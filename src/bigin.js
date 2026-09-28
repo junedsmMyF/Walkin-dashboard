@@ -146,17 +146,21 @@ export async function refreshBigin(env) {
       for (const u of r.users || []) owners.set(u.id, u.full_name);
       if (!r.info?.more_records) break;
     }
-    const leads = [];
-    for (let offset = 0; offset < 100000; offset += 2000) {
-      const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${FIELDS} from Pipelines where id is not null order by id asc limit ${offset}, 2000` } });
-      for (const x of r.data || []) {
+    // Zoho's MCP server caps each COQL query at 200 rows, so page by record ID (keyset paging):
+    // "id > last id seen, order by id, 200 at a time" — no offset limits, stable while records are added.
+    const leads = []; let lastId = '0'; let pages = 0;
+    for (;;) {
+      const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${FIELDS} from Pipelines where id > ${lastId} order by id asc limit 0, 200` } });
+      const rows = r.data || []; pages++;
+      for (const x of rows) {
         if (String(x.Pipeline) !== String(env.WALKIN_PIPELINE_ID)) continue;
         leads.push({ i: x.id, st: x.Stage, d: x.Walk_in_Date_Time, ct: x.Created_Time, loc: x.Store_Location, own: owners.get(x.Owner?.id) || '', amt: x.Amount, call: x.Call_Date, lr: x.Close_Lost_Reason, p: x.Phone_Number, em: x.Email_ID || '', prod: Array.isArray(x.Product) ? x.Product.join(', ') : (x.Product?.name || x.Product || ''), qty: x.Quantity, cat: x.Product_Category || '' });
       }
-      if (!r.info?.more_records) break;
+      if (!rows.length || !r.info?.more_records || pages >= 45) break; // 45 × 200 = 9,000 records per run (Worker subrequest budget)
+      lastId = rows[rows.length - 1].id;
     }
     await env.DASH_KV.put(KV_LEADS, JSON.stringify(leads));
-    await env.DASH_KV.put(KV_META, JSON.stringify({ status: 'ok', refreshedAt: new Date().toISOString(), started, count: leads.length }));
+    await env.DASH_KV.put(KV_META, JSON.stringify({ status: 'ok', refreshedAt: new Date().toISOString(), started, count: leads.length, pages }));
     return { ok: true, count: leads.length };
   } catch (e) {
     const prev = (await env.DASH_KV.get(KV_META, 'json')) || {};
