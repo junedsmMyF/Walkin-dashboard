@@ -1,6 +1,6 @@
 # Walk-in dashboard — Frido Founders Office
 
-Live **Walk in lead management** dashboard (Retail Revenue), hosted on Cloudflare and deployed automatically from this repo.
+Live **Walk in lead management** dashboard (Retail Revenue), hosted on Cloudflare and deployed automatically from this repo..
 
 ```
 GitHub (this repo) ──push to main──▶ Cloudflare Workers Builds ──▶ walkin-dashboard Worker
