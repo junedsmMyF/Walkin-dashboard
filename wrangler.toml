@@ -19,7 +19,7 @@ crons = ["30 0 * * *"]
 START_DATE = "2026-09-01"
 WALKIN_PIPELINE_ID = "1371203000000480122"
 BIGIN_MCP_URL = "https://bigin.zohomcp.in/mcp/message"
-SALES_CSV_URLS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTzF8v-e2kDnhFPXs9u0LT3A3EAd2exjyj_Uq4w27HJkAPOXKCOXzYVQ99gIxBhVCP0qp18xb1RzzQA/pub?gid=1606571298&single=true&output=csv"
+SALES_CSV_URLS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTzF8v-e2kDnhFPXs9u0LT3A3EAd2exjyj_Uq4w27HJkAPOXKCOXzYVQ99gIxBhVCP0qp18xb1RzzQA/pub?gid=838808167&single=true&output=csv"
 DSR_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQBggrBOrbDGyU-5TQucn82YnpR6KcKUUgp6JRJW9FP_SRbK4jDSIDQcFdvSIUu5KPkbNfG6oPXQZCu/pub?gid=194259253&single=true&output=csv"
 
 [observability]
