@@ -96,7 +96,12 @@ const csvCell = (v) => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? 
 
 // ---- Chat-with-Data bot ----
 // The bot's tables are rebuilt from the same inputs and engine as the dashboard, then written to D1.
-async function rebuildBot(env, { full = false } = {}) {
+async function rebuildBot(env, opts = {}) {
+  try { const r = await rebuildBotInner(env, opts); await env.DASH_KV.delete('bot:lastError'); return r; }
+  catch (e) { const error = String(e.message || e).slice(0, 300); await env.DASH_KV.put('bot:lastError', JSON.stringify({ error, at: new Date().toISOString() })); return { ok: false, error }; }
+  finally { await env.DASH_KV.delete('bot:building'); }
+}
+async function rebuildBotInner(env, { full = false } = {}) {
   if (!env.DB) return { ok: false, error: 'D1 binding DB is missing' };
   const cutoff = addDays(istDate(), -1);
   const [sales, dsrRows, leads] = await Promise.all([salesCombined(env), sheet(env.DSR_CSV_URL, env), biginLeads(env)]);
@@ -107,7 +112,7 @@ async function rebuildBot(env, { full = false } = {}) {
   return { ok: true, ...r, rows: Object.fromEntries(Object.entries(built.tables).map(([k, v]) => [k, v.length])) };
 }
 const BOT_DAILY_CAP = 200;   // questions per day across all users — keeps Workers AI inside its free 10,000 Neurons/day
-async function botAsk(request, env) {
+async function botAsk(request, env, ctx) {
   if (!env.AI || !env.DB) return json({ error: 'The bot is not set up yet (AI and D1 bindings missing).' }, 503);
   if (!env.BOT_PASSCODE) return json({ error: 'The bot is not set up yet (BOT_PASSCODE secret missing).' }, 503);
   if ((request.headers.get('x-bot-pass') || '') !== env.BOT_PASSCODE) return json({ error: 'Wrong or missing team passcode.', auth: false }, 401);
@@ -120,6 +125,12 @@ async function botAsk(request, env) {
   await env.DASH_KV.put(key, String(used + 1), { expirationTtl: 3 * 86400 });
   try {
     const out = await ask(env, { question, history: Array.isArray(body.history) ? body.history : [], filters: String(body.filters || '').slice(0, 300), mode: body.mode === 'deep' ? 'deep' : 'fast' });
+    if (out.error === 'not_built') {
+      await env.DASH_KV.put(key, String(used));                       // don't count this towards the daily limit
+      const lastErr = await env.DASH_KV.get('bot:lastError', 'json');
+      if (!(await env.DASH_KV.get('bot:building'))) { await env.DASH_KV.put('bot:building', '1', { expirationTtl: 300 }); ctx.waitUntil(rebuildBot(env, { full: true })); }
+      return json({ answer: 'Setting up the bot\'s data for the first time — please ask again in about a minute.' + (lastErr ? ` (The last attempt failed: ${lastErr.error})` : ''), error: 'building', remainingToday: BOT_DAILY_CAP - used });
+    }
     return json({ ...out, remainingToday: BOT_DAILY_CAP - used - 1 });
   } catch (e) {
     const msg = String(e.message || e);
@@ -202,7 +213,7 @@ export default {
     const url = new URL(request.url);
     try {
       if (url.pathname === '/api/metrics') return await metrics(env, ctx);
-      if (url.pathname === '/api/ask' && request.method === 'POST') return await botAsk(request, env);
+      if (url.pathname === '/api/ask' && request.method === 'POST') return await botAsk(request, env, ctx);
       if (url.pathname === '/api/status') {
         const r = await metrics(env, ctx); const m = await r.json();
         return json({ cutoff: m.cutoff, startDate: m.startDate, sources: m.sources, counts: m.counts, quality: m.quality });
@@ -283,7 +294,9 @@ export default {
             row('Team passcode (BOT_PASSCODE)', !!env.BOT_PASSCODE, env.BOT_PASSCODE ? 'set' : 'missing — add a Secret named BOT_PASSCODE')];
           if (env.DB) {
             let meta = {}; try { meta = Object.fromEntries(((await env.DB.prepare('SELECT k, v FROM bot_meta').all()).results || []).map((r) => [r.k, r.v])); } catch (e) { meta = { error: e.message }; }
+            const lastErr = await env.DASH_KV.get('bot:lastError', 'json');
             out.push(row('Bot data built', !!meta.data_through, meta.data_through ? `data through ${meta.data_through} · built ${meta.built_at}` : 'not built — click "Rebuild bot data (full)"'));
+            if (lastErr) out.push(row('Last build attempt', false, `${lastErr.at}: ${lastErr.error}`));
             for (const t of ['sales_orders', 'sales_lines', 'leads', 'store_day']) { let n = null; try { n = (await env.DB.prepare(`SELECT COUNT(*) n FROM ${t}`).first())?.n; } catch {} out.push(row(`Table ${t}`, n > 0, n == null ? 'missing' : `${Number(n).toLocaleString('en-IN')} rows`)); }
           }
           if (env.AI) for (const m of [...new Set([...MODEL_CHAIN.fast, ...MODEL_CHAIN.deep])]) {
