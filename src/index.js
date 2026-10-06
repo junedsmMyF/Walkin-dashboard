@@ -7,7 +7,7 @@ import { standardizeTab, combineTabs } from './standardize.js';
 import { cleanToEngineRows, excludedSummary } from './clean.js';
 import { buildBotTables } from './bot/tables.js';
 import { syncBotTables } from './bot/sync.js';
-import { ask, checkSql, MODELS } from './bot/ask.js';
+import { ask, checkSql, MODELS, MODEL_CHAIN, runModel } from './bot/ask.js';
 import { refreshBigin, biginLeads, biginMeta, biginConnected, startConnect, finishConnect } from './bigin.js';
 
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra } });
@@ -121,7 +121,11 @@ async function botAsk(request, env) {
   try {
     const out = await ask(env, { question, history: Array.isArray(body.history) ? body.history : [], filters: String(body.filters || '').slice(0, 300), mode: body.mode === 'deep' ? 'deep' : 'fast' });
     return json({ ...out, remainingToday: BOT_DAILY_CAP - used - 1 });
-  } catch (e) { return json({ answer: 'The AI service did not respond — please try again in a minute.', error: String(e.message || e).slice(0, 200) }, 502); }
+  } catch (e) {
+    const msg = String(e.message || e);
+    const answer = e.kind === 'ai' ? 'The AI models did not respond — please try again in a minute.' : e.kind === 'db' ? 'The bot\'s database could not be read.' : 'Something went wrong while answering.';
+    return json({ answer: `${answer} (${msg.slice(0, 220)})`, error: e.kind || 'error' }, 502);
+  }
 }
 // Reference checks for the admin "Test the bot" page: each question has an exact SQL answer to compare with.
 const BOT_TESTS = [
@@ -187,6 +191,7 @@ async function adminPage(env, url) {
   <a class="btn" href="/admin/captured.csv?key=${key}">Captured-leads audit (yesterday)</a>
   <a class="btn" href="/admin/revenue.csv?key=${key}">Walk-in revenue audit (yesterday)</a>
   <h3 style="margin-top:22px">Chat-with-Data bot</h3>
+  <a class="btn" href="/admin/bot-status?key=${key}">Bot status</a>
   <a class="btn" href="/admin/bot-rebuild?key=${key}">Rebuild bot data (full)</a>
   <a class="btn" href="/admin/bot-test?key=${key}">Test the bot (6 questions)</a>
   <a class="btn" href="/api/status">Data status</a> <a class="btn" href="/">Open dashboard</a>`);
@@ -269,6 +274,24 @@ export default {
         if (url.pathname === '/admin/bot-rebuild') {
           const r = await rebuildBot(env, { full: true });
           return html(`<h1>${r.ok ? 'Bot data rebuilt' : 'Rebuild failed'}</h1><p>${r.ok ? Object.entries(r.rows).map(([k, v]) => `${k}: ${v.toLocaleString('en-IN')} rows`).join(' · ') : String(r.error).replace(/</g, '&lt;')}</p><p><a class="btn" href="/admin?key=${encodeURIComponent(url.searchParams.get('key') || '')}">Back</a></p>`);
+        }
+        if (url.pathname === '/admin/bot-status') {
+          const esc2 = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+          const row = (k, ok, v) => `<tr><td>${k}</td><td>${ok ? '✅' : '❌'}</td><td>${esc2(v)}</td></tr>`;
+          const out = [row('AI binding (Workers AI)', !!env.AI, env.AI ? 'connected' : 'missing — add [ai] binding = "AI" to wrangler.toml'),
+            row('D1 binding (DB)', !!env.DB, env.DB ? 'connected' : 'missing — add the [[d1_databases]] block to wrangler.toml'),
+            row('Team passcode (BOT_PASSCODE)', !!env.BOT_PASSCODE, env.BOT_PASSCODE ? 'set' : 'missing — add a Secret named BOT_PASSCODE')];
+          if (env.DB) {
+            let meta = {}; try { meta = Object.fromEntries(((await env.DB.prepare('SELECT k, v FROM bot_meta').all()).results || []).map((r) => [r.k, r.v])); } catch (e) { meta = { error: e.message }; }
+            out.push(row('Bot data built', !!meta.data_through, meta.data_through ? `data through ${meta.data_through} · built ${meta.built_at}` : 'not built — click "Rebuild bot data (full)"'));
+            for (const t of ['sales_orders', 'sales_lines', 'leads', 'store_day']) { let n = null; try { n = (await env.DB.prepare(`SELECT COUNT(*) n FROM ${t}`).first())?.n; } catch {} out.push(row(`Table ${t}`, n > 0, n == null ? 'missing' : `${Number(n).toLocaleString('en-IN')} rows`)); }
+          }
+          if (env.AI) for (const m of [...new Set([...MODEL_CHAIN.fast, ...MODEL_CHAIN.deep])]) {
+            const t0 = Date.now(); try { const t = await runModel(env, m, [{ role: 'user', content: 'Reply with the single word OK.' }], 20); out.push(row(`Model ${m}`, true, `replied "${t.slice(0, 30)}" in ${Date.now() - t0} ms`)); } catch (e) { out.push(row(`Model ${m}`, false, String(e.message || e).slice(0, 200))); }
+          }
+          const used = +(await env.DASH_KV.get('bot:count:' + istDate())) || 0;
+          out.push(row('Questions used today', used < BOT_DAILY_CAP, `${used} of ${BOT_DAILY_CAP}`));
+          return html(`<h1>Bot status</h1><table border="1" cellpadding="6" style="border-collapse:collapse;font-size:13px">${out.join('')}</table><p><a class="btn" href="/admin?key=${encodeURIComponent(url.searchParams.get('key') || '')}">Back</a></p>`);
         }
         if (url.pathname === '/admin/bot-test') {
           const rows = await botTest(env); const esc2 = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
