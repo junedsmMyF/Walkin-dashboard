@@ -48,10 +48,15 @@ RULES
 5. Return at most 50 rows; ORDER BY the main measure when ranking.
 6. If the question needs data these tables do not have (e.g. targets, staff salaries, Meta ads, inventory, customer names or phones), do not write SQL: set cannot_answer to a short reason.
 7. Follow-up questions refer to the previous turns below; keep their filters unless the user changes them.
-Reply with ONLY a JSON object: {"interpretation": "<one line: what you will calculate, incl. dates/filters>", "sql": "<query or empty>", "cannot_answer": "<empty or reason>"} /no_think`;
+8. When ranking or comparing items, also return share_of_total (fraction of the total) so shares can be quoted. Use readable names (store_name, product_name, category, date) as the first column.
+9. Choose how to show the result: chart.type "bar" to compare categories (stores, products, formats; up to 15 rows), "line" for a trend over dates, "none" for a single number or long lists. chart.x = the label/date column, chart.y = 1–3 numeric columns to plot.
+Reply with ONLY a JSON object: {"interpretation": "<one line: what you will calculate, incl. dates/filters>", "sql": "<query or empty>", "cannot_answer": "<empty or reason>", "chart": {"type": "bar|line|none", "x": "<column>", "y": ["<column>"]}} /no_think`;
 
 const answerPrompt = `You write the answer for Frido's management dashboard. Use ONLY numbers that appear in the RESULT (you may round them and format ₹ in Indian style: ₹4.2 L, ₹1.3 Cr; fractions as %).
-Never invent, estimate or calculate new numbers. Reply in at most 3 short sentences, leading with the direct answer. If the result does not answer the question, say exactly what is missing. No SQL, no preamble. /no_think`;
+Never invent, estimate or calculate new numbers. Format:
+- First line: one sentence answering the question directly, with the key number in **bold**.
+- Then up to 3 short bullet lines starting with "- " giving the most useful insights from the result (leader, laggard, gaps, shares). Skip bullets for a single number.
+Write dates like "19 Sep" (add the year only if it is not the current one). If the result does not answer the question, say exactly what is missing. No SQL, no tables, no preamble. /no_think`;
 
 function textOf(res) {
   let t = '';
@@ -140,10 +145,15 @@ export async function ask(env, { question, history = [], filters = '', mode = 'f
   const columns = rows.length ? Object.keys(rows[0]) : [];
   if (!rows.length) return { answer: 'No data matches this question for the selected period and filters.', interpretation: plan.interpretation, sql, rows: [], columns, dataThrough: meta.data_through, ms: Date.now() - t0 };
   const shown = rows.slice(0, 50);
-  const csv = [columns.join(','), ...shown.map((r) => columns.map((c) => r[c]).join(','))].join('\n');
-  let answer = await llm(env, mode, [{ role: 'system', content: answerPrompt }, { role: 'user', content: `QUESTION: ${question}\nWHAT WAS CALCULATED: ${plan.interpretation}\nRESULT (${rows.length} rows${rows.length > 50 ? ', first 50 shown' : ''}):\n${csv}` }], 300, used);
+  const cell = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };   // quote names like "Nexus Westend, Aundh"
+  const csv = [columns.join(','), ...shown.map((r) => columns.map((c) => cell(r[c])).join(','))].join('\n');
+  // chart suggestion from the model, kept only if it names real result columns
+  const ch = plan.chart && typeof plan.chart === 'object' ? plan.chart : null;
+  const ys = ch && Array.isArray(ch.y) ? ch.y.filter((c) => columns.includes(c) && typeof shown[0][c] === 'number').slice(0, 3) : [];
+  const chart = ch && ['bar', 'line'].includes(ch.type) && columns.includes(ch.x) && ys.length ? { type: ch.type, x: ch.x, y: ys } : null;
+  let answer = await llm(env, mode, [{ role: 'system', content: answerPrompt }, { role: 'user', content: `QUESTION: ${question}\nWHAT WAS CALCULATED: ${plan.interpretation}\nRESULT (${rows.length} rows${rows.length > 50 ? ', first 50 shown' : ''}):\n${csv}` }], 380, used);
   const g = numbersGrounded(answer, shown);
   let verified = g.ok;
   if (!g.ok || !answer) { answer = 'Here is the result — see the table below.'; verified = false; }
-  return { answer, verified, interpretation: plan.interpretation, sql, columns, rows: shown, rowCount: rows.length, dataThrough: meta.data_through, model: used.model, ms: Date.now() - t0 };
+  return { answer, verified, interpretation: plan.interpretation, sql, columns, rows: shown, rowCount: rows.length, chart, dataThrough: meta.data_through, model: used.model, ms: Date.now() - t0 };
 }
