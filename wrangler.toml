@@ -1,0 +1,26 @@
+name = "walkin-dashboard"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+account_id = "64cd065d47d134cf62ccfb35bd874af9"
+workers_dev = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[kv_namespaces]]
+binding = "DASH_KV"
+id = "557386ba9dee45b3ae9f99d967109a42"
+
+[triggers]
+crons = ["30 0 * * *"]
+
+[vars]
+START_DATE = "2026-09-01"
+WALKIN_PIPELINE_ID = "1371203000000480122"
+BIGIN_MCP_URL = "https://bigin.zohomcp.in/mcp/message"
+# Sales come from BigQuery: apps-script/SalesToDashboard.gs syncs them daily at 08:00 IST (POST /admin/ingest-sales).
+DSR_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQBggrBOrbDGyU-5TQucn82YnpR6KcKUUgp6JRJW9FP_SRbK4jDSIDQcFdvSIUu5KPkbNfG6oPXQZCu/pub?gid=194259253&single=true&output=csv"
+
+[observability]
+enabled = true
