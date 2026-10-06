@@ -140,3 +140,13 @@ test('bot: tables reproduce the dashboard numbers and hold no phone numbers', as
   assert.equal(t.leads.find((r) => r[0] === '1')[16], 1);                             // lead 1 converted
   assert.doesNotMatch(JSON.stringify(t), /9000000001|9000000002|9000000003/);
 });
+test('bot: falls back to the next model and reports which one answered', async () => {
+  const { ask } = await import('../src/bot/ask.js');
+  const plan = JSON.stringify({ interpretation: 'x', sql: 'SELECT 5 AS n FROM leads LIMIT 1', cannot_answer: '' });
+  const DB = { prepare: (sql) => ({ all: async () => ({ results: /bot_meta/.test(sql) ? [{ k: 'data_through', v: '2026-10-05' }, { k: 'start_date', v: '2026-09-01' }] : [{ n: 5 }] }), bind() { return this; } }) };
+  const AI = { async run(model, body) { if (model.includes('qwen')) throw new Error('5007: No such model'); const m = body.messages || body.input; return { response: m[0].content.startsWith('You write the answer') ? 'There are 5.' : plan }; } };
+  const out = await ask({ AI, DB }, { question: 'how many?' });
+  assert.equal(out.answer, 'There are 5.'); assert.equal(out.model, '@cf/meta/llama-3.3-70b-instruct-fp8-fast');
+  const notBuilt = await ask({ AI, DB: { prepare: () => ({ all: async () => { throw new Error('D1_ERROR: no such table: bot_meta'); } }) } }, { question: 'x' });
+  assert.equal(notBuilt.error, 'not_built');
+});
