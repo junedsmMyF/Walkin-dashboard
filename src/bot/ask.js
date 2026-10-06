@@ -1,6 +1,11 @@
 // Chat-with-Data: question → (LLM) one read-only SQL query → (D1) result → (LLM) short answer using only returned numbers.
 // The model never calculates; SQL does. Every number in the answer is checked against the result before it is shown.
 export const MODELS = { fast: '@cf/qwen/qwen3-30b-a3b-fp8', deep: '@cf/openai/gpt-oss-120b' };
+// If a model fails (busy, retired, or a request-format mismatch), the next free model is tried automatically.
+export const MODEL_CHAIN = {
+  fast: ['@cf/qwen/qwen3-30b-a3b-fp8', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/openai/gpt-oss-20b'],
+  deep: ['@cf/openai/gpt-oss-120b', '@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/qwen/qwen3-30b-a3b-fp8'],
+};
 const ALLOWED = new Set(['sales_orders', 'sales_lines', 'leads', 'store_day']);
 
 export const SCHEMA_DOC = `TABLES (SQLite). Dates are TEXT 'YYYY-MM-DD' (IST). Money in ₹. Data covers start_date → data_through (yesterday).
@@ -49,7 +54,13 @@ const answerPrompt = `You write the answer for Frido's management dashboard. Use
 Never invent, estimate or calculate new numbers. Reply in at most 3 short sentences, leading with the direct answer. If the result does not answer the question, say exactly what is missing. No SQL, no preamble. /no_think`;
 
 function textOf(res) {
-  let t = typeof res === 'string' ? res : res?.response ?? res?.choices?.[0]?.message?.content ?? res?.output_text ?? '';
+  let t = '';
+  if (typeof res === 'string') t = res;
+  else if (res?.response != null) t = res.response;
+  else if (res?.choices?.[0]?.message?.content != null) t = res.choices[0].message.content;
+  else if (res?.output_text != null) t = res.output_text;
+  else if (Array.isArray(res?.output)) t = res.output.filter((o) => o.type === 'message' || o.content).flatMap((o) => (Array.isArray(o.content) ? o.content : [])).filter((c) => c.type === 'output_text' || c.text).map((c) => c.text).join('');
+  else if (res?.result?.response != null) t = res.result.response;
   if (typeof t !== 'string') t = JSON.stringify(t);
   return t.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 }
@@ -86,22 +97,38 @@ export function numbersGrounded(answer, rows) {
   return { ok: true };
 }
 
-async function llm(env, model, messages, maxTokens) {
-  const res = await env.AI.run(model, { messages, max_tokens: maxTokens, temperature: 0 });
-  return textOf(res);
+// One model, both request styles: chat "messages" and the Responses-style "input" (used by GPT-OSS).
+export async function runModel(env, model, messages, maxTokens) {
+  const styles = model.includes('gpt-oss')
+    ? [{ input: messages }, { messages, max_tokens: maxTokens }]
+    : [{ messages, max_tokens: maxTokens, temperature: 0 }, { input: messages }];
+  let lastErr = null;
+  for (const body of styles) {
+    try { const t = textOf(await env.AI.run(model, body)); if (t) return t; lastErr = new Error('empty reply'); } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('no reply');
+}
+async function llm(env, mode, messages, maxTokens, used) {
+  const errs = [];
+  for (const model of MODEL_CHAIN[mode] || MODEL_CHAIN.fast) {
+    try { const t = await runModel(env, model, messages, maxTokens); used.model = model; return t; } catch (e) { errs.push(`${model.split('/').pop()}: ${String(e.message || e).slice(0, 120)}`); }
+  }
+  const err = new Error('AI models unavailable — ' + errs.join(' | ')); err.kind = 'ai'; throw err;
 }
 
 export async function ask(env, { question, history = [], filters = '', mode = 'fast' }) {
-  const t0 = Date.now(); const model = MODELS[mode] || MODELS.fast;
-  const meta = Object.fromEntries(((await env.DB.prepare('SELECT k, v FROM bot_meta').all()).results || []).map((r) => [r.k, r.v]));
-  if (!meta.data_through) return { answer: 'The bot\'s data is not built yet. An admin needs to run "Rebuild bot data" once.', error: 'not_built' };
+  const t0 = Date.now(); const used = { model: null }; mode = MODEL_CHAIN[mode] ? mode : 'fast';
+  let meta = {};
+  try { meta = Object.fromEntries(((await env.DB.prepare('SELECT k, v FROM bot_meta').all()).results || []).map((r) => [r.k, r.v])); }
+  catch (e) { if (!/no such table/i.test(String(e.message))) { const err = new Error('Database error — ' + String(e.message).slice(0, 160)); err.kind = 'db'; throw err; } }
+  if (!meta.data_through) return { answer: 'The bot\'s data is not built yet. An admin needs to open the admin page and click "Rebuild bot data (full)" once.', error: 'not_built' };
   const ctx = { dataThrough: meta.data_through, startDate: meta.start_date, filters };
   const msgs = [{ role: 'system', content: planPrompt(ctx) }];
   for (const h of history.slice(-4)) { msgs.push({ role: 'user', content: h.q }); msgs.push({ role: 'assistant', content: JSON.stringify({ interpretation: h.interpretation || '', sql: h.sql || '', cannot_answer: '' }) }); }
   msgs.push({ role: 'user', content: question });
   let plan = null, rows = null, sql = null, lastErr = '';
   for (let attempt = 0; attempt < 2 && !rows; attempt++) {
-    const out = await llm(env, model, attempt ? [...msgs, { role: 'user', content: `That failed: ${lastErr}. Fix it and reply with the JSON only. /no_think` }] : msgs, 700);
+    const out = await llm(env, mode, attempt ? [...msgs, { role: 'user', content: `That failed: ${lastErr}. Fix it and reply with the JSON only. /no_think` }] : msgs, 700, used);
     plan = firstJson(out);
     if (!plan) { lastErr = 'the reply was not valid JSON'; continue; }
     if (plan.cannot_answer && !plan.sql) return { answer: `The dashboard data can't answer this: ${plan.cannot_answer}`, interpretation: plan.interpretation || '', sql: null, rows: [], columns: [], dataThrough: meta.data_through, ms: Date.now() - t0 };
@@ -114,9 +141,9 @@ export async function ask(env, { question, history = [], filters = '', mode = 'f
   if (!rows.length) return { answer: 'No data matches this question for the selected period and filters.', interpretation: plan.interpretation, sql, rows: [], columns, dataThrough: meta.data_through, ms: Date.now() - t0 };
   const shown = rows.slice(0, 50);
   const csv = [columns.join(','), ...shown.map((r) => columns.map((c) => r[c]).join(','))].join('\n');
-  let answer = await llm(env, model, [{ role: 'system', content: answerPrompt }, { role: 'user', content: `QUESTION: ${question}\nWHAT WAS CALCULATED: ${plan.interpretation}\nRESULT (${rows.length} rows${rows.length > 50 ? ', first 50 shown' : ''}):\n${csv}` }], 300);
+  let answer = await llm(env, mode, [{ role: 'system', content: answerPrompt }, { role: 'user', content: `QUESTION: ${question}\nWHAT WAS CALCULATED: ${plan.interpretation}\nRESULT (${rows.length} rows${rows.length > 50 ? ', first 50 shown' : ''}):\n${csv}` }], 300, used);
   const g = numbersGrounded(answer, shown);
   let verified = g.ok;
   if (!g.ok || !answer) { answer = 'Here is the result — see the table below.'; verified = false; }
-  return { answer, verified, interpretation: plan.interpretation, sql, columns, rows: shown, rowCount: rows.length, dataThrough: meta.data_through, model, ms: Date.now() - t0 };
+  return { answer, verified, interpretation: plan.interpretation, sql, columns, rows: shown, rowCount: rows.length, dataThrough: meta.data_through, model: used.model, ms: Date.now() - t0 };
 }
