@@ -151,7 +151,11 @@ function post_(from, to, rows, summary) {
   var url = String(p.getProperty('DASHBOARD_URL') || '').replace(/\/+$/, ''), key = p.getProperty('ADMIN_KEY');
   if (!url || !key) throw new Error('Set Script properties DASHBOARD_URL and ADMIN_KEY (Project Settings → Script properties)');
   var body = Utilities.gzip(Utilities.newBlob(JSON.stringify({ columns: CONFIG.OUT_COLS, rows: rows, from: from, to: to, summary: summary }), 'application/json')).getBytes();
-  var r = UrlFetchApp.fetch(url + '/admin/ingest-sales?key=' + encodeURIComponent(key), { method: 'post', contentType: 'application/octet-stream', payload: body, muteHttpExceptions: true });
+  // If the dashboard sits behind Cloudflare Access, a service token lets this script through (Script properties CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET).
+  var headers = {}; var cid = p.getProperty('CF_ACCESS_CLIENT_ID'), csec = p.getProperty('CF_ACCESS_CLIENT_SECRET');
+  if (cid && csec) { headers['CF-Access-Client-Id'] = cid; headers['CF-Access-Client-Secret'] = csec; }
+  var r = UrlFetchApp.fetch(url + '/admin/ingest-sales?key=' + encodeURIComponent(key), { method: 'post', contentType: 'application/octet-stream', payload: body, headers: headers, muteHttpExceptions: true, followRedirects: false });
+  if (r.getResponseCode() === 302 || r.getResponseCode() === 403 && /cloudflareaccess/i.test(r.getContentText())) throw new Error('Blocked by Cloudflare Access — add the service token (Script properties CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET) and allow it in the Access policy');
   var ack = {}; try { ack = JSON.parse(r.getContentText()); } catch (e) {}
   if (r.getResponseCode() !== 200 || !ack.ok) throw new Error('Dashboard rejected the upload (' + r.getResponseCode() + '): ' + (ack.error || r.getContentText().slice(0, 300)));
   return ack;
