@@ -19,8 +19,8 @@ crons = ["30 0 * * *"]
 # Sign-in & roles — a one-time code is emailed to each approved person when they sign in (no Cloudflare setup).
 # 1) Set up apps-script/Mailer.gs as a web app and paste its URL below; add the Cloudflare secret MAILER_SECRET.
 # 2) Approve people at /admin/users?key=…   3) remove the # from LOGIN and MAILER_URL below, and commit.
-# MAILER_URL = "https://script.google.com/macros/s/PASTE-DEPLOYMENT-ID/exec"
-# LOGIN = "on"
+MAILER_URL = "https://script.google.com/macros/s/PASTE-DEPLOYMENT-ID/exec"
+LOGIN = "on"
 # (Optional alternative: Cloudflare Access — only if it is switched on for this address. Leave these two commented out.)
 # ACCESS_TEAM_DOMAIN = "dark-art-9d99.cloudflareaccess.com"     # Zero Trust → Settings → Team domain
 # ACCESS_AUD = "532cf9ceab9f7e45e287c6fbae366d441e2c760f4212b6836108887e214c96bf"   # Zero Trust → Access → Applications → walkin-dashboard → Overview
