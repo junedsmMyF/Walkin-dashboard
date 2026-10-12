@@ -56,6 +56,51 @@ export async function verifyAccessJwt(token, env, fetcher) {
   if (!payload.email) throw new Error('no email in token');
   return String(payload.email).trim().toLowerCase();
 }
+// ---- Built-in sign-in: personal access codes + signed session cookie (LOGIN = "on") ----
+// Codes are stored only as SHA-256 hashes. Sessions are HMAC-signed with a key derived from ADMIN_KEY and carry a
+// per-user version (sv): generating a new code or pausing the user ends their existing sessions at once.
+const te = new TextEncoder();
+const b64uEnc = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+async function hmacKey(env) { return crypto.subtle.importKey('raw', te.encode(`${env.ADMIN_KEY || ''}:dashboard-session-v1`), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']); }
+export const normCode = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+export async function hashCode(email, code) { return b64uEnc(await crypto.subtle.digest('SHA-256', te.encode(`${String(email).toLowerCase()}:${normCode(code)}`))); }
+export function newCode() { const A = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; const r = crypto.getRandomValues(new Uint8Array(12)); const s = [...r].map((x) => A[x % A.length]).join(''); return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8)}`; }
+export const SESSION_DAYS = 30;
+// One-time sign-in codes sent by email: 6 digits, 10 minutes, 5 tries; only a hash is stored.
+export const OTP_MINUTES = 10, OTP_TRIES = 5, OTP_RESEND_SECONDS = 60;
+export function newOtp() { const n = crypto.getRandomValues(new Uint32Array(1))[0] % 1000000; return String(n).padStart(6, '0'); }
+export async function startOtp(env, email) {
+  const last = await env.DASH_KV.get('otp:last:' + email);
+  if (last && Date.now() - Number(last) < OTP_RESEND_SECONDS * 1000) return { wait: Math.ceil((OTP_RESEND_SECONDS * 1000 - (Date.now() - Number(last))) / 1000) };
+  const code = newOtp();
+  await env.DASH_KV.put('otp:' + email, JSON.stringify({ h: await hashCode(email, code), exp: Date.now() + OTP_MINUTES * 60e3, tries: 0 }), { expirationTtl: OTP_MINUTES * 60 + 60 });
+  await env.DASH_KV.put('otp:last:' + email, String(Date.now()), { expirationTtl: OTP_RESEND_SECONDS + 5 });
+  return { code };
+}
+export async function checkOtp(env, email, code) {
+  const rec = await env.DASH_KV.get('otp:' + email, 'json');
+  if (!rec || rec.exp < Date.now()) return { ok: false, error: 'That code has expired. Request a new one.' };
+  if (rec.tries >= OTP_TRIES) return { ok: false, error: 'Too many wrong tries. Request a new code.' };
+  if (rec.h !== (await hashCode(email, String(code).replace(/\D/g, '')))) {
+    rec.tries++; await env.DASH_KV.put('otp:' + email, JSON.stringify(rec), { expirationTtl: Math.max(60, Math.ceil((rec.exp - Date.now()) / 1000) + 60) });
+    return { ok: false, error: rec.tries >= OTP_TRIES ? 'Too many wrong tries. Request a new code.' : `That code is not right. ${OTP_TRIES - rec.tries} tries left.` };
+  }
+  await env.DASH_KV.delete('otp:' + email);
+  return { ok: true };
+}
+export async function makeSession(env, email, sv = 0) {
+  const body = b64uEnc(te.encode(JSON.stringify({ e: email, sv, exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86400 })));
+  const sig = b64uEnc(await crypto.subtle.sign('HMAC', await hmacKey(env), te.encode(body)));
+  return `${body}.${sig}`;
+}
+export async function readSession(env, value) {
+  const [body, sig] = String(value || '').split('.'); if (!body || !sig) return null;
+  const ok = await crypto.subtle.verify('HMAC', await hmacKey(env), b64u(sig), te.encode(body)); if (!ok) return null;
+  let s; try { s = JSON.parse(new TextDecoder().decode(b64u(body))); } catch { return null; }
+  return s.exp > Date.now() / 1000 ? s : null;
+}
+export const sessionCookie = (v, maxAge = SESSION_DAYS * 86400) => `fo_session=${v}; Max-Age=${maxAge}; Path=/; Secure; HttpOnly; SameSite=Lax`;
+
 const cookie = (req, name) => (req.headers.get('cookie') || '').split(/;\s*/).map((c) => c.split('=')).find(([k]) => k === name)?.[1];
 
 export function resolvePerms(u) {
@@ -65,8 +110,19 @@ export function resolvePerms(u) {
 }
 // Who is this, and what may they see?
 export async function identify(request, env, fetcher) {
-  const enforced = !!(env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD);
+  const access = !!(env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD);
+  const codes = !access && String(env.LOGIN || '').toLowerCase() === 'on';
+  const enforced = access || codes;
   if (!enforced) return { enforced: false, approved: true, email: null, role: 'open', perms: ALL.filter((k) => k !== 'admin'), stores: [] };
+  if (codes) {
+    const s = await readSession(env, cookie(request, 'fo_session'));
+    if (!s) return { enforced, mode: 'code', approved: false, reason: 'Please sign in.' };
+    const email = s.e; const admins = String(env.ADMIN_EMAILS || '').split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const users = (await env.DASH_KV.get('rbac:users', 'json')) || {}; const u = users[email];
+    if (admins.includes(email) && (!u || (u.sv || 0) === (s.sv || 0))) return { enforced, mode: 'code', approved: true, email, name: u?.name || '', role: 'admin', perms: ROLES.admin.perms, stores: [] };
+    if (!u || u.disabled || !ROLES[u.role] || (u.sv || 0) !== (s.sv || 0)) return { enforced, mode: 'code', approved: false, email, reason: 'Your access has changed or ended. Please sign in again or ask the Founders Office.' };
+    return { enforced, mode: 'code', approved: true, email, name: u.name || '', role: u.role, perms: resolvePerms(u), stores: Array.isArray(u.stores) ? u.stores : [] };
+  }
   const token = request.headers.get('cf-access-jwt-assertion') || cookie(request, 'CF_Authorization');
   if (!token) return { enforced, approved: false, reason: 'You are not signed in. If you were not asked for your email, Cloudflare Access is not switched on for this address yet — tell the Founders Office.' };
   let email; try { email = await verifyAccessJwt(token, env, fetcher); } catch (e) { return { enforced, approved: false, reason: 'Your sign-in could not be verified — please sign in again.' }; }
