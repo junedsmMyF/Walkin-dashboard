@@ -266,10 +266,18 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     try {
+      // Sign out: clear the Access cookie on this address, then end the Cloudflare Access session for the team.
+      // (workers.dev addresses do not serve /cdn-cgi/access/logout themselves.)
+      if (url.pathname === '/logout') {
+        const team = String(env.ACCESS_TEAM_DOMAIN || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+        const to = team ? `https://${team}/cdn-cgi/access/logout` : '/';
+        return new Response(null, { status: 302, headers: { location: to, 'cache-control': 'no-store',
+          'set-cookie': 'CF_Authorization=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Lax' } });
+      }
       const needsId = url.pathname.startsWith('/api/') || url.pathname.startsWith('/admin');
       const id = needsId ? await identify(request, env) : null;
       if (url.pathname === '/api/me') {
-        return json({ enforced: id.enforced, approved: id.approved, email: id.email || null, name: id.name || '', role: id.role || null, roleLabel: ROLES[id.role]?.label || (id.enforced ? '' : 'Sign-in not enabled yet'), perms: id.approved ? id.perms : [], stores: id.stores || [], bot: id.enforced ? canBot(id) : true, reason: id.reason || null, logout: id.enforced ? '/cdn-cgi/access/logout' : null }, 200, { 'cache-control': 'private, no-store' });
+        return json({ enforced: id.enforced, approved: id.approved, email: id.email || null, name: id.name || '', role: id.role || null, roleLabel: ROLES[id.role]?.label || (id.enforced ? '' : 'Sign-in not enabled yet'), perms: id.approved ? id.perms : [], stores: id.stores || [], bot: id.enforced ? canBot(id) : true, reason: id.reason || null, logout: id.enforced ? '/logout' : null }, 200, { 'cache-control': 'private, no-store' });
       }
       if (url.pathname === '/api/metrics') {
         if (!id.approved) return json({ error: id.reason, auth: false }, 401);
