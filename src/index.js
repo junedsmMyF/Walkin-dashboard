@@ -1,4 +1,4 @@
-// Cloudflare Worker: serves the dashboard (static assets), a PII-free metrics API, the Bigin admin page, 
+// Cloudflare Worker: serves the dashboard (static assets), a PII-free metrics API, the Bigin admin page,
 // and the 6:00 AM IST daily Bigin refresh (cron "30 0 * * *" UTC).
 import { parseCsv } from './csv.js';
 import { istDate, addDays } from './dates.js';
@@ -8,7 +8,7 @@ import { cleanToEngineRows, excludedSummary } from './clean.js';
 import { buildBotTables } from './bot/tables.js';
 import { syncBotTables } from './bot/sync.js';
 import { ask, checkSql, MODELS, MODEL_CHAIN, runModel } from './bot/ask.js';
-import { identify, can, canBot, canWalkin, filterMetrics, PAGES, ROLES } from './auth.js';
+import { identify, can, canBot, canWalkin, filterMetrics, PAGES, ROLES, makeSession, sessionCookie, startOtp, checkOtp, OTP_MINUTES } from './auth.js';
 import { STORE_MASTER } from './stores.js';
 import { refreshBigin, biginLeads, biginMeta, biginConnected, startConnect, finishConnect } from './bigin.js';
 
@@ -196,6 +196,69 @@ function isAdmin(env, url) {
   return diff === 0;
 }
 
+// ---- Sign-in: email → one-time code sent to that email (via the Google Apps Script mailer) → signed session ----
+async function sendMail(env, to, subject, text, htmlBody) {
+  if (!env.MAILER_URL || !env.MAILER_SECRET) throw new Error('mailer not set up');
+  const r = await fetch(env.MAILER_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ secret: env.MAILER_SECRET, to, subject, text, html: htmlBody }), redirect: 'follow' });
+  let j = {}; try { j = JSON.parse(await r.text()); } catch {}
+  if (!j.ok) throw new Error(j.error || `mailer replied ${r.status}`);
+  return j;
+}
+async function loginPage(request, env, url) {
+  const e2 = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const next = /^#\/[\w\-/]*$/.test(url.searchParams.get('next') || '') ? url.searchParams.get('next') : '#/';
+  const action = `/login?next=${encodeURIComponent(next)}`;
+  const shell = (inner, status = 200) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · Founders Office</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#F4F2EC;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1B1F24}
+.c{box-sizing:border-box;width:min(380px,92vw);background:#fff;border:1px solid #E3DFD4;border-radius:16px;padding:28px 26px;box-shadow:0 10px 30px rgba(16,24,32,.08)}
+.b{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;margin-bottom:18px}.b i{width:12px;height:12px;border:3px solid #FFD100;border-radius:50%}
+h1{font-size:20px;margin:0 0 4px}p{font-size:13px;color:#5B6068;margin:0 0 18px}label{display:block;font-size:12px;font-weight:600;margin:12px 0 6px}
+input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #E3DFD4;border-radius:10px;font-size:15px}input:focus{outline:2px solid #1F5E7A;border-color:#1F5E7A}
+.otp{font:600 24px/1 ui-monospace,Menlo,monospace;letter-spacing:.35em;text-align:center}
+button{width:100%;margin-top:18px;padding:12px;border:0;border-radius:10px;background:#101820;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+.ln{background:none;color:#1F5E7A;margin-top:10px;padding:6px;font-size:13px;font-weight:600}
+.m{background:#FDF0E7;color:#A8501A;border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:6px}.ok{background:#E6F0F4;color:#1F5E7A}.f{font-size:11.5px;color:#8A8F96;margin-top:14px;text-align:center}</style></head>
+<body><div class="c"><div class="b"><i></i>Founders Office</div>${inner}</div></body></html>`, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-frame-options': 'DENY' } });
+  const stepEmail = (msg = '', email = '') => shell(`<h1>Sign in</h1><p>Enter your work email. We'll email you a one-time code.</p>${msg ? `<div class="m">${e2(msg)}</div>` : ''}
+    <form method="post" action="${action}"><input type="hidden" name="step" value="send"><label for="e">Email</label><input id="e" name="email" type="email" autocomplete="username" required value="${e2(email)}" autofocus><button type="submit">Email me a code</button></form>
+    <div class="f">Only approved emails receive a code. Need access? Ask the Founders Office.</div>`, msg ? 400 : 200);
+  const stepCode = (email, msg = '', okMsg = '') => shell(`<h1>Check your email</h1><p>If <b>${e2(email)}</b> is approved, a 6-digit code is on its way. It works for ${OTP_MINUTES} minutes.</p>
+    ${okMsg ? `<div class="m ok">${e2(okMsg)}</div>` : ''}${msg ? `<div class="m">${e2(msg)}</div>` : ''}
+    <form method="post" action="${action}"><input type="hidden" name="step" value="verify"><input type="hidden" name="email" value="${e2(email)}"><label for="c">Code</label><input id="c" class="otp" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="64" required autofocus placeholder="••••••"><button type="submit">Sign in</button></form>
+    <form method="post" action="${action}"><input type="hidden" name="step" value="send"><input type="hidden" name="email" value="${e2(email)}"><button class="ln" type="submit">Send a new code</button></form>
+    <form method="get" action="/login"><input type="hidden" name="next" value="${e2(next)}"><button class="ln" type="submit">Use a different email</button></form>
+    <div class="f">Not there after 2 minutes? Check spam, or ask the Founders Office.</div>`, msg ? 401 : 200);
+  if (request.method !== 'POST') return stepEmail();
+  const origin = request.headers.get('origin'); if (origin && origin !== url.origin) return stepEmail('Please sign in from the dashboard page.');
+  const f = await request.formData(); const email = String(f.get('email') || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return stepEmail('Enter a valid email.', email);
+  const users = (await env.DASH_KV.get('rbac:users', 'json')) || {}; const u = users[email];
+  const admins = String(env.ADMIN_EMAILS || '').split(/[,\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const approved = admins.includes(email) || (u && !u.disabled && ROLES[u.role]);
+  if (f.get('step') === 'send') {
+    // Only approved emails get a code; the reply is the same either way so the page can't be used to discover who is approved.
+    if (approved) {
+      const r = await startOtp(env, email);
+      if (r.wait) return stepCode(email, `Please wait ${r.wait} seconds before asking for another code.`);
+      try {
+        await sendMail(env, email, `${r.code} is your Founders Office dashboard code`,
+          `Your sign-in code is ${r.code}\n\nIt works for ${OTP_MINUTES} minutes. If you did not try to sign in, ignore this email.`,
+          `<div style="font-family:Arial,sans-serif;color:#1B1F24"><p>Your Founders Office dashboard sign-in code:</p><p style="font:700 30px/1.2 Menlo,monospace;letter-spacing:6px;margin:12px 0">${r.code}</p><p style="color:#5B6068;font-size:13px">It works for ${OTP_MINUTES} minutes. If you did not try to sign in, you can ignore this email.</p></div>`);
+      } catch (e) { return stepEmail(`The code could not be emailed (${String(e.message).slice(0, 120)}). Ask the Founders Office.`, email); }
+    }
+    return stepCode(email);
+  }
+  // verify
+  const code = String(f.get('code') || '');
+  let ok = false;
+  if (approved && admins.includes(email) && env.ADMIN_KEY && code.trim() === env.ADMIN_KEY) ok = true;          // permanent admins: admin key always works
+  else if (approved) { const r = await checkOtp(env, email, code); if (!r.ok) return stepCode(email, r.error); ok = true; }
+  if (!ok) return stepCode(email, 'That code is not right.');
+  if (u) { users[email] = { ...u, lastLogin: new Date().toISOString() }; await env.DASH_KV.put('rbac:users', JSON.stringify(users)); }
+  const session = await makeSession(env, email, u?.sv || 0);
+  return new Response(null, { status: 302, headers: { location: '/' + next, 'set-cookie': sessionCookie(session), 'cache-control': 'no-store' } });
+}
+
 // ---- Users & roles (approvals live in KV: rbac:users) ----
 async function adminUsers(request, env, url, id) {
   const key = url.searchParams.get('key') || ''; const qk = key ? '?key=' + encodeURIComponent(key) : '';
@@ -206,13 +269,21 @@ async function adminUsers(request, env, url, id) {
     const f = await request.formData(); const email = String(f.get('email') || '').trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) msg = 'Enter a valid email.';
     else if (f.get('action') === 'delete') { delete users[email]; msg = `Removed ${email}.`; }
+    else if (f.get('action') === 'signout') {
+      if (!users[email]) msg = 'Unknown email.';
+      else { users[email] = { ...users[email], sv: (users[email].sv || 0) + 1 }; msg = `Saved: ${email} is signed out on every device.`; }
+    }
     else {
       const role = String(f.get('role') || ''); if (!ROLES[role]) msg = 'Pick a role.';
       else {
         const valid = new Set(STORE_MASTER.map((s) => s.id)); const stores = f.getAll('stores').map(String).filter((s) => valid.has(s));
         const pageKeys = new Set(PAGES.map(([k]) => k)); const deny = f.getAll('deny').map(String).filter((k) => pageKeys.has(k));
         if (role === 'store_manager' && !stores.length) msg = 'A store manager needs at least one store.';
-        else { users[email] = { name: String(f.get('name') || '').trim().slice(0, 60), role, stores, deny, disabled: f.get('disabled') === 'on', updatedAt: new Date().toISOString(), updatedBy: id.email || 'admin key' }; msg = `Saved ${email}.`; }
+        else {
+          const prev = users[email] || {}; const disabled = f.get('disabled') === 'on';
+          users[email] = { ...prev, name: String(f.get('name') || '').trim().slice(0, 60), role, stores, deny, disabled, sv: (prev.sv || 0) + (disabled && !prev.disabled ? 1 : 0), updatedAt: new Date().toISOString(), updatedBy: id.email || 'admin key' };
+          msg = `Saved ${email}.`;
+        }
       }
     }
     if (/^(Saved|Removed)/.test(msg)) await env.DASH_KV.put('rbac:users', JSON.stringify(users));
@@ -220,12 +291,13 @@ async function adminUsers(request, env, url, id) {
   const edit = users[String(url.searchParams.get('edit') || '').toLowerCase()] ? String(url.searchParams.get('edit')).toLowerCase() : '';
   const u = edit ? users[edit] : { role: 'walkin_viewer', stores: [], deny: [] };
   const storeName = Object.fromEntries(STORE_MASTER.map((s) => [s.id, s.name]));
-  const rows = Object.entries(users).sort(([a], [b]) => a.localeCompare(b)).map(([em, x]) => `<tr><td>${e2(em)}</td><td>${e2(x.name)}</td><td>${e2(ROLES[x.role]?.label || x.role)}</td><td>${x.stores?.length ? x.stores.map((s) => e2(storeName[s] || s)).join(', ') : 'All stores'}</td><td>${x.deny?.length ? x.deny.map((k) => e2((PAGES.find(([p]) => p === k) || [, k])[1])).join(', ') : '—'}</td><td>${x.disabled ? 'Paused' : 'Active'}</td><td><a href="/admin/users${qk}${qk ? '&' : '?'}edit=${encodeURIComponent(em)}">Edit</a> <form method="post" action="/admin/users${qk}" style="display:inline" onsubmit="return confirm('Remove ${e2(em)}?')"><input type="hidden" name="email" value="${e2(em)}"><button name="action" value="delete">Remove</button></form></td></tr>`).join('');
+  const rows = Object.entries(users).sort(([a], [b]) => a.localeCompare(b)).map(([em, x]) => `<tr><td>${e2(em)}</td><td>${e2(x.name)}</td><td>${e2(ROLES[x.role]?.label || x.role)}</td><td>${x.stores?.length ? x.stores.map((s) => e2(storeName[s] || s)).join(', ') : 'All stores'}</td><td>${x.deny?.length ? x.deny.map((k) => e2((PAGES.find(([p]) => p === k) || [, k])[1])).join(', ') : '—'}</td><td>${x.disabled ? 'Paused' : 'Active'}</td><td>${x.lastLogin ? e2(x.lastLogin.slice(0, 16).replace('T', ' ')) + ' UTC' : '—'}</td><td><a href="/admin/users${qk}${qk ? '&' : '?'}edit=${encodeURIComponent(em)}">Edit</a> <form method="post" action="/admin/users${qk}" style="display:inline" onsubmit="return confirm('Sign ${e2(em)} out on every device?')"><input type="hidden" name="email" value="${e2(em)}"><button name="action" value="signout">Sign out everywhere</button></form> <form method="post" action="/admin/users${qk}" style="display:inline" onsubmit="return confirm('Remove ${e2(em)}?')"><input type="hidden" name="email" value="${e2(em)}"><button name="action" value="delete">Remove</button></form></td></tr>`).join('');
   const admins = String(env.ADMIN_EMAILS || '').split(/[,\s]+/).filter(Boolean);
   return html(`<h1>Users &amp; roles</h1>
-  <p>${id.enforced ? `Signed in as <b>${e2(id.email)}</b>.` : '<b>Sign-in is not enabled yet</b> — these approvals take effect once Cloudflare Access is switched on.'} Only emails listed here (plus the permanent admins: ${admins.length ? admins.map(e2).join(', ') : 'none set'}) can open the dashboard.</p>
+  <p>${id.enforced ? `Signed in as <b>${e2(id.email)}</b>.` : '<b>Sign-in is not switched on yet</b> — approve people here, then set LOGIN = "on" in wrangler.toml. They will receive a one-time code by email each time they sign in.'} Only emails listed here (plus the permanent admins: ${admins.length ? admins.map(e2).join(', ') : 'none set'}) can open the dashboard.</p>
   ${msg ? `<p style="background:#FFF4B3;padding:8px 10px;border-radius:8px">${e2(msg)}</p>` : ''}
-  <table border="1" cellpadding="6" style="border-collapse:collapse;font-size:13px;margin-bottom:22px"><tr><th>Email</th><th>Name</th><th>Role</th><th>Stores</th><th>Hidden pages</th><th>Status</th><th></th></tr>${rows || '<tr><td colspan="7">No users approved yet.</td></tr>'}</table>
+  ${env.MAILER_URL && env.MAILER_SECRET ? '' : '<p style="background:#FDF0E7;color:#A8501A;padding:8px 10px;border-radius:8px"><b>Email sign-in codes are not set up yet</b> (MAILER_URL / MAILER_SECRET). Until then only permanent admins can sign in, using the admin key.</p>'}
+  <table border="1" cellpadding="6" style="border-collapse:collapse;font-size:13px;margin-bottom:22px"><tr><th>Email</th><th>Name</th><th>Role</th><th>Stores</th><th>Hidden pages</th><th>Status</th><th>Last sign-in</th><th></th></tr>${rows || '<tr><td colspan="7">No users approved yet.</td></tr>'}</table>
   <h2>${edit ? 'Edit ' + e2(edit) : 'Approve an email'}</h2>
   <form method="post" action="/admin/users${qk}" style="display:grid;gap:10px;max-width:640px">
     <label>Email<br><input name="email" type="email" required value="${e2(edit)}" ${edit ? 'readonly' : ''} style="width:100%;padding:8px"></label>
@@ -266,6 +338,10 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     try {
+      // ---- Built-in sign-in (LOGIN = "on"): email + personal access code ----
+      const codeMode = !(env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD) && String(env.LOGIN || '').toLowerCase() === 'on';
+      if (url.pathname === '/login') return await loginPage(request, env, url);
+      if (url.pathname === '/logout' && codeMode) return new Response(null, { status: 302, headers: { location: '/login', 'set-cookie': sessionCookie('', 0), 'cache-control': 'no-store' } });
       // Sign out: clear the Access cookie on this address, then end the Cloudflare Access session for the team.
       // (workers.dev addresses do not serve /cdn-cgi/access/logout themselves.)
       if (url.pathname === '/logout') {
@@ -277,7 +353,7 @@ export default {
       const needsId = url.pathname.startsWith('/api/') || url.pathname.startsWith('/admin');
       const id = needsId ? await identify(request, env) : null;
       if (url.pathname === '/api/me') {
-        return json({ enforced: id.enforced, approved: id.approved, email: id.email || null, name: id.name || '', role: id.role || null, roleLabel: ROLES[id.role]?.label || (id.enforced ? '' : 'Sign-in not enabled yet'), perms: id.approved ? id.perms : [], stores: id.stores || [], bot: id.enforced ? canBot(id) : true, reason: id.reason || null, logout: id.enforced ? '/logout' : null }, 200, { 'cache-control': 'private, no-store' });
+        return json({ enforced: id.enforced, approved: id.approved, email: id.email || null, name: id.name || '', role: id.role || null, roleLabel: ROLES[id.role]?.label || (id.enforced ? '' : 'Sign-in not enabled yet'), perms: id.approved ? id.perms : [], stores: id.stores || [], bot: id.enforced ? canBot(id) : true, reason: id.reason || null, logout: id.enforced ? '/logout' : null, login: id.mode === 'code' ? '/login' : null }, 200, { 'cache-control': 'private, no-store' });
       }
       if (url.pathname === '/api/metrics') {
         if (!id.approved) return json({ error: id.reason, auth: false }, 401);
