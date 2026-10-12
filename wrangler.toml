@@ -16,6 +16,10 @@ id = "557386ba9dee45b3ae9f99d967109a42"
 crons = ["30 0 * * *"]
 
 [vars]
+# Sign-in & roles (Cloudflare Access, one-time PIN). Until BOTH Access values are filled in, the dashboard stays open as today.
+# ACCESS_TEAM_DOMAIN = "yourteam.cloudflareaccess.com"     # Zero Trust → Settings → Team domain
+# ACCESS_AUD = "paste-the-Application-Audience-(AUD)-tag"   # Zero Trust → Access → Applications → walkin-dashboard → Overview
+# ADMIN_EMAILS = "you@myfrido.com"                          # permanent admins (comma-separated); can never be locked out
 START_DATE = "2026-09-01"
 WALKIN_PIPELINE_ID = "1371203000000480122"
 BIGIN_MCP_URL = "https://bigin.zohomcp.in/mcp/message"
