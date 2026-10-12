@@ -1,4 +1,4 @@
-// Cloudflare Worker: serves the dashboard (static assets), a PII-free metrics API, the Bigin admin page,
+// Cloudflare Worker: serves the dashboard (static assets), a PII-free metrics API, the Bigin admin page, 
 // and the 6:00 AM IST daily Bigin refresh (cron "30 0 * * *" UTC).
 import { parseCsv } from './csv.js';
 import { istDate, addDays } from './dates.js';
