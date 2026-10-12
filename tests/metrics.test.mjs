@@ -158,3 +158,59 @@ test('bot: result passed to the answer step quotes names containing commas', asy
   const out = await ask({ AI, DB }, { question: 'q' });
   assert.match(seen, /"Nexus Westend, Aundh",20018/); assert.equal(out.verified, true); assert.deepEqual(out.chart, { type: 'bar', x: 'store_name', y: ['walkin_revenue'] });
 });
+// ---------------- access control ----------------
+async function accessKit(aud = 'AUD123', team = 'frido.cloudflareaccess.com') {
+  const kp = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
+  const jwk = { ...(await crypto.subtle.exportKey('jwk', kp.publicKey)), kid: 'k1' };
+  const b64 = (o) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url');
+  const sign = async (payload) => { const h = b64({ alg: 'RS256', kid: 'k1' }), p = b64(payload); const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', kp.privateKey, new TextEncoder().encode(`${h}.${p}`)); return `${h}.${p}.${Buffer.from(sig).toString('base64url')}`; };
+  const now = Math.floor(Date.now() / 1000);
+  const token = (email, extra = {}) => sign({ email, aud: [aud], iss: `https://${team}`, exp: now + 3600, iat: now, ...extra });
+  const fetcher = async () => new Response(JSON.stringify({ keys: [jwk] }));
+  return { token, fetcher, env: { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: aud } };
+}
+const kvWith = (users) => ({ get: async (k, t) => (k === 'rbac:users' ? users : null) });
+const reqWith = (tok) => new Request('https://x/api/me', { headers: tok ? { 'cf-access-jwt-assertion': tok } : {} });
+
+test('auth: only genuine, current Access tokens for this app are accepted', async () => {
+  const { verifyAccessJwt } = await import('../src/auth.js');
+  const k = await accessKit();
+  assert.equal(await verifyAccessJwt(await k.token('Abdal@MyFrido.com'), k.env, k.fetcher), 'abdal@myfrido.com');
+  await assert.rejects(verifyAccessJwt(await k.token('a@b.com', { aud: ['OTHER'] }), k.env, k.fetcher), /another application/);
+  await assert.rejects(verifyAccessJwt(await k.token('a@b.com', { exp: 1 }), k.env, k.fetcher), /expired/);
+  await assert.rejects(verifyAccessJwt(await k.token('a@b.com', { iss: 'https://evil.cloudflareaccess.com' }), k.env, k.fetcher), /another team/);
+  const t = await k.token('a@b.com'); const [h, , sig] = t.split('.');
+  const forged = `${h}.${Buffer.from(JSON.stringify({ email: 'ceo@myfrido.com', aud: ['AUD123'], iss: 'https://frido.cloudflareaccess.com', exp: 9e9 })).toString('base64url')}.${sig}`;
+  await assert.rejects(verifyAccessJwt(forged, k.env, k.fetcher), /bad signature/);
+});
+test('auth: deny by default; roles, paused users, permanent admins', async () => {
+  const { identify } = await import('../src/auth.js');
+  const k = await accessKit();
+  const users = { 'vp@myfrido.com': { role: 'retail_vp' }, 'sm@myfrido.com': { role: 'store_manager', stores: ['FRIDO_0008'] }, 'paused@myfrido.com': { role: 'leadership', disabled: true }, 'v@myfrido.com': { role: 'walkin_viewer', deny: ['walkin.loss'] } };
+  const env = { ...k.env, DASH_KV: kvWith(users), ADMIN_EMAILS: 'boss@myfrido.com' };
+  const who = async (email) => identify(reqWith(email ? await k.token(email) : null), env, k.fetcher);
+  assert.equal((await who(null)).approved, false);
+  assert.equal((await who('stranger@gmail.com')).approved, false);
+  assert.equal((await who('paused@myfrido.com')).approved, false);
+  const vp = await who('vp@myfrido.com'); assert.ok(vp.approved); assert.ok(vp.perms.includes('walkin.revenue')); assert.ok(!vp.perms.includes('home')); assert.ok(!vp.perms.includes('admin'));
+  assert.ok(!(await who('v@myfrido.com')).perms.includes('walkin.loss'));
+  assert.deepEqual((await who('boss@myfrido.com')).role, 'admin');
+  const open = await identify(reqWith(null), { DASH_KV: kvWith({}) }); assert.equal(open.enforced, false); assert.ok(open.approved); assert.ok(!open.perms.includes('admin'));
+});
+test('auth: data is trimmed on the server to the role and stores', async () => {
+  const { filterMetrics, canBot } = await import('../src/auth.js');
+  const m = { stores: [{ id: 'FRIDO_0008' }, { id: 'FRIDO_0014' }], daily: [{ s: 'FRIDO_0008', d: 'x' }, { s: 'FRIDO_0014', d: 'x' }], attributed: [{ s: 'FRIDO_0014', net: 5 }],
+    pipeline: [{ s: 'FRIDO_0008' }], atRisk: [{ s: 'FRIDO_0014' }], loss: [{ s: 'FRIDO_0008' }], cohortRevenue: [{ s: 'FRIDO_0008' }], productSales: [['2026-10-01', 'FRIDO_0014', 1]], interestLead: [['2026-10-01', 'FRIDO_0008', 1]], quality: { a: 1 }, counts: { orders: 9 } };
+  const allTabs = ['walkin.overview', 'walkin.capture', 'walkin.followup', 'walkin.revenue', 'walkin.product', 'walkin.loss', 'walkin.definitions'];
+  const vp = { approved: true, perms: ['retail', ...allTabs, 'bot'], stores: [] };
+  assert.equal(filterMetrics(m, vp), m); assert.ok(canBot(vp));
+  const sm = { approved: true, perms: ['walkin.overview', 'walkin.capture', 'walkin.followup', 'walkin.definitions'], stores: ['FRIDO_0008'] };
+  const out = filterMetrics(m, sm);
+  assert.deepEqual(out.stores.map((s) => s.id), ['FRIDO_0008']);
+  assert.deepEqual(out.daily.map((x) => x.s), ['FRIDO_0008']);
+  assert.equal(out.attributed.length, 0);                       // another store's walk-in revenue never leaves the server
+  assert.equal(out.loss.length, 0); assert.equal(out.cohortRevenue.length, 0); assert.equal(out.productSales.length, 0); assert.equal(out.interestLead.length, 0);
+  assert.equal(out.pipeline.length, 1); assert.equal(out.atRisk.length, 0);
+  assert.deepEqual(out.quality, {}); assert.ok(!canBot(sm));
+  assert.equal(filterMetrics(m, { approved: true, perms: ['admin'], stores: [] }), null);   // no walk-in permission → no data at all
+});
