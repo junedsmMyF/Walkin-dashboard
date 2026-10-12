@@ -68,7 +68,7 @@ export async function identify(request, env, fetcher) {
   const enforced = !!(env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD);
   if (!enforced) return { enforced: false, approved: true, email: null, role: 'open', perms: ALL.filter((k) => k !== 'admin'), stores: [] };
   const token = request.headers.get('cf-access-jwt-assertion') || cookie(request, 'CF_Authorization');
-  if (!token) return { enforced, approved: false, reason: 'Please sign in.' };
+  if (!token) return { enforced, approved: false, reason: 'You are not signed in. If you were not asked for your email, Cloudflare Access is not switched on for this address yet — tell the Founders Office.' };
   let email; try { email = await verifyAccessJwt(token, env, fetcher); } catch (e) { return { enforced, approved: false, reason: 'Your sign-in could not be verified — please sign in again.' }; }
   const admins = String(env.ADMIN_EMAILS || '').split(/[,\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (admins.includes(email)) return { enforced, approved: true, email, name: '', role: 'admin', perms: ROLES.admin.perms, stores: [] };
