@@ -28,7 +28,7 @@ export function computeMetrics({ leads: rawLeads = [], salesRows = [], dsrRows =
   const orders = new Map();
   for (const r of salesRows) {
     if (String(r['Ret/Exc'] || '').trim().toUpperCase() === 'CANCELLED') { quality.salesCancelledLines++; continue; }
-    const store = (r['Store ID'] || '').trim();
+    const store = (r['Store ID'] || '').trim(); 
     if (!store || EXCLUDED_STORE_IDS.has(store)) continue;
     const date = salesDate(r['POS Created At']) || salesDate(r['Shopify Created At']);
     if (!date) { quality.salesBadDate++; continue; }
