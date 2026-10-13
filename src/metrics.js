@@ -19,7 +19,7 @@ const monthOf = (d) => d.slice(0, 7);
 const emailKey = (e) => { const v = String(e || '').trim().toLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v : null; };
 const monthsBetween = (a, b) => (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7));
 
-export function computeMetrics({ leads: rawLeads = [], salesRows = [], dsrRows = [], startDate, cutoff, overrides = MANUAL_WALKIN_ORDERS, audit = false }) {
+export function computeMetrics({ leads: rawLeads = [], salesRows = [], dsrRows = [], startDate, cutoff, overrides = MANUAL_WALKIN_ORDERS, audit = false, dsrAliases = null }) {
   const inRange = (d) => d && d >= startDate && d <= cutoff;
   const quality = { salesCancelledLines: 0, salesBadDate: 0, salesNoPhoneOrders: 0, dsrUnmapped: {}, dsrBadDate: 0, biginUnmapped: {}, biginNoPhone: 0, biginNoDate: 0 };
   const storeNames = new Map(STORE_MASTER.map((s) => [s.id, s.name]));
@@ -50,7 +50,7 @@ export function computeMetrics({ leads: rawLeads = [], salesRows = [], dsrRows =
   // ---------- DSR → walk-ins: latest submission per store per date; New + Other ----------
   const dsr = new Map();
   dsrRows.forEach((r, idx) => {
-    const store = storeFromDsr(r['Store']);
+    const store = storeFromDsr(r['Store'], dsrAliases);
     if (!store) { const k = r['Store'] || '(blank)'; quality.dsrUnmapped[k] = (quality.dsrUnmapped[k] || 0) + 1; return; }
     const date = dsrDate(r['Date']); if (!date) { quality.dsrBadDate++; return; }
     const ts = dsrTimestamp(r['Timestamp']); const key = store + '|' + date; const prev = dsr.get(key);
