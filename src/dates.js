@@ -1,7 +1,7 @@
 // All dates are handled as IST calendar dates in 'YYYY-MM-DD'.
 const pad = (n) => String(n).padStart(2, '0');
 const iso = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
-const validDate = (y, m, d) => y >= 2000 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
+const validDate = (y, m, d) => y >= 2000 && m >= 1 && m <= 12 && d >= 1 && d <= new Date(Date.UTC(y, m, 0)).getUTCDate();   // real calendar days only (no 31 Feb)
 
 // Sales rows are standardized before they reach the metrics (src/standardize.js): 'DD/MM/YYYY' or
 // 'DD/MM/YYYY HH:MM'. ISO 'YYYY-MM-DD…' (reference exports) is also accepted.
@@ -14,9 +14,15 @@ export function salesDate(s) {
 // DSR sheet: 'DD/MM/YYYY' or ISO 'YYYY-MM-DD'. Timestamp is 'DD/MM/YYYY HH:MM:SS'.
 export function dsrDate(s) {
   s = String(s || '').trim(); if (!s) return null;
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return validDate(+m[1], +m[2], +m[3]) ? iso(+m[1], +m[2], +m[3]) : null;
-  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if (!m) return null;
-  return validDate(+m[3], +m[2], +m[1]) ? iso(+m[3], +m[2], +m[1]) : null;
+  let m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/); if (m) return validDate(+m[1], +m[2], +m[3]) ? iso(+m[1], +m[2], +m[3]) : null;     // 2026-10-06, 2026/10/06
+  m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/);                                                                                 // 06/10/2026, 06-10-2026, 06.10.2026 (day first)
+  if (m) return validDate(+m[3], +m[2], +m[1]) ? iso(+m[3], +m[2], +m[1]) : null;
+  const MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+  m = s.match(/^(\d{1,2})[\s\-]([A-Za-z]{3})[A-Za-z]*[\s\-,]+(\d{4})/);                                                                   // 6 Oct 2026, 6-Oct-2026
+  if (m && MON[m[2].toLowerCase()]) return validDate(+m[3], MON[m[2].toLowerCase()], +m[1]) ? iso(+m[3], MON[m[2].toLowerCase()], +m[1]) : null;
+  m = s.match(/^([A-Za-z]{3})[A-Za-z]*\s+(\d{1,2}),?\s+(\d{4})/);                                                                          // Oct 6, 2026
+  if (m && MON[m[1].toLowerCase()]) return validDate(+m[3], MON[m[1].toLowerCase()], +m[2]) ? iso(+m[3], MON[m[1].toLowerCase()], +m[2]) : null;
+  return null;
 }
 export function dsrTimestamp(s) {
   const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
