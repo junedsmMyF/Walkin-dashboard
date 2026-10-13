@@ -28,8 +28,8 @@ export const BOT_TABLES = {
 };
 export const DATE_COL = { sales_orders: 'order_date', sales_lines: 'order_date', leads: 'walkin_date', store_day: 'date' };
 
-export function buildBotTables({ leads = [], salesRows = [], dsrRows = [], startDate, cutoff }) {
-  const m = computeMetrics({ leads, salesRows, dsrRows, startDate, cutoff, audit: true });
+export function buildBotTables({ leads = [], salesRows = [], dsrRows = [], startDate, cutoff, dsrAliases = null }) {
+  const m = computeMetrics({ leads, salesRows, dsrRows, startDate, cutoff, audit: true, dsrAliases });
   const inRange = (d) => d && d >= startDate && d <= cutoff;
   // walk-in orders (dashboard attribution)
   const walk = new Map(m.revenueAudit.map((r) => [r['POS Order ID'], r]));
