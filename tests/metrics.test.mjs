@@ -292,3 +292,4 @@ test('DSR: Bigin names and admin-approved aliases map to stores; unknown names g
   assert.equal(before.daily.filter((r) => r.walkins != null).length, 0);
   assert.equal(after.daily.find((r) => r.s === 'FRIDO_0003' && r.d === '2026-10-06').walkins, 12);
 });
+ 
