@@ -229,10 +229,10 @@ test('sign-in: sessions are signed, expire, and can be revoked', async () => {
 test('sign-in: email code flow — only approved emails get codes, wrong/expired codes, success, roles, sign-out-everywhere and pause', async () => {
   const { default: worker } = await import('../src/index.js');
   const sent = []; const realFetch = globalThis.fetch;
-  globalThis.fetch = async (u, o) => { if (String(u).startsWith('https://mailer.test')) { const b = JSON.parse(o.body); if (b.secret !== 'm-secret') return new Response('{"ok":false,"error":"forbidden"}'); sent.push(b); return new Response('{"ok":true}'); } return realFetch(u, o); };
+  globalThis.fetch = async (u, o) => { if (String(u).startsWith('https://script.google.com/macros/s/AKfycbTESTdeployment1234567890')) { const b = JSON.parse(o.body); if (b.secret !== 'm-secret') return new Response('{"ok":false,"error":"forbidden"}'); sent.push(b); return new Response('{"ok":true}'); } return realFetch(u, o); };
   try {
     const KV = memKV({ 'rbac:users': { 'vp@myfrido.com': { role: 'retail_vp' }, 'gone@myfrido.com': { role: 'leadership', disabled: true } } });
-    const env = { DASH_KV: KV, LOGIN: 'on', ADMIN_KEY: 'k-123', ADMIN_EMAILS: 'boss@myfrido.com', MAILER_URL: 'https://mailer.test/exec', MAILER_SECRET: 'm-secret' };
+    const env = { DASH_KV: KV, LOGIN: 'on', ADMIN_KEY: 'k-123', ADMIN_EMAILS: 'boss@myfrido.com', MAILER_URL: 'https://script.google.com/macros/s/AKfycbTESTdeployment1234567890/exec', MAILER_SECRET: 'm-secret' };
     const ctx = { waitUntil() {} };
     const post = (path, form, cookie) => worker.fetch(new Request('https://d.test' + path, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'https://d.test', ...(cookie ? { cookie } : {}) }, body: new URLSearchParams(form) }), env, ctx);
     const me = async (cookie) => (await worker.fetch(new Request('https://d.test/api/me', { headers: cookie ? { cookie } : {} }), env, ctx)).json();
@@ -265,6 +265,30 @@ test('sign-in: email code flow — only approved emails get codes, wrong/expired
     // a wrong mailer secret is reported, not hidden
     const env2 = { ...env, MAILER_SECRET: 'wrong' }; KV.raw.delete('otp:last:boss@myfrido.com');
     const r = await worker.fetch(new Request('https://d.test/login', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'https://d.test' }, body: new URLSearchParams({ step: 'send', email: 'boss@myfrido.com' }) }), env2, ctx);
-    assert.match(await r.text(), /could not be emailed \(forbidden\)/);
+    assert.match(await r.text(), /MAILER_SECRET in Cloudflare and in the Apps Script properties are different/);
+    // the placeholder URL (the real-world mistake) is caught with a clear fix, and the person can retry at once
+    const env3 = { ...env, MAILER_URL: 'https://script.google.com/macros/s/PASTE-DEPLOYMENT-ID/exec' }; KV.raw.delete('otp:last:boss@myfrido.com');
+    const send3 = () => worker.fetch(new Request('https://d.test/login', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'https://d.test' }, body: new URLSearchParams({ step: 'send', email: 'boss@myfrido.com' }) }), env3, ctx);
+    assert.match(await (await send3()).text(), /still has the placeholder/);
+    assert.doesNotMatch(await (await send3()).text(), /Please wait/);
+    assert.equal(JSON.parse(KV.raw.get('mail:last')).ok, false);
   } finally { globalThis.fetch = realFetch; }
+});
+test('DSR: every common date format is read; impossible dates are rejected', async () => {
+  const { dsrDate } = await import('../src/dates.js');
+  for (const v of ['2026-10-06', '06/10/2026', '6/10/2026', '06-10-2026', '06.10.2026', '2026/10/06', '06 Oct 2026', '6-Oct-2026', 'Oct 6, 2026']) assert.equal(dsrDate(v), '2026-10-06', v);
+  for (const v of ['31/02/2026', '31/09/2026', '', 'yesterday']) assert.equal(dsrDate(v), null, v);
+});
+test('DSR: Bigin names and admin-approved aliases map to stores; unknown names get a suggestion only', async () => {
+  const { storeFromDsr, suggestStore, normStoreName } = await import('../src/stores.js');
+  assert.equal(storeFromDsr('Amanora Mall Hadapsar Pune'), 'FRIDO_0002');
+  assert.equal(storeFromDsr('Elpro City Square, Chinchwad'), null);
+  assert.equal(suggestStore('Elpro City Square, Chinchwad').id, 'FRIDO_0005');
+  assert.equal(storeFromDsr('Elpro City Square, Chinchwad', { [normStoreName('Elpro City Square, Chinchwad')]: 'FRIDO_0005' }), 'FRIDO_0005');
+  const { computeMetrics } = await import('../src/metrics.js');
+  const rows = [{ Store: 'Amar Tech Park, Pune', Date: '2026-10-06', 'New Walk-ins': '10', 'Other Walk-ins': '2', Timestamp: '06/10/2026 21:00:00' }];
+  const before = computeMetrics({ leads: [], salesRows: [], dsrRows: rows, startDate: '2026-10-01', cutoff: '2026-10-06' });
+  const after = computeMetrics({ leads: [], salesRows: [], dsrRows: rows, startDate: '2026-10-01', cutoff: '2026-10-06', dsrAliases: { [normStoreName('Amar Tech Park, Pune')]: 'FRIDO_0003' } });
+  assert.equal(before.daily.filter((r) => r.walkins != null).length, 0);
+  assert.equal(after.daily.find((r) => r.s === 'FRIDO_0003' && r.d === '2026-10-06').walkins, 12);
 });
