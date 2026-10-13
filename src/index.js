@@ -1,7 +1,7 @@
 // Cloudflare Worker: serves the dashboard (static assets), a PII-free metrics API, the Bigin admin page,
 // and the 6:00 AM IST daily Bigin refresh (cron "30 0 * * *" UTC).
 import { parseCsv } from './csv.js';
-import { istDate, addDays } from './dates.js';
+import { istDate, addDays, dsrDate } from './dates.js';
 import { computeMetrics } from './metrics.js';
 import { standardizeTab, combineTabs } from './standardize.js';
 import { cleanToEngineRows, excludedSummary } from './clean.js';
@@ -9,7 +9,7 @@ import { buildBotTables } from './bot/tables.js';
 import { syncBotTables } from './bot/sync.js';
 import { ask, checkSql, MODELS, MODEL_CHAIN, runModel } from './bot/ask.js';
 import { identify, can, canBot, canWalkin, filterMetrics, PAGES, ROLES, makeSession, sessionCookie, startOtp, checkOtp, OTP_MINUTES } from './auth.js';
-import { STORE_MASTER } from './stores.js';
+import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, normStoreName, suggestStore } from './stores.js';
 import { refreshBigin, biginLeads, biginMeta, biginConnected, startConnect, finishConnect } from './bigin.js';
 
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra } });
@@ -107,7 +107,8 @@ async function rebuildBotInner(env, { full = false } = {}) {
   if (!env.DB) return { ok: false, error: 'D1 binding DB is missing' };
   const cutoff = addDays(istDate(), -1);
   const [sales, dsrRows, leads] = await Promise.all([salesCombined(env), sheet(env.DSR_CSV_URL, env), biginLeads(env)]);
-  const built = buildBotTables({ leads: leads || [], salesRows: sales.rows, dsrRows, startDate: env.START_DATE, cutoff });
+  const dsrAliases = (await env.DASH_KV.get('dsr:aliases', 'json')) || {};
+  const built = buildBotTables({ leads: leads || [], salesRows: sales.rows, dsrRows, startDate: env.START_DATE, cutoff, dsrAliases });
   let hasData = false; try { hasData = !!(await env.DB.prepare("SELECT v FROM bot_meta WHERE k='built_at'").first()); } catch {}
   const r = await syncBotTables(env.DB, built, { fromDate: full || !hasData ? null : addDays(cutoff, -8) });
   await env.DASH_KV.put('bot:meta', JSON.stringify({ builtAt: new Date().toISOString(), ...r, dataThrough: cutoff }));
@@ -179,7 +180,8 @@ async function metrics(env, ctx) {
   if (cached && cached.k === ver && Date.now() - cached.at < 15 * 60e3) return json(cached.body, 200, { 'cache-control': 'private, max-age=60', 'x-metrics-cache': 'hit' });
   const [sales, dsrRows, leads] = await Promise.all([salesCombined(env), sheet(env.DSR_CSV_URL, env), biginLeads(env)]);
   const salesRows = sales.rows;
-  const m = computeMetrics({ leads: leads || [], salesRows, dsrRows, startDate: env.START_DATE, cutoff });
+  const dsrAliases = (await env.DASH_KV.get('dsr:aliases', 'json')) || {};
+  const m = computeMetrics({ leads: leads || [], salesRows, dsrRows, startDate: env.START_DATE, cutoff, dsrAliases });
   m.sources = {
     bigin: { status: leads ? meta.status || 'ok' : 'not_connected', refreshedAt: meta.refreshedAt || null, error: meta.status === 'error' ? meta.error : null, lastLeadDate: m.lastDates.bigin },
     sales: { source: 'bigquery', status: sales.late ? 'stale' : 'live', uploadedAt: sales.meta.uploadedAt, hoursSinceUpload: sales.hoursSinceUpload, lastOrderDate: m.lastDates.sales, lines: sales.rows.length, run: sales.meta.summary || null, lastRange: sales.meta.lastRange || null, excluded: sales.excluded, months: sales.meta.months ? Object.keys(sales.meta.months).length : null },
@@ -197,12 +199,32 @@ function isAdmin(env, url) {
 }
 
 // ---- Sign-in: email → one-time code sent to that email (via the Google Apps Script mailer) → signed session ----
+// Plain-English diagnosis of every way the Apps Script mailer can fail, so problems never stay silent.
+function mailerProblem(env) {
+  if (!env.MAILER_URL) return 'MAILER_URL is missing in wrangler.toml.';
+  if (/PASTE|DEPLOYMENT-ID/i.test(env.MAILER_URL)) return 'MAILER_URL in wrangler.toml still has the placeholder — paste your Apps Script web app URL (Deploy → Manage deployments → Web app URL).';
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]{20,}\/exec$/.test(env.MAILER_URL)) return 'MAILER_URL should look like https://script.google.com/macros/s/…/exec (the deployed web app URL, not the editor or /dev link).';
+  if (!env.MAILER_SECRET) return 'The Cloudflare secret MAILER_SECRET is missing.';
+  return null;
+}
 async function sendMail(env, to, subject, text, htmlBody) {
-  if (!env.MAILER_URL || !env.MAILER_SECRET) throw new Error('mailer not set up');
-  const r = await fetch(env.MAILER_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ secret: env.MAILER_SECRET, to, subject, text, html: htmlBody }), redirect: 'follow' });
-  let j = {}; try { j = JSON.parse(await r.text()); } catch {}
-  if (!j.ok) throw new Error(j.error || `mailer replied ${r.status}`);
-  return j;
+  const problem = mailerProblem(env); if (problem) throw new Error(problem);
+  let r, body = '';
+  try { r = await fetch(env.MAILER_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ secret: env.MAILER_SECRET, to, subject, text, html: htmlBody }), redirect: 'follow' }); body = await r.text(); }
+  catch (e) { throw new Error('Could not reach the Apps Script mailer: ' + String(e.message || e).slice(0, 120)); }
+  let j = null; try { j = JSON.parse(body); } catch {}
+  if (j && j.ok) return j;
+  if (j && j.error === 'forbidden') throw new Error('The mailer refused the request: MAILER_SECRET in Cloudflare and in the Apps Script properties are different.');
+  if (j && j.error) throw new Error('Mailer error: ' + j.error);
+  if (r.status === 404) throw new Error('Mailer URL not found (404). Copy the web app URL again from Deploy → Manage deployments.');
+  if (/accounts\.google\.com|ServiceLogin|Sign in - Google/i.test(body)) throw new Error('The web app is not public. In Apps Script: Deploy → Manage deployments → edit → Who has access: Anyone → Deploy.');
+  if (/Script function not found: doPost/i.test(body)) throw new Error('The deployed version has no Mailer.gs. In Apps Script: Deploy → Manage deployments → edit → Version: New version → Deploy.');
+  if (/Authorization is required|authorization/i.test(body)) throw new Error('The script needs permission. In Apps Script run testMailer once, approve, then Deploy → Manage deployments → New version.');
+  throw new Error(`Unexpected reply from the mailer (HTTP ${r.status}).`);
+}
+async function logMail(env, to, ok, error) {
+  const masked = String(to).replace(/^(.)(.*)(@.*)$/, (m, a, b, c) => a + '*'.repeat(Math.min(6, b.length)) + c);
+  await env.DASH_KV.put('mail:last', JSON.stringify({ at: new Date().toISOString(), to: masked, ok, error: error || null }));
 }
 async function loginPage(request, env, url) {
   const e2 = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -244,7 +266,11 @@ button{width:100%;margin-top:18px;padding:12px;border:0;border-radius:10px;backg
         await sendMail(env, email, `${r.code} is your Founders Office dashboard code`,
           `Your sign-in code is ${r.code}\n\nIt works for ${OTP_MINUTES} minutes. If you did not try to sign in, ignore this email.`,
           `<div style="font-family:Arial,sans-serif;color:#1B1F24"><p>Your Founders Office dashboard sign-in code:</p><p style="font:700 30px/1.2 Menlo,monospace;letter-spacing:6px;margin:12px 0">${r.code}</p><p style="color:#5B6068;font-size:13px">It works for ${OTP_MINUTES} minutes. If you did not try to sign in, you can ignore this email.</p></div>`);
-      } catch (e) { return stepEmail(`The code could not be emailed (${String(e.message).slice(0, 120)}). Ask the Founders Office.`, email); }
+        await logMail(env, email, true);
+      } catch (e) {
+        await logMail(env, email, false, String(e.message)); await env.DASH_KV.delete('otp:last:' + email);
+        return stepEmail(`The code could not be emailed. ${String(e.message).slice(0, 220)}`, email);
+      }
     }
     return stepCode(email);
   }
@@ -259,16 +285,69 @@ button{width:100%;margin-top:18px;padding:12px;border:0;border-radius:10px;backg
   return new Response(null, { status: 302, headers: { location: '/' + next, 'set-cookie': sessionCookie(session), 'cache-control': 'no-store' } });
 }
 
+// ---- DSR check: which store names the DSR sheet uses, which the dashboard recognises, and one-click mapping ----
+async function adminDsr(request, env, url) {
+  const e2 = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const key = url.searchParams.get('key') || ''; const qk = key ? '?key=' + encodeURIComponent(key) : '';
+  let aliases = (await env.DASH_KV.get('dsr:aliases', 'json')) || {}; let msg = '';
+  const valid = new Map(STORE_MASTER.filter((s) => !EXCLUDED_STORE_IDS.has(s.id)).map((s) => [s.id, s.name]));
+  if (request.method === 'POST') {
+    const origin = request.headers.get('origin'); if (origin && origin !== url.origin) return html('<h1>Blocked</h1>', 403);
+    const f = await request.formData(); const name = String(f.get('name') || ''); const nk = normStoreName(name); const sid = String(f.get('store') || '');
+    if (!nk) msg = 'No name given.';
+    else if (f.get('action') === 'unmap') { delete aliases[nk]; msg = `"${name}" is no longer mapped.`; }
+    else if (!valid.has(sid)) msg = 'Pick a store.';
+    else { aliases[nk] = sid; msg = `"${name}" now counts as ${valid.get(sid)}.`; }
+    await env.DASH_KV.put('dsr:aliases', JSON.stringify(aliases)); await env.DASH_KV.delete('metrics:cache');
+  }
+  let rows = []; let err = '';
+  try { rows = await sheet(env.DSR_CSV_URL, env); } catch (e) { err = String(e.message || e); }
+  const cutoff = addDays(istDate(), -1), from30 = addDays(cutoff, -29), days7 = [...Array(7)].map((_, i) => addDays(cutoff, i - 6));
+  const names = new Map(); const bad = []; const sentBy = new Map();
+  for (const r of rows) {
+    const raw = String(r['Store'] || '').trim() || '(blank)'; const d = dsrDate(r['Date']);
+    if (!d) { if (bad.length < 12) bad.push({ raw, date: r['Date'], ts: r['Timestamp'] }); continue; }
+    const n = names.get(raw) || { rows30: 0, last: '', first: d }; if (d >= from30 && d <= cutoff) n.rows30++; if (d > n.last) n.last = d; if (d < n.first) n.first = d; names.set(raw, n);
+    const sid = storeFromDsr(raw, aliases); if (sid && days7.includes(d)) sentBy.set(sid + '|' + d, (sentBy.get(sid + '|' + d) || new Set()).add(raw));
+  }
+  const badTotal = rows.filter((r) => !dsrDate(r['Date'])).length;
+  const opt = (sel) => [...valid].map(([id, nm]) => `<option value="${id}" ${sel === id ? 'selected' : ''}>${e2(nm)}</option>`).join('');
+  const nameRows = [...names].sort((a, b) => (b[1].last || '').localeCompare(a[1].last || '') || a[0].localeCompare(b[0])).map(([raw, n]) => {
+    const built = storeFromDsr(raw, null); const ali = aliases[normStoreName(raw)]; const sid = built || ali; const sug = !sid ? suggestStore(raw) : null;
+    const status = built ? `<span style="color:#1F5E7A">✓ ${e2(valid.get(built) || built)}</span>` : ali ? `<span style="color:#1F5E7A">✓ ${e2(valid.get(ali) || ali)}</span> <small>(mapped here)</small>` : '<b style="color:#A8501A">Not recognised</b>';
+    const form = built ? '' : `<form method="post" action="/admin/dsr${qk}" style="display:flex;gap:6px;align-items:center"><input type="hidden" name="name" value="${e2(raw)}"><select name="store"><option value="">Map to store…</option>${opt(ali || sug?.id)}</select><button name="action" value="map">Save</button>${ali ? '<button name="action" value="unmap">Unmap</button>' : ''}</form>${sug ? `<small>Suggested: ${e2(sug.name)}</small>` : ''}`;
+    return `<tr style="${sid ? '' : 'background:#FDF5EF'}"><td>${e2(raw)}</td><td style="text-align:right">${n.rows30}</td><td>${e2(n.last)}</td><td>${status}</td><td>${form}</td></tr>`;
+  }).join('');
+  const grid = [...valid].map(([sid, nm]) => {
+    const cells = days7.map((d) => { const s = sentBy.get(sid + '|' + d); return `<td style="text-align:center;background:${s ? '#E6F0F4' : '#F6E1D1'}" title="${s ? e2([...s].join(', ')) : 'no DSR row'}">${s ? '✓' : '—'}</td>`; }).join('');
+    const usedNames = [...names.keys()].filter((raw) => storeFromDsr(raw, aliases) === sid);
+    const hints = [...names.keys()].filter((raw) => !storeFromDsr(raw, aliases) && suggestStore(raw)?.id === sid);
+    return `<tr><td>${e2(nm)}</td>${cells}<td style="font-size:12px">${usedNames.length ? e2(usedNames.join(' · ')) : '<b style="color:#A8501A">No DSR name in the sheet maps to this store</b>'}${hints.length ? `<br><span style="color:#A8501A">Unrecognised names that look like this store: ${e2(hints.join(' · '))}</span>` : ''}</td></tr>`;
+  }).join('');
+  return html(`<h1>DSR check</h1><p>Reads the live DSR sheet. A store shows "Missing" on the dashboard when none of its rows use a name the dashboard recognises, or the row's date can't be read.</p>
+  ${err ? `<p style="background:#FDF0E7;color:#A8501A;padding:8px 10px;border-radius:8px">Could not read the DSR sheet: ${e2(err)}</p>` : ''}
+  ${msg ? `<p style="background:#FFF4B3;padding:8px 10px;border-radius:8px">${e2(msg)} The dashboard uses this immediately.</p>` : ''}
+  <h2>Last 7 days by store</h2><table border="1" cellpadding="5" style="border-collapse:collapse;font-size:13px"><tr><th>Store</th>${days7.map((d) => `<th>${d.slice(8)}/${d.slice(5, 7)}</th>`).join('')}<th>Names used in the sheet</th></tr>${grid}</table>
+  <h2 style="margin-top:24px">Every store name in the DSR sheet</h2><p>${names.size} different names · rows in the last 30 days · newest first. Map any <b>Not recognised</b> name to its store.</p>
+  <table border="1" cellpadding="5" style="border-collapse:collapse;font-size:13px"><tr><th>Name in sheet</th><th>Rows (30 days)</th><th>Last date</th><th>Dashboard reads it as</th><th></th></tr>${nameRows || '<tr><td colspan="5">No rows.</td></tr>'}</table>
+  <h2 style="margin-top:24px">Rows with an unreadable date</h2><p>${badTotal} row(s) skipped.${bad.length ? ' Examples:' : ''}</p>${bad.length ? `<table border="1" cellpadding="5" style="border-collapse:collapse;font-size:13px"><tr><th>Store</th><th>Date as written</th><th>Submitted</th></tr>${bad.map((b) => `<tr><td>${e2(b.raw)}</td><td>${e2(b.date)}</td><td>${e2(b.ts)}</td></tr>`).join('')}</table>` : ''}
+  <p style="margin-top:20px"><a class="btn" href="/admin${qk}">Back to admin</a></p>`);
+}
+
 // ---- Users & roles (approvals live in KV: rbac:users) ----
 async function adminUsers(request, env, url, id) {
   const key = url.searchParams.get('key') || ''; const qk = key ? '?key=' + encodeURIComponent(key) : '';
   const e2 = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-  let users = (await env.DASH_KV.get('rbac:users', 'json')) || {}; let msg = '';
+  let users = (await env.DASH_KV.get('rbac:users', 'json')) || {}; let msg = ''; const lastMailRaw = await env.DASH_KV.get('mail:last', 'json');
   if (request.method === 'POST') {
     const origin = request.headers.get('origin'); if (origin && origin !== url.origin) return html('<h1>Blocked</h1><p>Cross-site request.</p>', 403);
     const f = await request.formData(); const email = String(f.get('email') || '').trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) msg = 'Enter a valid email.';
     else if (f.get('action') === 'delete') { delete users[email]; msg = `Removed ${email}.`; }
+    else if (f.get('action') === 'testmail') {
+      try { const r = await sendMail(env, email, '000000 is your Founders Office dashboard code', 'Test email from the dashboard admin page — the mailer works. This is not a real code.', '<p>Test email from the dashboard admin page — the mailer works.</p><p>This is not a real code.</p>'); await logMail(env, email, true); msg = `Test email sent to ${email}. Emails left today: ${r.remaining ?? '—'}.`; }
+      catch (e) { await logMail(env, email, false, String(e.message)); msg = `Test email failed: ${e.message}`; }
+    }
     else if (f.get('action') === 'signout') {
       if (!users[email]) msg = 'Unknown email.';
       else { users[email] = { ...users[email], sv: (users[email].sv || 0) + 1 }; msg = `Saved: ${email} is signed out on every device.`; }
@@ -288,6 +367,7 @@ async function adminUsers(request, env, url, id) {
     }
     if (/^(Saved|Removed)/.test(msg)) await env.DASH_KV.put('rbac:users', JSON.stringify(users));
   }
+  const lastMail = (await env.DASH_KV.get('mail:last', 'json')) || lastMailRaw;
   const edit = users[String(url.searchParams.get('edit') || '').toLowerCase()] ? String(url.searchParams.get('edit')).toLowerCase() : '';
   const u = edit ? users[edit] : { role: 'walkin_viewer', stores: [], deny: [] };
   const storeName = Object.fromEntries(STORE_MASTER.map((s) => [s.id, s.name]));
@@ -296,7 +376,9 @@ async function adminUsers(request, env, url, id) {
   return html(`<h1>Users &amp; roles</h1>
   <p>${id.enforced ? `Signed in as <b>${e2(id.email)}</b>.` : '<b>Sign-in is not switched on yet</b> — approve people here, then set LOGIN = "on" in wrangler.toml. They will receive a one-time code by email each time they sign in.'} Only emails listed here (plus the permanent admins: ${admins.length ? admins.map(e2).join(', ') : 'none set'}) can open the dashboard.</p>
   ${msg ? `<p style="background:#FFF4B3;padding:8px 10px;border-radius:8px">${e2(msg)}</p>` : ''}
-  ${env.MAILER_URL && env.MAILER_SECRET ? '' : '<p style="background:#FDF0E7;color:#A8501A;padding:8px 10px;border-radius:8px"><b>Email sign-in codes are not set up yet</b> (MAILER_URL / MAILER_SECRET). Until then only permanent admins can sign in, using the admin key.</p>'}
+  ${(() => { const p = mailerProblem(env); return p ? `<p style="background:#FDF0E7;color:#A8501A;padding:8px 10px;border-radius:8px"><b>Email sign-in codes cannot be sent:</b> ${e2(p)} Until fixed, only permanent admins can sign in (with the admin key).</p>` : ''; })()}
+  ${lastMail ? `<p style="font-size:13px;color:${lastMail.ok ? '#1F5E7A' : '#A8501A'}">Last code email: ${e2(lastMail.at.slice(0, 16).replace('T', ' '))} UTC to ${e2(lastMail.to)} — ${lastMail.ok ? 'sent ✓' : 'failed: ' + e2(lastMail.error)}</p>` : ''}
+  <form method="post" action="/admin/users${qk}" style="margin:6px 0 18px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input name="email" type="email" required placeholder="Send a test email to…" style="padding:7px 9px;min-width:260px"><button name="action" value="testmail">Send test email</button></form>
   <table border="1" cellpadding="6" style="border-collapse:collapse;font-size:13px;margin-bottom:22px"><tr><th>Email</th><th>Name</th><th>Role</th><th>Stores</th><th>Hidden pages</th><th>Status</th><th>Last sign-in</th><th></th></tr>${rows || '<tr><td colspan="7">No users approved yet.</td></tr>'}</table>
   <h2>${edit ? 'Edit ' + e2(edit) : 'Approve an email'}</h2>
   <form method="post" action="/admin/users${qk}" style="display:grid;gap:10px;max-width:640px">
@@ -328,6 +410,8 @@ async function adminPage(env, url) {
   <a class="btn" href="/admin/bot-status?key=${key}">Bot status</a>
   <a class="btn" href="/admin/bot-rebuild?key=${key}">Rebuild bot data (full)</a>
   <a class="btn" href="/admin/bot-test?key=${key}">Test the bot (6 questions)</a>
+  <h3 style="margin-top:22px">Data checks</h3>
+  <a class="btn" href="/admin/dsr?key=${key}">DSR check (store names)</a>
   <h3 style="margin-top:22px">Access control</h3>
   <a class="btn" href="/admin/users?key=${key}">Users &amp; roles</a>
   <a class="btn" href="/admin/access-log?key=${key}">Access log</a>
@@ -385,6 +469,7 @@ export default {
       if (url.pathname.startsWith('/admin')) {
         if (!(isAdmin(env, url) || (id.enforced && can(id, 'admin')))) return html(`<h1>Not authorised</h1><p>${id.enforced && id.email ? `Signed in as ${id.email}, which is not an admin.` : 'Admin sign-in or admin key required.'}</p>`, 403);
         if (url.pathname === '/admin/users') return await adminUsers(request, env, url, id);
+        if (url.pathname === '/admin/dsr') return await adminDsr(request, env, url);
         if (url.pathname === '/admin/access-log') {
           let rows = []; try { rows = (await env.DB.prepare('SELECT at, email, role, page FROM access_log ORDER BY at DESC LIMIT 300').all()).results || []; } catch {}
           const e2 = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
