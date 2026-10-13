@@ -30,8 +30,21 @@ export const EXCLUDED_STORE_IDS = new Set(['FRIDO_0000']); // TESTSTORE
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const DSR_INDEX = new Map(); const BIGIN_INDEX = new Map();
 for (const s of STORE_MASTER) {
-  for (const n of [...s.dsr, s.name]) DSR_INDEX.set(norm(n), s.id);
+  for (const n of [...s.dsr, s.name, ...s.bigin]) if (!DSR_INDEX.has(norm(n))) DSR_INDEX.set(norm(n), s.id);
   for (const n of s.bigin) BIGIN_INDEX.set(norm(n), s.id);
 }
-export const storeFromDsr = (name) => DSR_INDEX.get(norm(name)) || null;
+// extra: admin-approved aliases from the "DSR check" page ({ normalisedName: storeId }), stored in KV dsr:aliases.
+export const storeFromDsr = (name, extra) => DSR_INDEX.get(norm(name)) || (extra && extra[norm(name)]) || null;
+export const normStoreName = norm;
+// Best guess for an unrecognised name (word overlap with each store's known names) — shown as a suggestion only.
+const STOP = new Set(['mall', 'store', 'frido', 'the', 'experience', 'road', 'city', 'shop', 'outlet']);
+const words = (s) => new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !STOP.has(w)));
+export function suggestStore(name) {
+  const a = words(name); if (!a.size) return null; let best = null;
+  for (const s of STORE_MASTER) for (const n of [s.name, ...s.dsr, ...s.bigin]) {
+    const b = words(n); const inter = [...a].filter((w) => b.has(w)).length; const score = inter / Math.max(1, Math.min(a.size, b.size));
+    if (inter && (!best || score > best.score)) best = { id: s.id, name: s.name, score };
+  }
+  return best && best.score >= 0.5 ? best : null;
+}
 export const storeFromBigin = (location, owner) => BIGIN_INDEX.get(norm(location)) || BIGIN_INDEX.get(norm(owner)) || null;
