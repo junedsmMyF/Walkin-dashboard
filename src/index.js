@@ -10,7 +10,8 @@ import { syncBotTables } from './bot/sync.js';
 import { ask, checkSql, MODELS, MODEL_CHAIN, runModel } from './bot/ask.js';
 import { identify, can, canBot, canWalkin, filterMetrics, PAGES, ROLES, makeSession, sessionCookie, startOtp, checkOtp, OTP_MINUTES } from './auth.js';
 import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, normStoreName, suggestStore } from './stores.js';
-import { refreshBigin, biginLeads, biginMeta, biginConnected, startConnect, finishConnect } from './bigin.js';
+import { refreshBigin, biginLeads, biginCallbacks, biginMeta, biginConnected, startConnect, finishConnect } from './bigin.js';
+import { computePdp } from './pdp.js';
 
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra } });
 const html = (body, status = 200) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Dashboard admin</title><style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 16px;color:#101820}button,a.btn{display:inline-block;padding:10px 16px;border-radius:999px;border:0;background:#FFD100;color:#101820;font-weight:600;text-decoration:none;cursor:pointer;margin:4px 8px 4px 0}pre{background:#F4F6F9;padding:12px;border-radius:8px;overflow:auto}</style></head><body>${body}</body></html>`, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' } });
@@ -189,6 +190,31 @@ async function metrics(env, ctx) {
   };
   ctx.waitUntil(env.DASH_KV.put('metrics:cache', JSON.stringify({ k: ver, at: Date.now(), body: m })));
   return json(m, 200, { 'cache-control': 'private, max-age=60', 'x-metrics-cache': 'miss' });
+}
+
+// ---- PDP inventories: Callback Requests (Bigin) × BigQuery sales; LimeChat + PDP analytics are sample until connected ----
+async function pdpMetrics(env, ctx) {
+  const meta = (await biginMeta(env)) || {};
+  const cutoff = addDays(istDate(), -1);
+  const idx = await env.DASH_KV.get('sales:index', 'json');
+  const ver = ['pdp4', Math.floor(Date.now() / 900e3), idx?.uploadedAt || 'none', meta.refreshedAt || 'none', cutoff].join('|');
+  const cached = await env.DASH_KV.get('pdp:cache', 'json');
+  if (cached && cached.k === ver && Date.now() - cached.at < 15 * 60e3) return json(cached.body, 200, { 'cache-control': 'private, max-age=60', 'x-pdp-cache': 'hit' });
+  const [callbacks, walkin] = await Promise.all([biginCallbacks(env), biginLeads(env)]);
+  let limechatRows = null, lcErr = null;
+  if (env.LIMECHAT_CSV_URL) { try { limechatRows = await sheet(env.LIMECHAT_CSV_URL, env); } catch (e) { lcErr = String(e.message || e); } }
+  let routingRows = null, rtErr = null;
+  if (env.ROUTING_CSV_URL) { try { routingRows = await sheet(env.ROUTING_CSV_URL, env); } catch (e) { rtErr = String(e.message || e); } }
+  let sales = { rows: [], meta: {}, late: false };
+  try { sales = await salesCombined(env); } catch (e) { sales.error = String(e.message || e); }
+  const m = computePdp({ callbacks: callbacks || [], walkinLeads: walkin || [], salesRows: sales.rows, limechatRows, routingRows, startDate: env.PDP_START_DATE || '2026-10-08', cutoff, backendAgents: String(env.BACKEND_AGENTS || '').split(',').map((x) => x.trim()).filter(Boolean) });
+  m.sources = {
+    callback: { status: callbacks ? meta.status || 'ok' : (env.CALLBACK_PIPELINE_ID ? 'waiting_first_refresh' : 'not_configured'), refreshedAt: meta.refreshedAt || null, records: callbacks ? callbacks.length : 0 },
+    sales: { status: sales.error ? 'error' : sales.late ? 'stale' : 'live', uploadedAt: sales.meta?.uploadedAt || null, error: sales.error || null },
+    limechat: { status: limechatRows ? ((SHEET_STATUS.get(env.LIMECHAT_CSV_URL) || { ok: true }).ok ? 'live' : 'stale') : (env.LIMECHAT_CSV_URL ? 'error' : 'not_configured'), rows: limechatRows ? limechatRows.length : 0, error: lcErr, link: env.LIMECHAT_CSV_URL ? SHEET_STATUS.get(env.LIMECHAT_CSV_URL) || null : null }, routing: { status: routingRows ? ((SHEET_STATUS.get(env.ROUTING_CSV_URL) || { ok: true }).ok ? 'live' : 'stale') : (env.ROUTING_CSV_URL ? 'error' : 'not_configured'), rows: routingRows ? routingRows.length : 0, error: rtErr }, pdp: { status: 'sample' },
+  };
+  ctx.waitUntil(env.DASH_KV.put('pdp:cache', JSON.stringify({ k: ver, at: Date.now(), body: m })));
+  return json(m, 200, { 'cache-control': 'private, max-age=60', 'x-pdp-cache': 'miss' });
 }
 
 function isAdmin(env, url) {
@@ -446,6 +472,11 @@ export default {
         if (!id.enforced || id.role === 'admin' || r.status !== 200) return r;
         const scoped = filterMetrics(await r.json(), id);
         return json(scoped, 200, { 'cache-control': 'private, no-store' });
+      }
+      if (url.pathname === '/api/pdp') {
+        if (!id.approved) return json({ error: id.reason, auth: false }, 401);
+        if (!can(id, 'pdp')) return json({ error: 'You do not have access to the PDP inventories dashboard.' }, 403);
+        return await pdpMetrics(env, ctx);
       }
       if (url.pathname === '/api/ask' && request.method === 'POST') return await botAsk(request, env, ctx, id);
       if (url.pathname === '/api/log' && request.method === 'POST') {
