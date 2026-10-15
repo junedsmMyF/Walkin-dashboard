@@ -12,6 +12,7 @@ export const PAGES = [
   ['walkin.product', 'Walk-in · Product & category'],
   ['walkin.loss', 'Walk-in · Loss analysis'],
   ['walkin.definitions', 'Walk-in · Funnel & definitions'],
+  ['pdp', 'PDP inventories · all pages'],
   ['bot', 'Ask-data bot'],
   ['admin', 'Admin & user management'],
 ];
@@ -20,7 +21,7 @@ const WALKIN = ALL.filter((k) => k.startsWith('walkin.'));
 export const ROLES = {
   admin: { label: 'Admin (Founders Office)', perms: ALL },
   leadership: { label: 'Leadership — all dashboards, read-only', perms: ALL.filter((k) => k !== 'admin') },
-  retail_vp: { label: 'Retail VP — Retail Revenue section only', perms: ['retail', ...WALKIN, 'bot'] },
+  retail_vp: { label: 'Retail VP — Retail Revenue section only', perms: ['retail', ...WALKIN, 'pdp', 'bot'] },
   walkin_viewer: { label: 'Walk-in viewer — walk-in dashboard only', perms: [...WALKIN, 'bot'] },
   store_manager: { label: 'Store manager — own store(s), no revenue tabs', perms: ['walkin.overview', 'walkin.capture', 'walkin.followup', 'walkin.definitions'] },
 };
