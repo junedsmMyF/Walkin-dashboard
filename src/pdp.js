@@ -1,0 +1,224 @@
+// PDP inventories (Retail Revenue) — website PDP → lead → store visit → retail revenue.
+// Reference: Whimsical "Frido — D2C → Retail CTA Flow" (Oct 2026). Returns aggregated, PII-free rows only.
+//
+// Sources
+//   Call route  : Bigin "Callback Requests" pipeline (website Call Store pop-up) — REAL, refreshed daily (T-1).
+//   Revenue     : BigQuery retail sales already in this Worker (same orders as walk-in) — REAL, matched by phone.
+//   Text route  : LimeChat export — REAL (secret LIMECHAT_CSV_URL), standardised in limechat.js.
+//   Routing     : Lead routing sheet (WhatsApp DSR groups → Google Sheet) — REAL (secret ROUTING_CSV_URL), routing.js.
+//   PDP layer   : GA4 / Shopify PDP views + CTA clicks — not connected yet → SAMPLE data, flagged isSample.
+//
+// Proposed rules (pending owner sign-off — mirror the walk-in rules where they apply):
+//   Unique lead     = first Callback record per phone (last 10 digits) in the pipeline; later records for the same phone are duplicates.
+//   Attributed order= any DevX order (any store, any type) on or AFTER the lead's created date for the same phone.
+//                     Same day counts here (a caller can visit the same evening); walk-in uses strictly-after because
+//                     the lead is captured in-store after a purchase.
+//   Sales credit    = billing store; the store the caller asked for keeps "requested" credit.
+//   Revenue         = Total Revenue (gross − discount), as walk-in. Gross also returned.
+//   Overlap         = attributed order whose phone ALSO has an earlier walk-in lead → shown as shared, never double-counted silently.
+import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, storeFromBigin } from './stores.js';
+import { STAGE_GROUPS } from './metrics.js';
+import { categoryOf } from './categories.js';
+import { salesDate, biginDate, daysBetween, phone10, addDays } from './dates.js';
+import { standardiseLimechat, coverageGaps } from './limechat.js';
+import { standardiseRouting } from './routing.js';
+
+// Website store labels (Store_Name1, set by the Call Store pop-up) that the store master does not already know.
+export const WEB_STORE_ALIASES = {
+  'Frido Store, Vegas Mall': 'FRIDO_0017', 'Omaxe World Street': 'FRIDO_0019', 'Bhartiya Mall, BLR': 'FRIDO_0015',
+  'Elpro Mall, Chinchwad': 'FRIDO_0005', 'Elan Miracle': 'FRIDO_0024', 'DLF Summit': 'FRIDO_0022', 'Golf Course Rd, Gurugram': 'FRIDO_0018',
+  'Royal Meenakshi': 'FRIDO_0025', 'Phoenix Whitefield': 'FRIDO_0020', 'Amar Tech Park, Pune': 'FRIDO_0003', 'Amanora Mall, Pune': 'FRIDO_0002',
+  'Mall of Asia, BLR': 'FRIDO_0009', 'Kopa Mall, Pune': 'FRIDO_0008', 'Kompally, HYD': 'FRIDO_0014', 'Lakeshore, Hyderabad': 'FRIDO_0011',
+  // Lead routing sheet labels (WhatsApp DSR group)
+  'Felix, Gurgaon': 'FRIDO_0021', 'PMC, Vimannagar': 'FRIDO_0001',
+};
+const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const WEB_INDEX = new Map(Object.entries(WEB_STORE_ALIASES).map(([k, v]) => [norm(k), v]));
+export const storeFromWeb = (label, loc, owner) => (label && (WEB_INDEX.get(norm(label)) || storeFromDsr(label))) || storeFromBigin(loc, owner) || null;
+
+// Callback stages → groups. Extends the walk-in groups with the two stages only this pipeline uses.
+const CALL_STAGE = { ...STAGE_GROUPS, Connected: 'engaged', Resolved: 'resolved', 'Store Visit Follow-up': 'visit', 'Cx Visited Store': 'visit', 'Visit Scheduled': 'visitPlan', 'Store Visit Scheduled': 'visitPlan' };
+const stageGroup = (st) => CALL_STAGE[st] || (st ? 'other' : 'blank');
+const num = (v) => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isFinite(n) ? n : 0; };
+const hamming1 = (a, b) => { if (!a || !b || a.length !== b.length || a === b) return false; let d = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && ++d > 1) return false; return d === 1; };
+const nameKey = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 6);
+
+// Backend agents: every lead is owned by the backend agent who works it (Bigin owner / LimeChat first assignee).
+// Final flow (Whimsical "Frido PDP lead funnel and store routing", Oct 2026) — a qualified lead converts one of three ways:
+//   agent  = order punched on DevX by the backend agent (DevX employee = a backend agent)
+//   store  = agent routes the lead to a store on the WhatsApp DSR group → customer visits → bill by store staff
+//   video  = video consult with the store team → order placed by the store team
+// Purchase path (proposed, pending sign-off): employee = backend agent → "agent"; else ONLINE punch-in → "video"
+// (store team placing a remote order); else cash & carry → "store". pb = basis: agent | online | retail.
+const agentKey = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, ' ').trim().split(/\s+/).filter(Boolean);
+export function isAgentName(emp, agents) {
+  const e = agentKey(emp); if (!e.length) return false;
+  return agents.some((a) => { const k = agentKey(a); if (!k.length) return false; if (k.join(' ') === e.join(' ')) return true;
+    return k[0] === e[0] && (!k[1] || !e[1] || k[1][0] === e[1][0]); }); // "Raj B" ~ "Raj Bhardwaj"
+}
+export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], limechatRows = null, routingRows = null, startDate, cutoff, sample = true, backendAgents = [] }) {
+  const callStart = startDate;
+  const LC = limechatRows ? standardiseLimechat(limechatRows, { cutoff }) : null;
+  if (LC && LC.tickets.length && LC.tickets[0].d < startDate) startDate = LC.tickets[0].d; // LimeChat history starts earlier than Callback Requests
+  const inRange = (d) => d && d >= startDate && d <= cutoff;
+  const quality = { noPhone: 0, badPhone: 0, unmappedStores: {}, futureDates: 0 };
+
+  // ---------- Orders (one per POS Order ID; same build as walk-in) ----------
+  const orders = new Map();
+  for (const r of salesRows) {
+    if (String(r['Ret/Exc'] || '').trim().toUpperCase() === 'CANCELLED') continue;
+    const store = (r['Store ID'] || '').trim(); if (!store || EXCLUDED_STORE_IDS.has(store)) continue;
+    const date = salesDate(r['POS Created At']) || salesDate(r['Shopify Created At']); if (!date) continue;
+    const id = r['POS Order ID'] || r['Shopify Order ID']; if (!id) continue;
+    let o = orders.get(id);
+    if (!o) { o = { id, date, store, phone: phone10(r['Customer Phone']), type: (r['Order Type'] || '').toUpperCase(), emp: String(r['Employee Name'] || '').trim(), net: 0, gross: 0, lines: [] }; orders.set(id, o); }
+    const g = r.__gross != null ? num(r.__gross) : num(r['Amount Paid']);
+    const n = r.__net != null ? num(r.__net) : g - num(r['Return Amount']);
+    o.gross += g; o.net += n; o.lines.push({ p: String(r['Product Name'] || '(no product name)').trim(), net: n, gross: g, qty: num(r['Quantity']) || 1 });
+  }
+  const ordersByPhone = new Map();
+  for (const o of orders.values()) if (o.phone) (ordersByPhone.get(o.phone) || ordersByPhone.set(o.phone, []).get(o.phone)).push(o);
+  for (const a of ordersByPhone.values()) a.sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
+
+  // Earliest walk-in date per phone (for overlap with the walk-in vertical).
+  const walkinFirst = new Map();
+  for (const l of walkinLeads) { const p = phone10(l.p); const d = biginDate(l.d) || biginDate(l.ct); if (!p || !d) continue; if (!walkinFirst.has(p) || d < walkinFirst.get(p)) walkinFirst.set(p, d); }
+
+  // ---------- Callback leads ----------
+  const raw = callbacks.map((c) => {
+    const ct = c.ct ? Date.parse(c.ct) : NaN; const d = biginDate(c.ct);
+    const p = phone10(c.p); if (!c.p) quality.noPhone++; else if (!p || !/^[6-9]/.test(p)) quality.badPhone++;
+    let s = storeFromWeb(c.web, c.loc, c.own); if (!s) { const k = c.web || c.loc || '(blank)'; quality.unmappedStores[k] = (quality.unmappedStores[k] || 0) + 1; s = 'UNMAPPED'; }
+    const touchedH = c.mt && !isNaN(ct) ? (Date.parse(c.mt) - ct) / 3600e3 : 0;
+    return { id: String(c.i || ''), d, ts: ct, p, nm: nameKey(c.nm), s, st: c.st || '', g: stageGroup(c.st), lr: c.lr || '', prod: c.prod || '', cat: c.cat || '', utm: !!(c.us || c.um || c.uc || c.ux), utmSrc: c.us || '', touchedH, ag: String(c.own || '').trim() };
+  }).filter((x) => x.d).sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
+
+  const firstByPhone = new Map(); const seenNames = [];
+  const leads = [];
+  for (const x of raw) {
+    let dup = 0, near = 0;
+    if (x.p) { if (firstByPhone.has(x.p)) dup = 1; else firstByPhone.set(x.p, x); }
+    if (!dup && x.p && x.nm) { if (seenNames.some((y) => y.nm === x.nm && hamming1(y.p, x.p))) near = 1; seenNames.push(x); }
+    if (x.d > cutoff) { if (daysBetween(cutoff, x.d) > 2) quality.futureDates++; continue; }
+    if (!inRange(x.d)) continue;
+    const ageD = daysBetween(x.d, cutoff);
+    leads.push({
+      i: x.id.slice(-6), d: x.d, s: x.s, st: x.st, g: x.g, dup, near, ag: x.ag || '',
+      prod: x.prod ? 1 : 0, cat: x.cat || (x.prod ? categoryOf(x.prod.split(' || ')[0]) : ''), utm: x.utm ? 1 : 0,
+      lostNoReason: x.g === 'lost' && !x.lr ? 1 : 0, lr: x.lr || '',
+      stale: x.g === 'notCalled' && ageD >= 2 ? 1 : 0, ageD,
+      untouched: x.touchedH < 0.05 ? 1 : 0,
+      wk: x.p && walkinFirst.has(x.p) && walkinFirst.get(x.p) <= x.d ? 1 : 0, // caller was already a walk-in lead
+    });
+  }
+
+  // ---------- Attribution: order on/after the unique lead date, same phone, any store ----------
+  const agents = [...new Set([...raw.map((x) => x.ag).filter(Boolean), ...(LC ? LC.tickets.map((x) => x.fa).filter(Boolean) : []), ...backendAgents])];
+  const pathOf = (o) => (o.emp && isAgentName(o.emp, agents) ? 'agent' : o.type === 'ONLINE' ? 'video' : 'store');
+  const pathBasis = (o) => (o.emp && isAgentName(o.emp, agents) ? 'agent' : o.type === 'ONLINE' ? 'online' : 'retail');
+  // Lead routing sheet (store routing from the WhatsApp DSR group). Routed phone → earliest routing date.
+  const RT = routingRows ? standardiseRouting(routingRows, { storeOf: (l) => storeFromWeb(l), cutoff }) : null;
+  const routedOn = (p, d) => (RT && p && RT.firstByPhone.has(p) && RT.firstByPhone.get(p).d <= d ? 1 : 0);
+  const attributed = []; const wonStageNoOrder = []; const orderNoWonStage = [];
+  const productRev = new Map();
+  const pIdx = new Map(); const pNames = []; const pid = (n) => { if (!pIdx.has(n)) { pIdx.set(n, pNames.length); pNames.push(n); } return pIdx.get(n); };
+  const lines = []; // order lines from attributed orders: {d, ld, s, cs, p, c, net, qty}
+  for (const [p, first] of firstByPhone) {
+    if (!inRange(first.d)) continue;
+    const os = (ordersByPhone.get(p) || []).filter((o) => o.date >= first.d && o.date <= cutoff);
+    const wk = walkinFirst.has(p) && walkinFirst.get(p) < (os[0]?.date || '9999');
+    os.forEach((o, k) => {
+      attributed.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.s, t: o.type || 'RETAIL', net: Math.round(o.net), gross: Math.round(o.gross), first: k === 0 ? 1 : 0, lag: daysBetween(first.d, o.date), shared: wk ? 1 : 0, same: o.date === first.d ? 1 : 0, path: pathOf(o), pb: pathBasis(o), ag: first.ag || '', by: isAgentName(o.emp, agents) ? o.emp : '', rtd: routedOn(p, o.date) });
+      for (const ln of o.lines) lines.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.s, p: pid(ln.p), c: categoryOf(ln.p), net: Math.round(ln.net), qty: ln.qty, r: 'c' });
+      for (const ln of o.lines) { const v = productRev.get(ln.p) || { p: ln.p, c: categoryOf(ln.p), net: 0, gross: 0, qty: 0, n: 0 }; v.net += ln.net; v.gross += ln.gross; v.qty += ln.qty; v.n++; productRev.set(ln.p, v); }
+    });
+    if (first.g === 'crmWon' && !os.length) wonStageNoOrder.push(first.id.slice(-6));
+    if (os.length && first.g !== 'crmWon') orderNoWonStage.push(first.id.slice(-6));
+  }
+
+  // ---------- LimeChat (text) — real tickets, standardised; raw values kept ----------
+  let text = null;
+  if (LC) {
+    const callPhones = new Set(raw.map((x) => x.p).filter(Boolean));
+    const tAttr = [];
+    for (const [k, first] of LC.firstByPhone) {
+      if (!first.phone || !first.validPhone || !inRange(first.d)) continue;
+      const os = (ordersByPhone.get(first.phone) || []).filter((o) => o.date >= first.d && o.date <= cutoff);
+      const wk = walkinFirst.has(first.phone) && walkinFirst.get(first.phone) < (os[0]?.date || '9999');
+      os.forEach((o, j) => {
+        tAttr.push({ o: o.id, i: first.id, d: o.date, ld: first.d, s: o.store, cs: first.store || 'UNMAPPED', t: o.type || 'RETAIL', net: Math.round(o.net), gross: Math.round(o.gross), first: j === 0 ? 1 : 0, lag: daysBetween(first.d, o.date), shared: wk ? 1 : 0, call: callPhones.has(first.phone) ? 1 : 0, path: pathOf(o), pb: pathBasis(o), ag: first.fa || '', stage: first.stage, pdp: first.pdp, entry: first.entry, rtd: routedOn(first.phone, o.date) });
+        for (const ln of o.lines) lines.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.store || 'UNMAPPED', p: pid(ln.p), c: categoryOf(ln.p), net: Math.round(ln.net), qty: ln.qty, r: 't' });
+      });
+    }
+    const mask = (n) => String(n || '').replace(/\d{7,}/g, '#').slice(0, 120);
+    text = {
+      source: 'LimeChat export (WhatsApp inbox FES - WA - Karix - 9096417888)', start: LC.tickets[0]?.d || null, end: LC.tickets[LC.tickets.length - 1]?.d || null,
+      tickets: LC.tickets.filter((x) => inRange(x.d)).map((x) => ({ i: x.id, d: x.d, st: x.stage, raw: x.status, ho: x.ho ? 1 : 0, ag: x.fa, ca: x.ca, am: x.am ? 1 : 0, oc: x.oc, note: mask(x.note), entry: x.entry, pdp: x.pdp, s: x.store || 'UNMAPPED', intent: x.intent, svc: x.svc ? 1 : 0, dup: x.dup ? 1 : 0, ooh: x.ooh ? 1 : 0, ma: x.minsToAssign, mm: x.minsToAgentMsg, l1: x.l1, fl: x.flags, last: x.lastBy, rnr: x.rnrVariant, ageD: daysBetween(x.d, cutoff), call: x.phone && callPhones.has(x.phone) ? 1 : 0 })),
+      attributed: tAttr, gaps: coverageGaps(LC.tickets),
+    };
+  }
+
+  // ---------- Routing sheet: routed lead → source lead → DevX order on/after routing date ----------
+  let routing = null;
+  if (RT) {
+    const lcFirst = LC ? LC.firstByPhone : new Map();
+    routing = {
+      source: 'Lead routing backend (Google Sheet fed by the WhatsApp DSR groups)',
+      start: RT.routes[0]?.d || null, end: RT.routes[RT.routes.length - 1]?.d || null, total: RT.routes.length,
+      routes: RT.routes.filter((x) => x.d >= startDate).map((x) => {
+        const cl = x.phone ? firstByPhone.get(x.phone) : null; const tl = x.phone ? lcFirst.get(x.phone) : null;
+        const lead = [cl && { d: cl.d, src: 'call', ag: cl.ag }, tl && { d: tl.d, src: 'text', ag: tl.fa }].filter(Boolean).sort((a, b) => (a.d < b.d ? -1 : 1))[0];
+        const os = !x.test && x.phone ? (ordersByPhone.get(x.phone) || []).filter((o) => o.date >= x.d && o.date <= cutoff) : [];
+        const o = os[0];
+        return {
+          i: x.id, d: x.d, s: x.s || 'UNMAPPED', sr: x.storeRaw, p: x.prods[0] || '', np: x.prods.length, c: x.cat, cr: x.catRaw, vd: x.vd, vt: x.vtKind, vh: x.vtFrom,
+          disc: x.disc ? 1 : 0, dv: x.disc.slice(0, 12), rem: x.remarks ? 1 : 0, by: x.by, fl: x.flags, test: x.test, dup: x.dup, after: x.d > cutoff ? 1 : 0,
+          src: cl && tl ? 'both' : cl ? 'call' : tl ? 'text' : '', ld: lead ? lead.d : '', lag: lead ? daysBetween(lead.d, x.d) : null, ag: lead ? lead.ag || '' : '',
+          od: o ? o.date : '', os: o ? o.store : '', same: o ? (o.store === x.s ? 1 : 0) : 0, net: Math.round(os.reduce((s, y) => s + y.net, 0)), n: os.length,
+          path: o ? pathOf(o) : '', onTime: o && x.vd ? (o.date <= x.vd ? 1 : 0) : 0, vlag: o && x.vd ? daysBetween(x.vd, o.date) : null,
+        };
+      }),
+    };
+  }
+
+  const stores = STORE_MASTER.map((s) => ({ id: s.id, name: s.name, city: s.city, format: s.format }));
+  stores.push({ id: 'UNMAPPED', name: 'Store not recognised', city: '—', format: null });
+
+  const salesDaily = new Map();
+  for (const o of orders.values()) { if (!inRange(o.date)) continue; const k = o.date + '|' + o.store; const v = salesDaily.get(k) || { d: o.date, s: o.store, net: 0, n: 0 }; v.net += o.net; v.n++; salesDaily.set(k, v); }
+  const out = {
+    startDate, callStart, cutoff, generatedAt: new Date().toISOString(), stores, text, routing,
+    call: { leads, attributed, lines, pnames: pNames, salesDaily: [...salesDaily.values()].map((v) => ({ ...v, net: Math.round(v.net) })), products: [...productRev.values()].map((v) => ({ ...v, net: Math.round(v.net), gross: Math.round(v.gross) })).sort((a, b) => b.net - a.net) },
+    agents,
+    quality: { ...quality, wonStageNoOrder: wonStageNoOrder.length, orderNoWonStage: orderNoWonStage.length, rawRecords: raw.length, uniquePhones: firstByPhone.size },
+    rules: { attribution: 'Order on or after lead date · same phone · any store', uniqueLead: 'First record per phone', revenue: 'Total Revenue = gross − discount' },
+  };
+  if (sample) out.sample = buildSample({ startDate, cutoff, stores: STORE_MASTER });
+  return out;
+}
+
+// ---------- SAMPLE data (deterministic) — replaced when LimeChat + GA4 exports are connected ----------
+// Products are real myfrido.com PDPs; every number below is illustrative only.
+export const SAMPLE_PDPS = [
+  ['Frido 3D Posture Plus Ergonomic Chair', 'Chairs', 5200], ['Frido ErgoLuxe Executive Chair', 'Chairs', 3100], ['Frido Ergoluxe Electric Standing Desk', 'Workspace', 2100],
+  ['Frido Ultimate Mattress Topper', 'Mattress', 4600], ['Frido Ultimate Pro Seat Cushion', 'Cushions', 7800], ['Frido Adjustable Wedge Max Cushion', 'Cushions', 2600],
+  ['Frido Cloud Comfort Arch Support Slippers', 'Footwear', 9400], ["Frido Active Walking Shoes - Men's", 'Footwear', 6100], ['Frido Barefoot Sock Shoe Classic', 'Barefoot', 5300],
+  ['Frido Dual Gel Pro Insoles', 'Insoles', 4800], ['Frido Orthotics Posture Corrector Pro', 'Orthotics', 3900], ['Frido Travel Neck Pillow', 'Pillows', 4400],
+];
+function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; };
+
+export function buildSample({ startDate, cutoff, stores }) {
+  const pdpDaily = [];
+  for (let d = startDate; d <= cutoff; d = addDays(d, 1)) {
+    const r = rng(hash('pdp' + d)); const wkend = [0, 6].includes(new Date(d + 'T00:00:00Z').getUTCDay());
+    SAMPLE_PDPS.forEach(([name, cat, base], i) => {
+      const views = Math.round(base * 0.35 * (0.85 + r() * 0.3) * (wkend ? 1.18 : 1));
+      const ctr = 0.004 + r() * 0.006; // retail-CTA clicks per PDP view (floating widget is desktop-only)
+      const clicks = Math.round(views * ctr * (cat === 'Chairs' || cat === 'Workspace' || cat === 'Mattress' ? 1.8 : 1));
+      const wa = Math.round(clicks * (0.34 + r() * 0.1)), call = Math.round(clicks * (0.18 + r() * 0.08)), dir = Math.round(clicks * (0.12 + r() * 0.06));
+      pdpDaily.push({ d, p: i, views, clicks, wa, call, dir });
+    });
+  }
+  return { isSample: true, note: 'Illustrative PDP views / CTA clicks — replace with GA4 / Shopify PDP data.', pdps: SAMPLE_PDPS.map(([n, c]) => ({ n, c })), pdpDaily };
+}
