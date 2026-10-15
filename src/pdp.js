@@ -167,13 +167,13 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
       start: RT.routes[0]?.d || null, end: RT.routes[RT.routes.length - 1]?.d || null, total: RT.routes.length,
       routes: RT.routes.filter((x) => x.d >= startDate).map((x) => {
         const cl = x.phone ? firstByPhone.get(x.phone) : null; const tl = x.phone ? lcFirst.get(x.phone) : null;
-        const lead = [cl && { d: cl.d, src: 'call', ag: cl.ag }, tl && { d: tl.d, src: 'text', ag: tl.fa }].filter(Boolean).sort((a, b) => (a.d < b.d ? -1 : 1))[0];
+        const lead = [cl && { d: cl.d, src: 'call', ag: cl.ag, en: 'call_popup' }, tl && { d: tl.d, src: 'text', ag: tl.fa, en: tl.entry }].filter(Boolean).sort((a, b) => (a.d < b.d ? -1 : 1))[0];
         const os = !x.test && x.phone ? (ordersByPhone.get(x.phone) || []).filter((o) => o.date >= x.d && o.date <= cutoff) : [];
         const o = os[0];
         return {
           i: x.id, d: x.d, s: x.s || 'UNMAPPED', sr: x.storeRaw, p: x.prods[0] || '', np: x.prods.length, c: x.cat, cr: x.catRaw, vd: x.vd, vt: x.vtKind, vh: x.vtFrom,
           disc: x.disc ? 1 : 0, dv: x.disc.slice(0, 12), rem: x.remarks ? 1 : 0, by: x.by, fl: x.flags, test: x.test, dup: x.dup, after: x.d > cutoff ? 1 : 0,
-          src: cl && tl ? 'both' : cl ? 'call' : tl ? 'text' : '', ld: lead ? lead.d : '', lag: lead ? daysBetween(lead.d, x.d) : null, ag: lead ? lead.ag || '' : '',
+          src: cl && tl ? 'both' : cl ? 'call' : tl ? 'text' : '', en: lead ? lead.en : '', ld: lead ? lead.d : '', lag: lead ? daysBetween(lead.d, x.d) : null, ag: lead ? lead.ag || '' : '',
           od: o ? o.date : '', os: o ? o.store : '', same: o ? (o.store === x.s ? 1 : 0) : 0, net: Math.round(os.reduce((s, y) => s + y.net, 0)), n: os.length,
           path: o ? pathOf(o) : '', onTime: o && x.vd ? (o.date <= x.vd ? 1 : 0) : 0, vlag: o && x.vd ? daysBetween(x.vd, o.date) : null,
         };
@@ -215,9 +215,9 @@ export function buildSample({ startDate, cutoff, stores }) {
     SAMPLE_PDPS.forEach(([name, cat, base], i) => {
       const views = Math.round(base * 0.35 * (0.85 + r() * 0.3) * (wkend ? 1.18 : 1));
       const ctr = 0.004 + r() * 0.006; // retail-CTA clicks per PDP view (floating widget is desktop-only)
-      const clicks = Math.round(views * ctr * (cat === 'Chairs' || cat === 'Workspace' || cat === 'Mattress' ? 1.8 : 1));
-      const wa = Math.round(clicks * (0.34 + r() * 0.1)), call = Math.round(clicks * (0.18 + r() * 0.08)), dir = Math.round(clicks * (0.12 + r() * 0.06));
-      pdpDaily.push({ d, p: i, views, clicks, wa, call, dir });
+      const raw = Math.round(views * ctr * (cat === 'Chairs' || cat === 'Workspace' || cat === 'Mattress' ? 1.8 : 1));
+      const wa = Math.round(raw * (0.34 + r() * 0.1)), call = Math.round(raw * (0.18 + r() * 0.08));
+      pdpDaily.push({ d, p: i, views, clicks: wa + call, wa, call }); // lead CTAs only (Get Direction excluded — not a lead)
     });
   }
   return { isSample: true, note: 'Illustrative PDP views / CTA clicks — replace with GA4 / Shopify PDP data.', pdps: SAMPLE_PDPS.map(([n, c]) => ({ n, c })), pdpDaily };
