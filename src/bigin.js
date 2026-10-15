@@ -5,6 +5,7 @@
 const KV_TOKENS = 'bigin:oauth';
 const KV_LEADS = 'bigin:leads';
 const KV_META = 'bigin:meta';
+const KV_CALLBACK = 'bigin:callback'; // website "Call Store" pop-up leads (Callback Requests pipeline) — PDP inventories
 const PROTOCOL = '2025-06-18';
 
 const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -134,7 +135,7 @@ class McpSession {
 }
 
 // ---------- Daily refresh: all walk-in leads → KV ----------
-const FIELDS = 'id, Stage, Pipeline, Walk_in_Date_Time, Created_Time, Store_Location, Owner, Amount, Call_Date, Close_Lost_Reason, Phone_Number, Email_ID, Product, Quantity, Product_Category';
+const FIELDS = 'id, Deal_Name, Stage, Pipeline, Walk_in_Date_Time, Created_Time, Modified_Time, Store_Location, Store_Name1, Owner, Amount, Call_Date, Close_Lost_Reason, Phone_Number, Email_ID, Product, Quantity, Product_Category, UTM_Source, UTM_Medium, UTM_Campaign, UTM_Content';
 
 export async function refreshBigin(env) {
   const started = new Date().toISOString();
@@ -148,11 +149,15 @@ export async function refreshBigin(env) {
     }
     // Zoho's MCP server caps each COQL query at 200 rows, so page by record ID (keyset paging):
     // "id > last id seen, order by id, 200 at a time" — no offset limits, stable while records are added.
-    const leads = []; let lastId = '0'; let pages = 0;
+    const leads = []; const callbacks = []; let lastId = '0'; let pages = 0;
     for (;;) {
       const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${FIELDS} from Pipelines where id > ${lastId} order by id asc limit 0, 200` } });
       const rows = r.data || []; pages++;
       for (const x of rows) {
+        if (env.CALLBACK_PIPELINE_ID && String(x.Pipeline) === String(env.CALLBACK_PIPELINE_ID)) {
+          callbacks.push({ i: x.id, nm: x.Deal_Name || '', st: x.Stage, ct: x.Created_Time, mt: x.Modified_Time, web: x.Store_Name1 || '', loc: x.Store_Location || '', own: owners.get(x.Owner?.id) || '', p: x.Phone_Number, lr: x.Close_Lost_Reason || '', prod: Array.isArray(x.Product) ? x.Product.join(' || ') : (x.Product?.name || x.Product || ''), cat: x.Product_Category || '', us: x.UTM_Source || '', um: x.UTM_Medium || '', uc: x.UTM_Campaign || '', ux: x.UTM_Content || '' });
+          continue;
+        }
         if (String(x.Pipeline) !== String(env.WALKIN_PIPELINE_ID)) continue;
         leads.push({ i: x.id, st: x.Stage, d: x.Walk_in_Date_Time, ct: x.Created_Time, loc: x.Store_Location, own: owners.get(x.Owner?.id) || '', amt: x.Amount, call: x.Call_Date, lr: x.Close_Lost_Reason, p: x.Phone_Number, em: x.Email_ID || '', prod: Array.isArray(x.Product) ? x.Product.join(' || ') : (x.Product?.name || x.Product || ''), qty: x.Quantity, cat: x.Product_Category || '' });
       }
@@ -160,7 +165,8 @@ export async function refreshBigin(env) {
       lastId = rows[rows.length - 1].id;
     }
     await env.DASH_KV.put(KV_LEADS, JSON.stringify(leads));
-    await env.DASH_KV.put(KV_META, JSON.stringify({ status: 'ok', refreshedAt: new Date().toISOString(), started, count: leads.length, pages }));
+    if (env.CALLBACK_PIPELINE_ID) await env.DASH_KV.put(KV_CALLBACK, JSON.stringify(callbacks));
+    await env.DASH_KV.put(KV_META, JSON.stringify({ status: 'ok', refreshedAt: new Date().toISOString(), started, count: leads.length, callbacks: callbacks.length, pages }));
     return { ok: true, count: leads.length };
   } catch (e) {
     const prev = (await env.DASH_KV.get(KV_META, 'json')) || {};
@@ -169,5 +175,6 @@ export async function refreshBigin(env) {
   }
 }
 export const biginLeads = (env) => env.DASH_KV.get(KV_LEADS, 'json');
+export const biginCallbacks = (env) => env.DASH_KV.get(KV_CALLBACK, 'json');
 export const biginMeta = (env) => env.DASH_KV.get(KV_META, 'json');
 export const biginConnected = async (env) => !!(await env.DASH_KV.get(KV_TOKENS));
