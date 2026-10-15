@@ -1,0 +1,73 @@
+// Synthetic data only — never commit real customer rows.
+import test from 'node:test'; import assert from 'node:assert/strict';
+import { computePdp, storeFromWeb } from '../src/pdp.js';
+
+const cb = (id, p, ct, web, st = 'Yet to Call', extra = {}) => ({ i: id, nm: 'Test Caller', p, ct, mt: ct, web, st, ...extra });
+const sale = (id, p, d, store, net) => ({ 'POS Order ID': id, 'Customer Phone': p, 'POS Created At': d, 'Store ID': store, __gross: String(net), __net: String(net), 'Order Type': 'RETAIL', 'Ret/Exc': '-', 'Product Name': 'Frido Test Chair' });
+const run = (x) => computePdp({ startDate: '2026-10-08', cutoff: '2026-10-12', sample: false, ...x });
+
+test('website store labels map to the store master', () => {
+  assert.equal(storeFromWeb('SkyCity Mall, Mumbai'), 'FRIDO_0010');
+  assert.equal(storeFromWeb('Frido Store, Vegas Mall'), 'FRIDO_0017');
+  assert.equal(storeFromWeb('Kompally, HYD'), 'FRIDO_0014');
+  assert.equal(storeFromWeb('Nowhere Mall'), null);
+});
+
+test('unique lead = first record per phone; repeats are duplicates', () => {
+  const m = run({ callbacks: [
+    cb('1000000000000000001', '9000000001', '2026-10-08T11:00:00+05:30', 'SkyCity Mall, Mumbai'),
+    cb('1000000000000000002', '+91 9000000001', '2026-10-09T11:00:00+05:30', 'Frido Store, Vegas Mall'),
+    cb('1000000000000000003', '9000000002', '2026-10-09T12:00:00+05:30', 'Amanora Mall, Pune', 'Not Interested'),
+  ] });
+  assert.equal(m.call.leads.length, 3);
+  assert.deepEqual(m.call.leads.map((x) => x.dup), [0, 1, 0]);
+  assert.equal(m.call.leads[2].lostNoReason, 1);
+  assert.equal(m.quality.uniquePhones, 2);
+});
+
+test('attribution: same-day and later orders count, earlier orders do not; any store', () => {
+  const m = run({
+    callbacks: [cb('1000000000000000001', '9000000001', '2026-10-09T11:00:00+05:30', 'SkyCity Mall, Mumbai')],
+    salesRows: [sale('A', '9000000001', '08/10/2026', 'FRIDO_0010', 900), sale('B', '9000000001', '09/10/2026', 'FRIDO_0010', 1000), sale('C', '919000000001', '11/10/2026', 'FRIDO_0001', 2000)],
+  });
+  assert.deepEqual(m.call.attributed.map((x) => [x.d, x.s, x.cs, x.net, x.first, x.same]), [['2026-10-09', 'FRIDO_0010', 'FRIDO_0010', 1000, 1, 1], ['2026-10-11', 'FRIDO_0001', 'FRIDO_0010', 2000, 0, 0]]);
+  assert.equal(m.call.products[0].net, 3000);
+});
+
+test('overlap with walk-in leads is flagged as shared', () => {
+  const m = run({
+    callbacks: [cb('1000000000000000001', '9000000001', '2026-10-09T11:00:00+05:30', 'SkyCity Mall, Mumbai')],
+    walkinLeads: [{ p: '9000000001', d: '2026-09-20T12:00:00+05:30' }],
+    salesRows: [sale('B', '9000000001', '10/10/2026', 'FRIDO_0010', 1000)],
+  });
+  assert.equal(m.call.attributed[0].shared, 1);
+  assert.equal(m.call.leads[0].wk, 1);
+});
+
+test('typo phones (one digit off, same name) are flagged; payload has no phones or names', () => {
+  const m = run({ callbacks: [
+    cb('1000000000000000001', '9918268307', '2026-10-10T13:11:00+05:30', 'DLF Summit'),
+    cb('1000000000000000002', '9910268307', '2026-10-10T13:12:00+05:30', 'DLF Summit'),
+  ] });
+  assert.deepEqual(m.call.leads.map((x) => x.near), [0, 1]);
+  const s = JSON.stringify(m);
+  assert.ok(!s.includes('9918268307') && !s.includes('Test Caller'));
+});
+
+test('sample block is flagged and deterministic', () => {
+  const a = computePdp({ startDate: '2026-10-08', cutoff: '2026-10-09' }).sample;
+  const b = computePdp({ startDate: '2026-10-08', cutoff: '2026-10-09' }).sample;
+  assert.equal(a.isSample, true);
+  assert.deepEqual(a.pdpDaily, b.pdpDaily);
+});
+
+test('purchase path: punched by the backend agent = agent; store team ONLINE = video consult; cash & carry = store visit', () => {
+  const s2 = (id, d, store, emp, type) => ({ ...sale(id, '9000000001', d, store, 1000), 'Employee Name': emp, 'Order Type': type });
+  const m = run({
+    callbacks: [cb('1000000000000000001', '9000000001', '2026-10-08T11:00:00+05:30', 'SkyCity Mall, Mumbai', 'Connected', { own: 'Raj B' })],
+    salesRows: [s2('A', '09/10/2026', 'FRIDO_0010', 'Raj Bhardwaj', 'ONLINE'), s2('B', '10/10/2026', 'FRIDO_0010', 'Store Staff', 'RETAIL'), s2('C', '11/10/2026', 'FRIDO_0010', '', 'ONLINE')],
+  });
+  assert.deepEqual(m.call.attributed.map((x) => [x.path, x.pb, x.ag]), [['agent', 'agent', 'Raj B'], ['store', 'retail', 'Raj B'], ['video', 'online', 'Raj B']]);
+  assert.equal(m.call.leads[0].ag, 'Raj B');
+  assert.deepEqual(m.agents, ['Raj B']);
+});
