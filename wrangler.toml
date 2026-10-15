@@ -27,6 +27,11 @@ LOGIN = "on"
 ADMIN_EMAILS = "juned.m@myfrido.com"                          # permanent admins (comma-separated); can never be locked out
 START_DATE = "2026-09-01"
 WALKIN_PIPELINE_ID = "1371203000000480122"
+CALLBACK_PIPELINE_ID = "1371203000000629516"   # Bigin "Callback Requests" — website Call Store pop-up (PDP inventories)
+PDP_START_DATE = "2026-10-08"                   # Callback Requests pipeline went live
+# LIMECHAT_CSV_URL is a SECRET (Worker → Settings → Variables and secrets): the LimeChat export holds customer phones and names, and this repo is public.
+# ROUTING_CSV_URL is a SECRET too: the published "Lead routing backend" sheet (WhatsApp DSR groups → Sheet) holds customer names and phones.
+BACKEND_AGENTS = ""                             # optional extra backend-agent names (comma-separated) as they appear on DevX orders; Bigin lead owners are included automatically
 BIGIN_MCP_URL = "https://bigin.zohomcp.in/mcp/message"
 # Sales come from BigQuery: apps-script/SalesToDashboard.gs syncs them daily at 08:00 IST (POST /admin/ingest-sales).
 DSR_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQBggrBOrbDGyU-5TQucn82YnpR6KcKUUgp6JRJW9FP_SRbK4jDSIDQcFdvSIUu5KPkbNfG6oPXQZCu/pub?gid=194259253&single=true&output=csv"
