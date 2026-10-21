@@ -48,6 +48,17 @@ test('LimeChat leads match DevX orders by phone on/after the chat date; payload 
   const m = computePdp({ startDate: '2026-10-08', cutoff: '2026-10-12', sample: false,
     limechatRows: [T('3', '08-10-2026 12:00', { 'Phone Number': '919000000003', 'is_handoff?': 'TRUE', 'First Assignee Name': 'Agent A', 'Private Notes': 'VC done', 'Customer Name': 'Real Person' , 'Level 1 Tags (Main)': 'storewidget' })],
     salesRows: [sale('A', '9000000003', '07/10/2026', 'Staff', 'RETAIL'), sale('B', '9000000003', '09/10/2026', 'Agent A', 'ONLINE')] });
-  assert.deepEqual(m.text.attributed.map((x) => [x.d, x.net, x.path, x.ag, x.entry]), [['2026-10-09', 1800, 'agent', 'Agent A', 'store_widget']]);
+  assert.deepEqual(m.text.attributed.map((x) => [x.d, x.net, x.path, x.ag, x.entry]), [['2026-10-09', 1800, 'video', 'Agent A', 'store_widget']]);
   const s = JSON.stringify(m); assert.ok(!s.includes('9000000003') && !s.includes('Real Person'));
+});
+
+test('new export format (ISO dates, True/False) parses; consumed = agent reply by time or message blocks', () => {
+  assert.deepEqual(lcTime('2026-10-14 18:42:17'), { d: '2026-10-14', t: Date.UTC(2026, 9, 14, 18, 42, 17) });
+  assert.equal(lcTime('14-10-2026 18:42').d, '2026-10-14');
+  const { tickets } = standardiseLimechat([
+    T('1', '2026-10-14 10:00:00', { 'Phone Number': '919000000001', 'is_handoff?': 'True', 'First Assignee Name': 'Agent A', 'First Agent Message Time': '2026-10-14 10:30:00', 'Agent Message Blocks': '2' }),
+    T('2', '2026-10-14 11:00:00', { 'Phone Number': '919000000002', 'is_handoff?': 'True', 'First Assignee Name': 'Agent A', 'Agent Message Blocks': '1' }),
+    T('3', '2026-10-14 12:00:00', { 'Phone Number': '919000000003', 'is_handoff?': 'True', 'First Assignee Name': 'Agent A', 'Agent Message Blocks': '0', 'Private Notes': 'RNR1' }),
+  ]);
+  assert.deepEqual(tickets.map((x) => [x.am, x.ho, x.minsToReply, x.flags.includes('reply_time_missing')]), [[true, true, 30, false], [true, true, null, true], [false, true, null, false]]);
 });
