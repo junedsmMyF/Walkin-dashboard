@@ -3,18 +3,23 @@
 //  • There is NO lead-stage column. "Ticket Status" (closed / bot / open) is the support-ticket state, not the lead stage:
 //    the bot auto-closes most chats, and assigned chats are closed with no agent action. It is kept as raw only.
 //  • The journey is rebuilt from: Level 1 Tags (entry point · PDP · store card), System Tags (bot flow / customer intent),
-//    is_handoff? + First Assignee Name (agent hand-off), First Agent Message Time (agent WhatsApp reply) and
+//    is_handoff? + First Assignee Name (agent hand-off), First Agent Message Time / Agent Message Blocks (agent WhatsApp reply = "consumed") and
 //    Private Notes (the only record of the agent's call outcome — free text, standardised below).
 //  • Raw values are always kept next to the standardised ones (auditability). Nothing in the source is modified.
 import { daysBetween, phone10 } from './dates.js';
 
-// DD-MM-YYYY H:MM (IST) → { d: 'YYYY-MM-DD', t: epoch ms (as IST wall clock) }
+// Export timestamps (IST) → { d: 'YYYY-MM-DD', t: epoch ms (as IST wall clock) }.
+// Accepts both export formats seen so far: 'DD-MM-YYYY H:MM' (Sep 2026) and 'YYYY-MM-DD HH:MM:SS' (Oct 2026).
 export function lcTime(s) {
-  const m = String(s || '').trim().match(/^(\d{1,2})-(\d{1,2})-(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+  const v = String(s || '').trim();
+  let m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) { const d = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; return { d, t: Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)) }; }
+  m = v.match(/^(\d{1,2})-(\d{1,2})-(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
   if (!m) return null;
   const d = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   return { d, t: Date.UTC(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0)) };
 }
+const isTrue = (v) => /^true$/i.test(String(v || '').trim());
 
 // Level 1 tag `chat_<store>` (store card "Chat with store") and System Tags store words → store master id
 export const LC_STORE_TAGS = {
@@ -93,18 +98,22 @@ export function standardiseLimechat(rows, { cutoff } = {}) {
     const raw = String(r['Phone Number'] || '').replace(/\D/g, '');
     const phone = phone10(raw);
     const fa = String(r['First Assignee Name'] || '').trim(), ca = String(r['Current Agent'] || '').trim();
-    const am = !!String(r['First Agent Message Time'] || '').trim();
+    // Consumed = a backend agent replied on WhatsApp. Two independent signals in the export: First Agent Message Time
+    // and Agent Message Blocks (> 0). They disagree on some tickets (blocks but no time) — either counts; the gap is flagged.
+    const famRaw = String(r['First Agent Message Time'] || '').trim(), blocks = +String(r['Agent Message Blocks'] || '0').trim() || 0;
+    const am = !!famRaw || blocks > 0;
     const note = String(r['Private Notes'] || '').trim();
     const oc = noteOutcome(note);
     const asg = lcTime(r['First Assigned Time']), fam = lcTime(r['First Agent Message Time']);
     const name = String(r['Customer Name'] || '').trim();
     const x = {
       id: String(r['Ticket ID'] || ''), d: c.d, ts: c.t, phone, validPhone: /^91[6-9]\d{9}$/.test(raw) || /^[6-9]\d{9}$/.test(raw),
-      status: String(r['Ticket Status'] || '').trim(), ho: String(r['is_handoff?']).toUpperCase() === 'TRUE', res: String(r['is_resolved?']).toUpperCase() === 'TRUE',
-      ooh: String(r['is_outside_working_hours?']).toUpperCase() === 'TRUE', fa, ca, am, agentBlocks: +r['Agent Message Blocks'] || 0,
+      status: String(r['Ticket Status'] || '').trim(), ho: isTrue(r['is_handoff?']), res: isTrue(r['is_resolved?']),
+      ooh: isTrue(r['is_outside_working_hours?']), out: isTrue(r['is_outbound?']), fa, ca, am, agentBlocks: blocks, replyTimeMissing: blocks > 0 && !famRaw,
       note, oc, l1: l1.join(', '), entry, pdp: pdpTag ? LC_PDP_TAGS[pdpTag] : '', store, intent, svc: intent === 'service',
       lastBy: String(r['Last Message Sent By'] || '').trim(),
       minsToAssign: asg ? Math.round((asg.t - c.t) / 60000) : null, minsToAgentMsg: asg && fam ? Math.round((fam.t - asg.t) / 60000) : null,
+      minsToReply: fam ? Math.round((fam.t - c.t) / 60000) : null,
       junkName: /^[?.\-\s]*$/.test(name) || /E\+\d+$/i.test(name) || /^\d+$/.test(name),
       rnrVariant: (note.match(RNR_RE) || []).map((v) => v.replace(/\s+/g, ' ').trim()),
     };
@@ -114,6 +123,8 @@ export function standardiseLimechat(rows, { cutoff } = {}) {
     if (!x.validPhone) f.push('invalid_phone');
     if (x.junkName) f.push('junk_name');
     if (x.fa && !x.ho) f.push('assigned_without_handoff');
+    if (x.replyTimeMissing) f.push('reply_time_missing');
+    if (x.out) f.push('outbound');
     if (x.ho && !x.fa) f.push('handoff_without_agent');
     if (x.fa && x.status === 'bot') f.push('assigned_but_bot_status');
     if (x.fa && x.status === 'closed' && !x.am && !x.note) f.push('closed_without_action');
