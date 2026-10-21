@@ -61,13 +61,13 @@ test('sample block is flagged and deterministic', () => {
   assert.deepEqual(a.pdpDaily, b.pdpDaily);
 });
 
-test('purchase path: punched by the backend agent = agent; store team ONLINE = video consult; cash & carry = store visit', () => {
+test('purchase path: ONLINE punch-in = video consult; cash & carry = store visit (agent branch removed from the flow)', () => {
   const s2 = (id, d, store, emp, type) => ({ ...sale(id, '9000000001', d, store, 1000), 'Employee Name': emp, 'Order Type': type });
   const m = run({
     callbacks: [cb('1000000000000000001', '9000000001', '2026-10-08T11:00:00+05:30', 'SkyCity Mall, Mumbai', 'Connected', { own: 'Raj B' })],
     salesRows: [s2('A', '09/10/2026', 'FRIDO_0010', 'Raj Bhardwaj', 'ONLINE'), s2('B', '10/10/2026', 'FRIDO_0010', 'Store Staff', 'RETAIL'), s2('C', '11/10/2026', 'FRIDO_0010', '', 'ONLINE')],
   });
-  assert.deepEqual(m.call.attributed.map((x) => [x.path, x.pb, x.ag]), [['agent', 'agent', 'Raj B'], ['store', 'retail', 'Raj B'], ['video', 'online', 'Raj B']]);
+  assert.deepEqual(m.call.attributed.map((x) => [x.path, x.pb, x.ag]), [['video', 'online', 'Raj B'], ['store', 'retail', 'Raj B'], ['video', 'online', 'Raj B']]);
   assert.equal(m.call.leads[0].ag, 'Raj B');
   assert.deepEqual(m.agents, ['Raj B']);
 });
