@@ -44,12 +44,11 @@ const hamming1 = (a, b) => { if (!a || !b || a.length !== b.length || a === b) r
 const nameKey = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 6);
 
 // Backend agents: every lead is owned by the backend agent who works it (Bigin owner / LimeChat first assignee).
-// Final flow (Whimsical "Frido PDP lead funnel and store routing", Oct 2026) — a qualified lead converts one of three ways:
-//   agent  = order punched on DevX by the backend agent (DevX employee = a backend agent)
+// Final flow (Whimsical "Frido PDP lead funnel and store routing", updated 21 Oct 2026) — a qualified lead converts two ways:
 //   store  = agent routes the lead to a store on the WhatsApp DSR group → customer visits → bill by store staff
 //   video  = video consult with the store team → order placed by the store team
-// Purchase path (proposed, pending sign-off): employee = backend agent → "agent"; else ONLINE punch-in → "video"
-// (store team placing a remote order); else cash & carry → "store". pb = basis: agent | online | retail.
+// (The earlier "order punched by backend agent" branch was removed from the flow.)
+// Purchase path (proposed, pending sign-off): ONLINE punch-in → "video"; cash & carry → "store". pb = basis: online | retail.
 const agentKey = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, ' ').trim().split(/\s+/).filter(Boolean);
 export function isAgentName(emp, agents) {
   const e = agentKey(emp); if (!e.length) return false;
@@ -103,7 +102,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
     if (!inRange(x.d)) continue;
     const ageD = daysBetween(x.d, cutoff);
     leads.push({
-      i: x.id.slice(-6), d: x.d, s: x.s, st: x.st, g: x.g, dup, near, ag: x.ag || '',
+      i: x.id.slice(-6), d: x.d, s: x.s, st: x.st, g: x.g, dup, near, ag: x.ag || '', cons: x.st && x.st !== 'Yet to Call' ? 1 : 0, // consumed = moved past Yet to Call
       prod: x.prod ? 1 : 0, cat: x.cat || (x.prod ? categoryOf(x.prod.split(' || ')[0]) : ''), utm: x.utm ? 1 : 0,
       lostNoReason: x.g === 'lost' && !x.lr ? 1 : 0, lr: x.lr || '',
       stale: x.g === 'notCalled' && ageD >= 2 ? 1 : 0, ageD,
@@ -114,8 +113,8 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
 
   // ---------- Attribution: order on/after the unique lead date, same phone, any store ----------
   const agents = [...new Set([...raw.map((x) => x.ag).filter(Boolean), ...(LC ? LC.tickets.map((x) => x.fa).filter(Boolean) : []), ...backendAgents])];
-  const pathOf = (o) => (o.emp && isAgentName(o.emp, agents) ? 'agent' : o.type === 'ONLINE' ? 'video' : 'store');
-  const pathBasis = (o) => (o.emp && isAgentName(o.emp, agents) ? 'agent' : o.type === 'ONLINE' ? 'online' : 'retail');
+  const pathOf = (o) => (o.type === 'ONLINE' ? 'video' : 'store');
+  const pathBasis = (o) => (o.type === 'ONLINE' ? 'online' : 'retail');
   // Lead routing sheet (store routing from the WhatsApp DSR group). Routed phone → earliest routing date.
   const RT = routingRows ? standardiseRouting(routingRows, { storeOf: (l) => storeFromWeb(l), cutoff }) : null;
   const routedOn = (p, d) => (RT && p && RT.firstByPhone.has(p) && RT.firstByPhone.get(p).d <= d ? 1 : 0);
@@ -153,7 +152,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
     const mask = (n) => String(n || '').replace(/\d{7,}/g, '#').slice(0, 120);
     text = {
       source: 'LimeChat export (WhatsApp inbox FES - WA - Karix - 9096417888)', start: LC.tickets[0]?.d || null, end: LC.tickets[LC.tickets.length - 1]?.d || null,
-      tickets: LC.tickets.filter((x) => inRange(x.d)).map((x) => ({ i: x.id, d: x.d, st: x.stage, raw: x.status, ho: x.ho ? 1 : 0, ag: x.fa, ca: x.ca, am: x.am ? 1 : 0, oc: x.oc, note: mask(x.note), entry: x.entry, pdp: x.pdp, s: x.store || 'UNMAPPED', intent: x.intent, svc: x.svc ? 1 : 0, dup: x.dup ? 1 : 0, ooh: x.ooh ? 1 : 0, ma: x.minsToAssign, mm: x.minsToAgentMsg, l1: x.l1, fl: x.flags, last: x.lastBy, rnr: x.rnrVariant, ageD: daysBetween(x.d, cutoff), call: x.phone && callPhones.has(x.phone) ? 1 : 0 })),
+      tickets: LC.tickets.filter((x) => inRange(x.d)).map((x) => ({ i: x.id, d: x.d, st: x.stage, raw: x.status, ho: x.ho ? 1 : 0, ag: x.fa, ca: x.ca, am: x.am ? 1 : 0, oc: x.oc, note: mask(x.note), entry: x.entry, pdp: x.pdp, s: x.store || 'UNMAPPED', intent: x.intent, svc: x.svc ? 1 : 0, dup: x.dup ? 1 : 0, ooh: x.ooh ? 1 : 0, ma: x.minsToAssign, mm: x.minsToAgentMsg, mr: x.minsToReply, l1: x.l1, fl: x.flags, last: x.lastBy, rnr: x.rnrVariant, ageD: daysBetween(x.d, cutoff), call: x.phone && callPhones.has(x.phone) ? 1 : 0 })),
       attributed: tAttr, gaps: coverageGaps(LC.tickets),
     };
   }
