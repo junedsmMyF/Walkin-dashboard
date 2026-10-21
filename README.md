@@ -27,7 +27,7 @@ Keep both Google Sheets **published to the web as CSV** (File → Share → Publ
 
 ## Metric rules (agreed Sep 2026)
 
-| Rule | Definition |
+| Rule | Definition | 
 |---|---|
 | Start date | 1 Sep 2026; every metric cut at yesterday (T-1) |
 | Walk-ins | DSR `New Walk-ins + Other Walk-ins`, latest submission per store per date (even if zero), never summed |
