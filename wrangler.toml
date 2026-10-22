@@ -3,6 +3,8 @@ main = "src/index.js"
 compatibility_date = "2026-09-01"
 account_id = "64cd065d47d134cf62ccfb35bd874af9"
 workers_dev = true
+# Keep variables set in the Cloudflare dashboard on deploy (a deploy wiped LIMECHAT_CSV_URL / ROUTING_CSV_URL on 22 Oct 2026).
+keep_vars = true
 
 [assets]
 directory = "./public"
