@@ -672,7 +672,7 @@ function crumbs(list){
 
 /* ---------- Live data (Cloudflare Worker /api/metrics — aggregated, no customer data) ---------- */
 let DATA = null, DATA_ERR = null, LOADING = false;
-const F = { rcamp: 'all', rcity: 'all', rprod: 'net', oFrom: null, oTo: null, oLabel: null, mtype: 'all', mcity: 'all', mstore: 'all', mleads: 'net', range: 'mtd', format: 'all', city: 'all', store: 'all', cta: 'all', ex: {}, cx: {}, rev: 'net', cmp: 'prev', day: 'all', from: null, to: null, crf: '1', dpLabel: null };
+const F = { rcamp: 'all', rprod: 'net', oFrom: null, oTo: null, oLabel: null, mtype: 'all', mcity: 'all', mstore: 'all', mleads: 'net', range: 'mtd', format: 'all', city: 'all', store: 'all', cta: 'all', ex: {}, cx: {}, rev: 'net', cmp: 'prev', day: 'all', from: null, to: null, crf: '1', dpLabel: null };
 const dayOk = (d) => F.day === 'all' || (F.day === 'weekend' ? ((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7) >= 5 : ((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7) < 5);
 async function loadData(force){
   if (LOADING || (DATA && !force)) return;
@@ -1046,6 +1046,24 @@ function wlFilters(){
     <span class="wl-note" style="align-self:center">${dpShort(r[0])} → ${dpShort(r[1])}</span>
   </div>`;
 }
+// Walk-in filter set reused by PDP and Retail retention (capture rate is walk-in only)
+function sharedFilters(storeList){
+  const st = storeList.filter((s) => s.id !== 'UNMAPPED');
+  const cities = [...new Set(st.map((s) => s.city))].sort();
+  const stores = st.filter((s) => (F.format === 'all' || s.format === F.format) && (F.city === 'all' || s.city === F.city)).sort((a, b) => a.name.localeCompare(b.name));
+  const opt = (v, l, cur, dis) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''} ${dis ? 'disabled' : ''}>${esc(l)}</option>`;
+  const seg = ['all', 'Mall', 'High street'].map((f) => `<button type="button" data-seg="${f}" class="${F.format === f ? 'on' : ''}">${f === 'all' ? 'All' : f}</button>`).join('');
+  return {
+    format: `<div class="wl-fl">STORE FORMAT<div class="wl-seg" role="group" aria-label="Store format">${seg}</div></div>`,
+    city: `<label class="wl-fl">CITY<select data-f="city">${opt('all', `All ${cities.length} cities`, F.city)}${cities.map((c) => opt(c, c, F.city)).join('')}</select></label>`,
+    store: `<label class="wl-fl">STORE<select data-f="store">${opt('all', 'All stores', F.store)}${stores.map((s) => opt(s.id, s.name, F.store)).join('')}</select></label>`,
+    rest: `<label class="wl-fl">COMPARE TO<select data-f="cmp">${opt('prev', 'Previous period', F.cmp)}${opt('lastmonth', 'Same days last month', F.cmp)}${opt('target', 'Target (awaiting targets)', F.cmp, true)}</select></label>
+    <label class="wl-fl">DAY TYPE<select data-f="day">${opt('all', 'All days', F.day)}${opt('weekday', 'Weekday', F.day)}${opt('weekend', 'Weekend', F.day)}</select></label>
+    <label class="wl-fl">REVENUE<select data-f="rev">${opt('net', 'Total Revenue', F.rev)}${opt('gross', 'Gross', F.rev)}</select></label>`,
+  };
+}
+// Total Revenue / Gross switch for row data that carries both: `net` is swapped in place, the original kept in n0
+function applyRev(arrs){ const g = F.rev === 'gross'; for (const a of arrs) for (const x of a || []) { if (x.n0 === undefined) x.n0 = x.net; x.net = g && x.gross != null ? x.gross : x.n0; } }
 function pageWalkIn(tab){
   if (!WTABS.find((t) => t.id === tab)) tab = 'overview';
   const tabName = WTABS.find((t) => t.id === tab).name;
@@ -1471,10 +1489,10 @@ const pcard = (title, sub, body, badge = '', right = '') => `<section class="wl-
 
 // ---------- range & filters ----------
 const pStore = (id) => (PDATA?.stores || []).find((s) => s.id === id) || { name: id, city: '—' };
-const pStoreOk = (id) => { if (F.store !== 'all') return id === F.store; if (F.city !== 'all') return pStore(id).city === F.city; return true; };
+const pStoreOk = (id) => { if (F.store !== 'all') return id === F.store; const s = pStore(id); if (F.format !== 'all' && s.format !== F.format) return false; if (F.city !== 'all') return s.city === F.city; return true; };
 function pRange(){ const r = rangeOf(F.range); const s = PDATA.startDate; if (r[1] < s) return null; return [r[0] < s ? s : r[0], r[1] > PDATA.cutoff ? PDATA.cutoff : r[1]]; }
-function pPrev(r){ if (!r) return null; const len = dDiff(r[0], r[1]) + 1; const pb = dAdd(r[0], -1), pa = dAdd(r[0], -len); if (pb < PDATA.startDate) return null; return [pa < PDATA.startDate ? PDATA.startDate : pa, pb]; }
-const inPR = (d, r) => r && d >= r[0] && d <= r[1];
+function pPrev(r){ if (!r) return null; if (F.cmp === 'lastmonth') { const p = prevOf(r); return p && p[1] >= PDATA.startDate ? [p[0] < PDATA.startDate ? PDATA.startDate : p[0], p[1]] : null; } const len = dDiff(r[0], r[1]) + 1; const pb = dAdd(r[0], -1), pa = dAdd(r[0], -len); if (pb < PDATA.startDate) return null; return [pa < PDATA.startDate ? PDATA.startDate : pa, pb]; }
+const inPR = (d, r) => r && d >= r[0] && d <= r[1] && dayOk(d); // day type (weekday / weekend) applies everywhere
 // CTA (entry point) toggle — applies to every PDP page except the CTA comparison itself
 const ctaOk = (entry) => F.cta === 'all' || F.cta === (entry || 'generic');
 const callOn = () => ctaOk('call_popup');
@@ -1584,15 +1602,12 @@ function pHeader(tab){
   <nav class="wl-tabs" aria-label="Dashboard pages">${PTABS.map((t) => `<a class="wl-tab ${t.id === tab ? 'on' : ''} ${t.id === 'definitions' ? 'aux' : ''}" href="#/retail/pdp/${t.id}" ${t.id === tab ? 'aria-current="page"' : ''}>${t.name}</a>`).join('')}</nav>`;
 }
 function pFilters(){
-  const st = PDATA.stores.filter((s) => s.id !== 'UNMAPPED');
-  const cities = [...new Set(st.map((s) => s.city))].sort();
-  const stores = st.filter((s) => F.city === 'all' || s.city === F.city).sort((a, b) => a.name.localeCompare(b.name));
-  const opt = (v, l, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`;
+  const sf = sharedFilters(PDATA.stores);
   const r = pRange(), full = rangeOf(F.range);
   return `<div class="wl-filters">
+    ${sf.format}
     <div class="wl-fl">DATE RANGE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
-    <label class="wl-fl">CITY<select data-f="city">${opt('all', `All ${cities.length} cities`, F.city)}${cities.map((c) => opt(c, c, F.city)).join('')}</select></label>
-    <label class="wl-fl">STORE<select data-f="store">${opt('all', 'All stores', F.store)}${stores.map((s) => opt(s.id, s.name, F.store)).join('')}</select></label>
+    ${sf.city}${sf.store}${sf.rest}
     <span class="wl-note" style="align-self:center">${r ? `${dpShort(r[0])} → ${dpShort(r[1])}` : 'No PDP data in this range'}${full[0] < PDATA.startDate ? ` · call leads start ${dpShort(PDATA.startDate)}` : ''}</span>
   </div>${r ? ctaBar(r) : ''}`;
 }
@@ -1603,6 +1618,7 @@ function ctaBar(r){
   return `<div class="ctabar" role="group" aria-label="CTA type"><span class="wl-fl" style="margin:0">CTA</span><div class="wl-seg">${keys.map((k) => `<button type="button" data-cta="${k}" class="${F.cta === k ? 'on' : ''}" aria-pressed="${F.cta === k}">${ENTRY_SHORT[k]}${k === 'all' ? ` <span>${nf(e.U)}</span>` : n[k] ? ` <span>${nf(n[k])}</span>` : ''}</button>`).join('')}</div>${F.cta !== 'all' ? `<span class="wl-note">Every number below is for <b>${ENTRY_SHORT[F.cta]}</b> leads only · ${ENTRY[F.cta][1]}</span>` : ''}</div>`;
 }
 function pagePdp(tab){
+  if (PDATA) applyRev([PDATA.call?.attributed, PDATA.call?.lines, PDATA.call?.salesDaily, PDATA.call?.products, PDATA.text?.attributed, PDATA.routing?.routes]);
   if (!PTABS.find((t) => t.id === tab)) tab = 'journey';
   const tabName = PTABS.find((t) => t.id === tab).name;
   const crumb = crumbs([['Founders Office', '#/'], ['Retail Revenue', '#/retail'], ['PDP inventories', '#/retail/pdp/journey'], [tabName, '#']]);
@@ -2163,7 +2179,7 @@ function pDefs(){
   return pcard('Customer journey', 'Lead funnel: PDP → capture → agent → follow-up → qualified? → outcome · after qualification: store visit, video consult or agent-punched order', map) + wh + `<div class="wl-g2">${pcard('Definitions', '', rules)}${pcard('Rules to sign off', 'Proposed for v1', open)}</div>`;
 }
 function pdpAllNet(){ return allAttributed(false).filter((x) => x.d >= PDATA.startDate && x.d <= PDATA.cutoff).reduce((u, x) => u + x.net, 0); }
-function pdpStatsLine(){ if (!PDATA) return 'Loading'; const keep = [F.city, F.store, F.cta]; F.city = 'all'; F.store = 'all'; F.cta = 'all'; const R = [PDATA.startDate, PDATA.cutoff]; const a = callAgg(R), t = textAgg(R); [F.city, F.store, F.cta] = keep; return `Leads <b>${nf(a.unique + t.unique)}</b> (call ${nf(a.unique)} · WhatsApp ${nf(t.unique)}) · Bought <b>${nf(a.purchased + t.purchased)}</b> · Revenue <b>${inr(pdpAllNet())}</b>`; }
+function pdpStatsLine(){ if (!PDATA) return 'Loading'; const keep = [F.city, F.store, F.cta, F.format, F.day]; F.city = 'all'; F.store = 'all'; F.cta = 'all'; F.format = 'all'; F.day = 'all'; const R = [PDATA.startDate, PDATA.cutoff]; const a = callAgg(R), t = textAgg(R); [F.city, F.store, F.cta, F.format, F.day] = keep; return `Leads <b>${nf(a.unique + t.unique)}</b> (call ${nf(a.unique)} · WhatsApp ${nf(t.unique)}) · Bought <b>${nf(a.purchased + t.purchased)}</b> · Revenue <b>${inr(pdpAllNet())}</b>`; }
 
 /* ---------- Meta ads module (Lead Gen = Bigin live · CTWA, spend, revenue = sample until connected) ---------- */
 const MTABS = [
@@ -2540,7 +2556,7 @@ const META = (() => {
 })();
 
 /* ---------- Retail retention module (offer broadcasts → retail store orders · sample until the LimeChat broadcast report is connected) ---------- */
-const RTABS = [{ id: 'overview', name: 'Overview' }, { id: 'stores', name: 'Stores' }, { id: 'definitions', name: 'Flow & definitions' }];
+const RTABS = [{ id: 'overview', name: 'Overview' }, { id: 'revenue', name: 'Revenue' }, { id: 'definitions', name: 'Flow & definitions' }];
 let RDATA = null, RDATA_ERR = null, RLOADING = false;
 async function loadRet(force){
   if (RLOADING || (RDATA && !force)) return;
@@ -2556,6 +2572,12 @@ const RET = (() => {
     'Read': ['Read Status = Read. Only read leads get orders.', 'LimeChat broadcast export'],
     'Orders': ['Store orders from read leads, day 0–60.', 'DevX × broadcast, phone match'],
     'Revenue': ['Credited orders, gross − discount.', 'DevX (BigQuery)'],
+    'Units': ['Units on credited orders.', 'DevX (BigQuery)'],
+    'AOV': ['Revenue ÷ orders.', 'DevX (BigQuery)'],
+    'UPT': ['Units ÷ orders.', 'DevX (BigQuery)'],
+    'Discount': ['1 − revenue ÷ gross.', 'DevX (BigQuery)'],
+    'Revenue per day': ['Revenue ÷ days in the window.', 'DevX (BigQuery)'],
+    'Top category': ['Category with the most revenue.', 'DevX (BigQuery)'],
     'Conversion rate': ['Orders ÷ delivered.', 'DevX × broadcast'],
     'Spend': ['₹0.85 per delivered message.', 'LimeChat broadcast export'],
     'ROAS': ['Revenue ÷ spend.', 'DevX × broadcast'],
@@ -2571,10 +2593,12 @@ const RET = (() => {
 
   /* ---------- range & filters: campaigns whose run date falls in the range ---------- */
   function rRange(){ const r = rangeOf(F.range); return [r[0], r[1] > RDATA.cutoff ? RDATA.cutoff : r[1]]; }
-  const cityOk = (id) => F.rcity === 'all' || store(id).city === F.rcity;
+  // walk-in filters: store format / city / store on the home store (recipients) or the billing store (orders)
+  const storeOk = (id) => { if (F.store !== 'all') return id === F.store; const s = RDATA.stores.find((x) => x.id === id); if (!s) return F.format === 'all' && F.city === 'all'; if (F.format !== 'all' && s.format !== F.format) return false; return F.city === 'all' || s.city === F.city; };
   const inR = (x, r) => x.run >= r[0] && x.run <= r[1] && (F.rcamp === 'all' || String(x.c) === F.rcamp);
-  const recs = (r) => RDATA.recipients.filter((x) => inR(x, r) && cityOk(x.hs));
-  const cred = (r) => RDATA.credited.filter((x) => inR(x, r) && cityOk(x.s));
+  const recs = (r) => RDATA.recipients.filter((x) => inR(x, r) && storeOk(x.hs));
+  const oOk = (x) => (!F.oFrom || (x.d >= F.oFrom && x.d <= F.oTo)) && dayOk(x.d); // order placed in the picked window · day type on the order date
+  const cred = (r, all) => RDATA.credited.filter((x) => inR(x, r) && storeOk(x.s) && (all || oOk(x)));
   function agg(R, O){
     const a = { n: 0, sent: 0, failed: 0, del: 0, read: 0, rep: 0, clk: 0, buy: 0, repBuy: 0 };
     R.forEach((x) => { for (const k in a) a[k] += x[k] || 0; });
@@ -2594,31 +2618,18 @@ const RET = (() => {
   function filters(r){
     const opt = (v, l, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`;
     const camps = RDATA.campaigns.filter((c) => c.last >= r[0] && c.first <= r[1]);
-    const cities = [...new Set(RDATA.stores.map((s) => s.city))].sort();
+    const sf = sharedFilters(RDATA.stores);
     return `<div class="wl-filters">
+      ${sf.format}
       <div class="wl-fl">CAMPAIGN RUN DATE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
       <label class="wl-fl">CAMPAIGN<select data-f="rcamp">${opt('all', `All campaigns (${camps.length})`, F.rcamp)}${camps.map((c) => opt(String(c.i), c.name, F.rcamp)).join('')}</select></label>
-      <label class="wl-fl">CITY<select data-f="rcity">${opt('all', 'All cities', F.rcity)}${cities.map((c) => opt(c, c, F.rcity)).join('')}</select></label>
+      ${sf.city}${sf.store}${sf.rest}
       <span class="wl-note" style="align-self:center">Campaigns run ${dpShort(r[0])} → ${dpShort(r[1])} · orders counted to ${dpShort(RDATA.cutoff)}</span>
     </div>`;
   }
 
   /* ---------- shared pieces ---------- */
   const spendOf = (a) => a.del * RDATA.costPerDelivered;
-  function flowCard(a){
-    const box = (t, s, cl = '') => `<div class="fbox ${cl}"><b>${t}</b><span>${s}</span></div>`;
-    const ar = '<span class="wl-arrow" aria-hidden="true">→</span>';
-    return card('Campaign flow', 'From offer to retention revenue · counts for this view', `<div class="flow">
-      <div class="flow-row"><span class="flow-tag">Set-up</span>${box('Exclusive offer', 'e.g. Diwali', 'lead')}${ar}${box('Creatives', 'From the retention team', 'lead')}${ar}${box('Campaign flow', 'Built on LimeChat', 'lead')}${ar}${box('Broadcast', 'Existing retail customers', 'lead')}</div>
-      <div class="flow-row"><span class="flow-tag">Reach</span>${box(nf(a.n) + ' messages', `${nf(a.failed)} failed`)}${ar}${box(nf(a.sent) + ' sent', pct(a.sent, a.n, 0) + ' of messages')}${ar}${box(nf(a.del) + ' delivered', pct(a.del, a.n, 0) + ' of messages')}${ar}${box(nf(a.read) + ' read', pct(a.read, a.del, 0) + ' of delivered')}</div>
-      <div class="flow-row"><span class="flow-tag">Revenue</span>${box('Store order', `Read leads only · day 0–${RDATA.windowDays}`)}${ar}${box(nf(a.orders) + ' orders · ' + inr(a.net), `ROAS ${spendOf(a) ? (a.net / spendOf(a)).toFixed(1) + '×' : '—'} on ${inr(spendOf(a))} spend`, 'rev')}</div>
-    </div>`, smp());
-  }
-  function funnel(a){
-    const steps = [['Total messages', a.n, 'In the broadcast'], ['Sent', a.sent, 'Not failed'], ['Delivered', a.del, 'On WhatsApp'], ['Read', a.read, 'Eligible for credit'], ['Bought', a.buyers, 'Read lead with a store order']];
-    return `<div class="wl-rank" style="grid-template-columns:minmax(110px,150px) minmax(0,1fr) 70px"><span class="wl-colhead">STAGE</span><span class="wl-colhead">CUSTOMERS</span><span class="wl-colhead" style="text-align:right">OF PREV.</span>` +
-      steps.map(([l, v, s], i) => `<div><span class="wl-sn">${l}</span><span class="wl-sm">${s}</span></div><div style="display:flex;align-items:center;gap:8px"><div class="wl-track"><div class="wl-fill" style="width:${100 * v / (a.n || 1)}%;background:${i === 4 ? C.rust : C.teal}"></div></div><span class="wl-val">${nf(v)}</span></div><span style="font-size:13px;text-align:right;font-variant-numeric:tabular-nums">${i ? pct(v, steps[i - 1][1], i === 4 ? 1 : 0) : '100%'}</span>`).join('') + `</div>`;
-  }
   const BUCKETS = [['Day 0', 0, 0], ['1–3', 1, 3], ['4–7', 4, 7], ['8–14', 8, 14], ['15–30', 15, 30], ['31–60', 31, 60]];
   function lagCard(O){
     const F1 = O.filter((x) => x.first); const n = F1.length; let cum = 0;
@@ -2628,12 +2639,12 @@ const RET = (() => {
   function failCard(r){
     const by = {}; RDATA.fails.filter((x) => x.run >= r[0] && x.run <= r[1] && (F.rcamp === 'all' || String(x.c) === F.rcamp)).forEach((x) => { by[x.why] = (by[x.why] || 0) + x.n; });
     const rows = Object.entries(by).sort((x, y) => y[1] - x[1]); const tot = rows.reduce((s, x) => s + x[1], 0); const mx = Math.max(1, ...rows.map((x) => x[1]));
-    return card('Why messages failed', `${nf(tot)} failed messages · WhatsApp error reason${F.rcity !== 'all' ? ' · all cities' : ''}`, rows.length ? `<div class="wl-rank" style="grid-template-columns:minmax(150px,240px) minmax(0,1fr) 60px 44px">` + rows.map(([k, n]) => `<span class="wl-sn" style="white-space:normal">${esc(k)}</span><div class="wl-track"><div class="wl-fill" style="width:${100 * n / mx}%;background:${C.rust}"></div></div><span class="wl-val">${nf(n)}</span><span style="text-align:right;font-size:12px;color:#5B6068">${pct(n, tot, 0)}</span>`).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No failed messages in this view.</p>', smp());
+    return card('Why messages failed', `${nf(tot)} failed messages · WhatsApp error reason${F.city !== 'all' || F.store !== 'all' || F.format !== 'all' ? ' · all stores' : ''}`, rows.length ? `<div class="wl-rank" style="grid-template-columns:minmax(150px,240px) minmax(0,1fr) 60px 44px">` + rows.map(([k, n]) => `<span class="wl-sn" style="white-space:normal">${esc(k)}</span><div class="wl-track"><div class="wl-fill" style="width:${100 * n / mx}%;background:${C.rust}"></div></div><span class="wl-val">${nf(n)}</span><span style="text-align:right;font-size:12px;color:#5B6068">${pct(n, tot, 0)}</span>`).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No failed messages in this view.</p>', smp());
   }
   function campaignRows(r){
     return RDATA.campaigns.filter((cp) => (F.rcamp === 'all' || String(cp.i) === F.rcamp)).map((cp) => {
-      const R = RDATA.recipients.filter((x) => x.c === cp.i && x.run >= r[0] && x.run <= r[1] && cityOk(x.hs)); if (!R.length) return null;
-      const O = RDATA.credited.filter((x) => x.c === cp.i && x.run >= r[0] && x.run <= r[1] && cityOk(x.s)); const a = agg(R, O);
+      const R = RDATA.recipients.filter((x) => x.c === cp.i && x.run >= r[0] && x.run <= r[1] && storeOk(x.hs)); if (!R.length) return null;
+      const O = RDATA.credited.filter((x) => x.c === cp.i && x.run >= r[0] && x.run <= r[1] && storeOk(x.s) && oOk(x)); const a = agg(R, O);
       const age = dDiff(cp.last, RDATA.cutoff); const left = dDiff(RDATA.cutoff, cp.closes);
       const by = (k) => age < k ? null : pctv(O.filter((x) => x.first && x.lag <= k).length, a.del);
       return { cp, name: cp.name, a, d7: by(7), d14: by(14), d30: by(30), d60: by(60), left, R };
@@ -2648,8 +2659,8 @@ const RET = (() => {
     if (!data.length) return card('Broadcast performance', '', '<p class="sub" style="margin-top:14px">No broadcast ran in this range.</p>');
     const head = `<tr><th>Broadcast</th><th>Sent at</th><th class="r">Total messages</th><th class="r">Sent</th><th class="r">Delivered</th><th class="r">Failed</th><th class="r">Read</th><th class="r">Orders</th><th class="r">Qty</th><th class="r">Revenue</th><th class="r">Conversion</th><th class="r">Spend</th><th class="r">ROAS</th><th class="r">AOV</th><th class="r">UPT</th><th>Window</th></tr>`;
     const row = (x) => { const many = x.cp.waves.length > 1; return `<tr ${full && many ? `data-rex="c${x.cp.i}" tabindex="0" style="cursor:pointer"` : ''}><td class="b">${full && many ? (EX['c' + x.cp.i] ? '▾ ' : '▸ ') : ''}${esc(x.name)}</td><td>${dpShort(x.cp.first)}${many ? ` · ${x.cp.waves.length} waves` : ''}</td>${perf(x.a)}<td>${status(x)}</td></tr>` +
-      (full && EX['c' + x.cp.i] ? x.cp.waves.filter((w) => w.d >= r[0] && w.d <= r[1]).map((w) => { const R = x.R.filter((y) => y.run === w.d), O = RDATA.credited.filter((y) => y.c === x.cp.i && y.run === w.d && cityOk(y.s)); return `<tr style="background:#FAF9F5"><td style="padding-left:28px">Wave</td><td>${dpShort(w.d)}</td>${perf(agg(R, O))}<td>Closes ${dpShort(dAdd(w.d, RDATA.windowDays)).replace(/ \d{4}$/, '')}</td></tr>`; }).join('') : ''); };
-    const tot = agg(data.flatMap((x) => x.R), data.flatMap((x) => RDATA.credited.filter((y) => y.c === x.cp.i && y.run >= r[0] && y.run <= r[1] && cityOk(y.s))));
+      (full && EX['c' + x.cp.i] ? x.cp.waves.filter((w) => w.d >= r[0] && w.d <= r[1]).map((w) => { const R = x.R.filter((y) => y.run === w.d), O = RDATA.credited.filter((y) => y.c === x.cp.i && y.run === w.d && storeOk(y.s) && oOk(y)); return `<tr style="background:#FAF9F5"><td style="padding-left:28px">Wave</td><td>${dpShort(w.d)}</td>${perf(agg(R, O))}<td>Closes ${dpShort(dAdd(w.d, RDATA.windowDays)).replace(/ \d{4}$/, '')}</td></tr>`; }).join('') : ''); };
+    const tot = agg(data.flatMap((x) => x.R), data.flatMap((x) => RDATA.credited.filter((y) => y.c === x.cp.i && y.run >= r[0] && y.run <= r[1] && storeOk(y.s) && oOk(y))));
     const total = data.length > 1 ? `<tr style="background:#FFF6CC;font-weight:600"><td class="b">Total</td><td></td>${perf(tot)}<td></td></tr>` : '';
     return card('Broadcast performance', `Orders from delivered + read leads only · conversion = orders ÷ delivered · spend = ₹${RDATA.costPerDelivered} × delivered${full ? ' · click a multi-wave broadcast for its waves' : ''}`, `<div class="wl-tw"><table><thead>${head}</thead><tbody>${data.map(row).join('')}${total}</tbody></table></div>`, smp());
   }
@@ -2662,53 +2673,46 @@ const RET = (() => {
   }
 
   /* ---------- pages ---------- */
+  function orderBar(note){
+    const lbl = F.oFrom ? (F.oLabel || `${dpShort(F.oFrom)} → ${dpShort(F.oTo)}`) : 'All order dates';
+    return `<div class="wl-filters" style="margin-top:-4px">
+      <div class="wl-fl">ORDER PLACED<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open="ord" aria-haspopup="dialog" aria-expanded="${DP.open && DP.tgt === 'ord'}">${esc(lbl)}</button><div id="dpHostOrd"></div></div></div>
+      ${F.oFrom ? '<button type="button" class="wl-btn" data-roclear style="min-height:32px;padding:4px 12px;font-size:12px;align-self:flex-end">All order dates</button>' : ''}
+      <span class="wl-note" style="align-self:center">${note}</span>
+    </div>`;
+  }
   function pOverview(r){
     const c = ctx(r), a = c.a, sp = spendOf(a);
+    const pr = prevOf(r); const b = pr ? ctx(pr).a : null; const spB = b ? spendOf(b) : null;
+    const dl = (cur, prev, o) => wdelta(cur, prev, { short: true, ...o });
+    const D = { n: dl(a.n, b?.n), del: dl(a.del, b?.del), read: dl(a.read, b?.read), orders: dl(a.orders, b?.orders), net: dl(a.net, b?.net), conv: dl(pctv(a.orders, a.del), b ? pctv(b.orders, b.del) : null, { pts: true }), sp: dl(sp, spB), roas: dl(sp ? a.net / sp : null, spB ? b.net / spB : null) };
     const kp = kpis([
-      { l: 'Total messages', v: nf(a.n), d: `${nf(a.sent)} sent`, s: `${nf(a.failed)} failed · ${pct(a.failed, a.n, 0)}`, b: smp() },
-      { l: 'Delivered', v: nf(a.del), d: pct(a.del, a.n, 0) + ' of messages', s: 'On WhatsApp', b: smp() },
-      { l: 'Read', v: nf(a.read), d: pct(a.read, a.del, 0) + ' of delivered', s: 'Only these get credit', b: smp() },
-      { l: 'Orders', v: nf(a.orders), d: `${nf(a.qty)} units`, s: `${nf(a.buyers)} buyers`, b: smp() },
-      { l: 'Revenue', v: inr(a.net), d: `AOV ${a.orders ? inr(a.net / a.orders) : '—'}`, s: `UPT ${a.orders ? (a.qty / a.orders).toFixed(1) : '—'}`, b: smp() },
-      { l: 'Conversion rate', v: pct(a.orders, a.del), d: 'orders ÷ delivered', s: `${pct(a.orders, a.read)} of read`, b: smp() },
-      { l: 'Spend', v: inr(sp), d: `₹${RDATA.costPerDelivered} × delivered`, s: `${nf(a.del)} delivered`, b: smp() },
-      { l: 'ROAS', v: roas(a), d: 'revenue ÷ spend', s: a.orders ? `${inr(sp / a.orders)} per order` : '—', tone: sp && a.net >= sp ? 'good' : 'flat', b: smp() },
+      { l: 'Total messages', v: nf(a.n), d: D.n.d, tone: D.n.tone, s: `${nf(a.sent)} sent · ${nf(a.failed)} failed`, b: smp() },
+      { l: 'Delivered', v: nf(a.del), d: D.del.d, tone: D.del.tone, s: pct(a.del, a.n, 0) + ' of messages', b: smp() },
+      { l: 'Read', v: nf(a.read), d: D.read.d, tone: D.read.tone, s: pct(a.read, a.del, 0) + ' of delivered', b: smp() },
+      { l: 'Orders', v: nf(a.orders), d: D.orders.d, tone: D.orders.tone, s: `${nf(a.qty)} units · ${nf(a.buyers)} buyers`, b: smp() },
+      { l: 'Revenue', v: inr(a.net), d: D.net.d, tone: D.net.tone, s: `AOV ${a.orders ? inr(a.net / a.orders) : '—'} · UPT ${a.orders ? (a.qty / a.orders).toFixed(1) : '—'}`, b: smp() },
+      { l: 'Conversion rate', v: pct(a.orders, a.del), d: D.conv.d, tone: D.conv.tone, s: 'Orders ÷ delivered', b: smp() },
+      { l: 'Spend', v: inr(sp), d: D.sp.d, tone: 'flat', s: `₹${RDATA.costPerDelivered} × delivered`, b: smp() },
+      { l: 'ROAS', v: roas(a), d: D.roas.d, tone: D.roas.tone, s: 'Revenue ÷ spend', b: smp() },
     ]);
     const data = campaignRows(r);
     const cols = [['Day 7', 'd7'], ['Day 14', 'd14'], ['Day 30', 'd30'], ['Day 60', 'd60']];
     const mx = Math.max(1, ...data.flatMap((x) => cols.map(([, k]) => x[k] || 0)));
     const cohort = card('Conversion by days since run', 'Buyers ÷ delivered by day N · blank = not reached yet', data.length ? `<div class="wl-heat" style="grid-template-columns:minmax(140px,220px) repeat(4,minmax(0,1fr))"><span></span>${cols.map(([l]) => `<span class="wl-hh">${l}</span>`).join('')}` + data.map((x) => `<span class="wl-hn">${esc(x.name)}</span>` + cols.map(([, k]) => x[k] == null ? '<div class="wl-cell wl-na">—</div>' : `<div class="wl-cell" style="${heatBg(x[k], mx)}">${pctTxt(x[k])}</div>`).join('')).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No broadcast ran in this range.</p>', smp());
-    return kp + campaignTable(r, true) + `<div class="wl-g2">${roasChart(r)}${card('Message funnel', 'Customers at each step', funnel(a), smp())}</div>` +
-      revenueAnalysis(c) +
-      `<p class="wl-colhead" style="margin:22px 0 0">TIMING &amp; DELIVERY</p><div class="wl-g2">${lagCard(c.O)}${cohort}</div>` + failCard(r) + flowCard(a);
-  }
-  function pStores(r){
-    const c = ctx(r);
-    const bill = {}, home = {};
-    c.O.forEach((x) => { const b = bill[x.s] || (bill[x.s] = { orders: 0, net: 0, same: 0 }); b.orders++; b.net += x.net; if (x.s === x.hs) b.same++; });
-    c.R.forEach((x) => { const h = home[x.hs] || (home[x.hs] = { n: 0, del: 0, buy: 0 }); h.n += x.n; h.del += x.del; h.buy += x.buy; });
-    const ids = [...new Set([...Object.keys(bill), ...Object.keys(home)])].filter(Boolean);
-    const byCity = {}; ids.forEach((id) => { const s = store(id); (byCity[s.city] = byCity[s.city] || []).push(id); });
-    const sum = (list) => list.reduce((t, id) => { const b = bill[id] || {}, h = home[id] || {}; t.n += h.n || 0; t.del += h.del || 0; t.buy += h.buy || 0; t.orders += b.orders || 0; t.net += b.net || 0; t.same += b.same || 0; return t; }, { n: 0, del: 0, buy: 0, orders: 0, net: 0, same: 0 });
-    const line = (t) => `<td class="r">${nf(t.n)}</td><td class="r">${nf(t.buy)}</td><td class="r">${pct(t.buy, t.del)}</td><td class="r">${nf(t.orders)}</td><td class="r b">${inr(t.net)}</td><td class="r">${pct(t.same, t.orders, 0)}</td>`;
-    const cities = Object.entries(byCity).map(([city, list]) => ({ city, list, t: sum(list) })).sort((x, y) => y.t.net - x.t.net);
-    const noHome = home[''] ? home[''].n : 0;
-    const tbl = card('Retention by city and store', 'Click a city to see its stores · messaged & buyers by home store, orders & revenue by billing store', `<div class="wl-tw"><table><thead><tr><th>City / store</th><th class="r">Messaged</th><th class="r">Buyers</th><th class="r">Conversion</th><th class="r">Orders billed</th><th class="r">Revenue billed</th><th class="r">Same store</th></tr></thead><tbody>` +
-      cities.map((g) => `<tr data-rex="${esc(g.city)}" tabindex="0" style="cursor:pointer"><td class="b">${EX[g.city] ? '▾' : '▸'} ${esc(g.city)} <span class="wl-sm" style="display:inline">${g.list.length} store${g.list.length === 1 ? '' : 's'}</span></td>${line(g.t)}</tr>` + (EX[g.city] ? g.list.map((id) => ({ id, t: sum([id]) })).sort((x, y) => y.t.net - x.t.net).map((s) => `<tr style="background:#FAF9F5"><td style="padding-left:28px">${esc(store(s.id).name)}</td>${line(s.t)}</tr>`).join('') : '')).join('') +
-      `</tbody></table></div>${noHome ? `<p class="wl-note" style="margin-top:10px">${nf(noHome)} messaged customers have no earlier store order, so no home store. They stay in totals.</p>` : ''}`, smp());
-    return tbl;
+    return orderBar('Orders, revenue, conversion, ROAS and timing use orders placed in this window · messages and spend stay by run date') + kp + campaignTable(r, true) + `<div class="wl-g2">${roasChart(r)}${failCard(r)}</div>` +
+      `<p class="wl-colhead" style="margin:22px 0 0">TIMING</p><div class="wl-g2">${lagCard(c.O)}${cohort}</div>`;
   }
   // Revenue analysis — own "Order placed" range (picker target 'ord'); daily revenue, category, top products
-  function revenueAnalysis(c){
+  function pRevenue(r){
+    const c = ctx(r);
     const oR = [F.oFrom || DATA.startDate, F.oTo || RDATA.cutoff];
     const OD = c.O.filter((x) => x.d >= oR[0] && x.d <= oR[1]);
+    // previous order window of the same length (only when a range is picked)
+    const pR = F.oFrom ? prevOf(oR) : null;
+    const OP = pR ? cred(r, true).filter((x) => x.d >= pR[0] && x.d <= pR[1]) : null;
     const keep = new Set(OD.map((x) => x.o)); const L = RDATA.lines.filter((x) => keep.has(x.o));
-    const oLbl = F.oFrom ? (F.oLabel || `${dpShort(oR[0])} → ${dpShort(oR[1])}`) : 'All order dates';
-    const obar = `<p class="wl-colhead" style="margin:22px 0 0">REVENUE ANALYSIS</p><div class="wl-filters" style="margin-top:6px">
-      <div class="wl-fl">ORDER PLACED<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open="ord" aria-haspopup="dialog" aria-expanded="${DP.open && DP.tgt === 'ord'}">${esc(oLbl)}</button><div id="dpHostOrd"></div></div></div>
-      ${F.oFrom ? '<button type="button" class="wl-btn" data-roclear style="min-height:32px;padding:4px 12px;font-size:12px;align-self:flex-end">All order dates</button>' : ''}
-      <span class="wl-note" style="align-self:center">Applies to daily revenue, category and products · ${nf(OD.length)} orders · ${inr(OD.reduce((t, x) => t + x.net, 0))}</span>
-    </div>`;
+    const obar = orderBar(`Applies to every card on this tab${pR ? ` · vs ${dpShort(pR[0])} → ${dpShort(pR[1])}` : ''}`);
     const dayMap = {}; OD.forEach((x) => { const v = dayMap[x.d] || (dayMap[x.d] = { net: 0, n: 0 }); v.net += x.net; v.n++; });
     const dFirst = F.oFrom ? oR[0] : (OD.length ? OD.reduce((m, x) => (x.d < m ? x.d : m), OD[0].d) : oR[0]), dLast = F.oTo ? oR[1] : (OD.length ? OD.reduce((m, x) => (x.d > m ? x.d : m), OD[0].d) : oR[1]);
     const days = []; for (let d = dFirst; d <= dLast && days.length < 400; d = dAdd(d, 1)) days.push(d);
@@ -2724,7 +2728,36 @@ const RET = (() => {
     const tp = Object.entries(prod).sort((x, y) => (byQty ? y[1].qty - x[1].qty || y[1].net - x[1].net : y[1].net - x[1].net)).slice(0, 10);
     const pseg = `<div class="wl-seg" role="group" aria-label="Rank products by">${[['net', 'By revenue'], ['qty', 'By qty']].map(([v, l]) => `<button type="button" data-rprod="${v}" class="${F.rprod === v ? 'on' : ''}" aria-pressed="${F.rprod === v}">${l}</button>`).join('')}</div>`;
     const prodCard = card('Top products', `Credited orders · top 10 by ${byQty ? 'units' : 'revenue'}`, tp.length ? `<div class="wl-tw"><table><thead><tr><th>Product</th><th class="r ${byQty ? 'b' : ''}">Units</th><th class="r ${byQty ? '' : 'b'}">Revenue</th></tr></thead><tbody>${tp.map(([p, v]) => `<tr><td class="wrap">${esc(RDATA.pnames[p])}</td><td class="r ${byQty ? 'b' : ''}">${nf(v.qty)}</td><td class="r ${byQty ? '' : 'b'}">${inr(v.net)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="sub" style="margin-top:14px">No credited orders in this order-date range.</p>', smp(), pseg);
-    return obar + daily + `<div class="wl-g2">${catCard}${prodCard}</div>`;
+    // KPIs on the order-placed window
+    const sum = (O) => { const net = O.reduce((t, x) => t + x.net, 0), tr = O.reduce((t, x) => t + (x.n0 ?? x.net), 0), gross = O.reduce((t, x) => t + x.gross, 0), qty = O.reduce((t, x) => t + (x.qty || 0), 0); return { net, tr, gross, qty, n: O.length, buyers: O.filter((x) => x.first).length }; };
+    const k = sum(OD), kp0 = OP ? sum(OP) : null; const dl = (a, b, o) => (pR ? wdelta(a, b, { short: true, ...o }) : { d: '— all order dates', tone: 'flat' });
+    const d1 = dl(k.net, kp0?.net), d2 = dl(k.n, kp0?.n), d3 = dl(k.n ? k.net / k.n : null, kp0 && kp0.n ? kp0.net / kp0.n : null), d4 = dl(k.n ? k.qty / k.n : null, kp0 && kp0.n ? kp0.qty / kp0.n : null);
+    const disc = k.gross ? (1 - k.tr / k.gross) * 100 : null, discP = kp0 && kp0.gross ? (1 - kp0.tr / kp0.gross) * 100 : null; const d5 = dl(disc, discP, { pts: true, invert: true });
+    const topCat = cats[0];
+    const kpi = kpis([
+      { l: 'Revenue', v: inr(k.net), d: d1.d, tone: d1.tone, s: F.rev === 'gross' ? 'Gross' : `Gross ${inr(k.gross)}`, b: smp() },
+      { l: 'Orders', v: nf(k.n), d: d2.d, tone: d2.tone, s: `${nf(k.buyers)} buyers`, b: smp() },
+      { l: 'Units', v: nf(k.qty), d: dl(k.qty, kp0?.qty).d, tone: dl(k.qty, kp0?.qty).tone, s: `${nf(Object.keys(prod).length)} products`, b: smp() },
+      { l: 'AOV', v: k.n ? inr(k.net / k.n) : '—', d: d3.d, tone: d3.tone, s: 'Revenue ÷ orders', b: smp() },
+      { l: 'UPT', v: k.n ? (k.qty / k.n).toFixed(2) : '—', d: d4.d, tone: d4.tone, s: 'Units ÷ orders', b: smp() },
+      { l: 'Discount', v: pctTxt(disc), d: d5.d, tone: d5.tone, s: 'Off gross', b: smp() },
+      { l: 'Revenue per day', v: OD.length ? inr(k.net / days.length) : '—', d: OD.length ? `Peak ${dLbl(peak)}` : '', s: `${nf(days.length)} days`, b: smp() },
+      { l: 'Top category', v: topCat ? topCat[0] : '—', d: topCat ? pct(topCat[1].net, tot, 0) + ' of revenue' : '', s: topCat ? inr(topCat[1].net) : '', b: smp() },
+    ]);
+    // Revenue by billing city → store (click a city), same window
+    const byS = {}; OD.forEach((x) => { const v = byS[x.s] || (byS[x.s] = { n: 0, net: 0, qty: 0 }); v.n++; v.net += x.net; v.qty += x.qty || 0; });
+    const byCity = {}; Object.keys(byS).forEach((id) => { const ct = store(id).city; (byCity[ct] = byCity[ct] || []).push(id); });
+    const tsum = (ids) => ids.reduce((t, id) => ({ n: t.n + byS[id].n, net: t.net + byS[id].net, qty: t.qty + byS[id].qty }), { n: 0, net: 0, qty: 0 });
+    const line = (t) => `<td class="r">${nf(t.n)}</td><td class="r">${nf(t.qty)}</td><td class="r b">${inr(t.net)}</td><td class="r">${t.n ? inr(t.net / t.n) : '—'}</td><td class="r">${pct(t.net, k.net, 0)}</td>`;
+    const cityRows = Object.entries(byCity).map(([ct, ids]) => ({ ct, ids, t: tsum(ids) })).sort((x, y) => y.t.net - x.t.net);
+    const storeCard = card('Revenue by city and store', 'Billing store · click a city to see its stores', cityRows.length ? `<div class="wl-tw"><table><thead><tr><th>City / store</th><th class="r">Orders</th><th class="r">Units</th><th class="r">Revenue</th><th class="r">AOV</th><th class="r">Share</th></tr></thead><tbody>` +
+      cityRows.map((g) => `<tr data-rex="${esc(g.ct)}" tabindex="0" style="cursor:pointer"><td class="b">${EX[g.ct] ? '▾' : '▸'} ${esc(g.ct)} <span class="wl-sm" style="display:inline">${g.ids.length} store${g.ids.length === 1 ? '' : 's'}</span></td>${line(g.t)}</tr>` + (EX[g.ct] ? g.ids.slice().sort((x, y) => byS[y].net - byS[x].net).map((id) => `<tr style="background:#FAF9F5"><td style="padding-left:28px">${esc(store(id).name)}</td>${line(byS[id])}</tr>`).join('') : '')).join('') +
+      `</tbody></table></div>` : '<p class="sub" style="margin-top:14px">No credited orders in this order-date range.</p>', smp());
+    const TYPE = { RETAIL: 'Store bill', ONLINE: 'Online punch-in at store' };
+    const byT = {}; OD.forEach((x) => { const t = TYPE[x.t] ? x.t : 'RETAIL'; const v = byT[t] || (byT[t] = { n: 0, net: 0 }); v.n++; v.net += x.net; });
+    const bt = Object.entries(byT).sort((x, y) => y[1].net - x[1].net); const mxT = Math.max(1, ...bt.map((x) => x[1].net));
+    const typeCard = card('Store bill vs online punch-in', 'How the order was billed', bt.length ? `<div class="wl-rank" style="grid-template-columns:minmax(130px,190px) minmax(0,1fr) 80px 50px">` + bt.map(([t, v]) => `<div><span class="wl-sn">${TYPE[t]}</span><span class="wl-sm">${nf(v.n)} orders · AOV ${inr(v.net / v.n)}</span></div><div class="wl-track"><div class="wl-fill" style="width:${100 * v.net / mxT}%;background:${t === 'ONLINE' ? C.rust : C.teal}"></div></div><span style="text-align:right;font-size:13px;font-weight:600">${inr(v.net)}</span><span style="text-align:right;font-size:12px;color:#5B6068">${pct(v.net, k.net, 0)}</span>`).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No credited orders in this order-date range.</p>', smp());
+    return obar + kpi + daily + `<div class="wl-g2">${catCard}${prodCard}</div><div class="wl-g2">${storeCard}${typeCard}</div>`;
   }
   function pDefs(){
     const box = (t, s, cl = '') => `<div class="fbox ${cl}"><b>${t}</b><span>${s}</span></div>`;
@@ -2745,7 +2778,6 @@ const RET = (() => {
       ['Credited order', `DevX order at a Frido retail store, same phone, on/after the run date and within ${W} days`, 'Any order type billed at a store (ONLINE punch-ins too). Website orders with no store and the test store do not count. Cancelled and refunded orders are kept.'],
       ['Buyers', 'Customers with a credited order', 'A buyer counts once per campaign; later orders add revenue.'],
       ['Retention revenue', 'Total Revenue (gross − discount) of credited orders', 'Same revenue rule as every Retail Revenue dashboard.'],
-      ['Home store', "Store of the customer's last order before the run date", 'Used for messaged and buyers by store; revenue goes to the billing store.'],
     ];
     const defs = card('Definitions', 'Pending owner sign-off', D.map((f) => `<div class="def"><strong>${f[0]}</strong><div class="formula">${f[1]}</div><p class="sub">${f[2]}</p></div>`).join(''));
     const s = RDATA?.sources || {};
@@ -2756,9 +2788,10 @@ const RET = (() => {
     return flow + `<div class="wl-g2">${defs}${src}</div>`;
   }
 
-  const PAGES = { overview: pOverview, stores: pStores };
+  const PAGES = { overview: pOverview, revenue: pRevenue };
   function page(tab){
     if (!RTABS.find((t) => t.id === tab)) tab = 'overview'; CUR = tab;
+    if (RDATA) applyRev([RDATA.credited, RDATA.lostTo, RDATA.lines]);
     const i = RTABS.findIndex((t) => t.id === tab);
     const crumb = crumbs([['Founders Office', '#/'], ['Retail Revenue', '#/retail'], ['Retail retention', href('overview')], [RTABS[i].name, '#']]);
     let body;

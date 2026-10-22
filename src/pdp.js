@@ -128,7 +128,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
     const wk = walkinFirst.has(p) && walkinFirst.get(p) < (os[0]?.date || '9999');
     os.forEach((o, k) => {
       attributed.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.s, t: o.type || 'RETAIL', net: Math.round(o.net), gross: Math.round(o.gross), first: k === 0 ? 1 : 0, lag: daysBetween(first.d, o.date), shared: wk ? 1 : 0, same: o.date === first.d ? 1 : 0, path: pathOf(o), pb: pathBasis(o), ag: first.ag || '', by: isAgentName(o.emp, agents) ? o.emp : '', rtd: routedOn(p, o.date) });
-      for (const ln of o.lines) lines.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.s, p: pid(ln.p), c: categoryOf(ln.p), net: Math.round(ln.net), qty: ln.qty, r: 'c' });
+      for (const ln of o.lines) lines.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.s, p: pid(ln.p), c: categoryOf(ln.p), net: Math.round(ln.net), gross: Math.round(ln.gross), qty: ln.qty, r: 'c' });
       for (const ln of o.lines) { const v = productRev.get(ln.p) || { p: ln.p, c: categoryOf(ln.p), net: 0, gross: 0, qty: 0, n: 0 }; v.net += ln.net; v.gross += ln.gross; v.qty += ln.qty; v.n++; productRev.set(ln.p, v); }
     });
     if (first.g === 'crmWon' && !os.length) wonStageNoOrder.push(first.id.slice(-6));
@@ -146,7 +146,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
       const wk = walkinFirst.has(first.phone) && walkinFirst.get(first.phone) < (os[0]?.date || '9999');
       os.forEach((o, j) => {
         tAttr.push({ o: o.id, i: first.id, d: o.date, ld: first.d, s: o.store, cs: first.store || 'UNMAPPED', t: o.type || 'RETAIL', net: Math.round(o.net), gross: Math.round(o.gross), first: j === 0 ? 1 : 0, lag: daysBetween(first.d, o.date), shared: wk ? 1 : 0, call: callPhones.has(first.phone) ? 1 : 0, path: pathOf(o), pb: pathBasis(o), ag: first.fa || '', stage: first.stage, pdp: first.pdp, entry: first.entry, rtd: routedOn(first.phone, o.date) });
-        for (const ln of o.lines) lines.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.store || 'UNMAPPED', p: pid(ln.p), c: categoryOf(ln.p), net: Math.round(ln.net), qty: ln.qty, r: 't' });
+        for (const ln of o.lines) lines.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.store || 'UNMAPPED', p: pid(ln.p), c: categoryOf(ln.p), net: Math.round(ln.net), gross: Math.round(ln.gross), qty: ln.qty, r: 't' });
       });
     }
     const mask = (n) => String(n || '').replace(/\d{7,}/g, '#').slice(0, 120);
@@ -173,7 +173,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
           i: x.id, d: x.d, s: x.s || 'UNMAPPED', sr: x.storeRaw, p: x.prods[0] || '', np: x.prods.length, c: x.cat, cr: x.catRaw, vd: x.vd, vt: x.vtKind, vh: x.vtFrom,
           disc: x.disc ? 1 : 0, dv: x.disc.slice(0, 12), rem: x.remarks ? 1 : 0, by: x.by, fl: x.flags, test: x.test, dup: x.dup, after: x.d > cutoff ? 1 : 0,
           src: cl && tl ? 'both' : cl ? 'call' : tl ? 'text' : '', en: lead ? lead.en : '', ld: lead ? lead.d : '', lag: lead ? daysBetween(lead.d, x.d) : null, ag: lead ? lead.ag || '' : '',
-          od: o ? o.date : '', os: o ? o.store : '', same: o ? (o.store === x.s ? 1 : 0) : 0, net: Math.round(os.reduce((s, y) => s + y.net, 0)), n: os.length,
+          od: o ? o.date : '', os: o ? o.store : '', same: o ? (o.store === x.s ? 1 : 0) : 0, net: Math.round(os.reduce((s, y) => s + y.net, 0)), gross: Math.round(os.reduce((s, y) => s + y.gross, 0)), n: os.length,
           path: o ? pathOf(o) : '', onTime: o && x.vd ? (o.date <= x.vd ? 1 : 0) : 0, vlag: o && x.vd ? daysBetween(x.vd, o.date) : null,
         };
       }),
@@ -184,10 +184,10 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
   stores.push({ id: 'UNMAPPED', name: 'Store not recognised', city: '—', format: null });
 
   const salesDaily = new Map();
-  for (const o of orders.values()) { if (!inRange(o.date)) continue; const k = o.date + '|' + o.store; const v = salesDaily.get(k) || { d: o.date, s: o.store, net: 0, n: 0 }; v.net += o.net; v.n++; salesDaily.set(k, v); }
+  for (const o of orders.values()) { if (!inRange(o.date)) continue; const k = o.date + '|' + o.store; const v = salesDaily.get(k) || { d: o.date, s: o.store, net: 0, gross: 0, n: 0 }; v.net += o.net; v.gross += o.gross; v.n++; salesDaily.set(k, v); }
   const out = {
     startDate, callStart, cutoff, generatedAt: new Date().toISOString(), stores, text, routing,
-    call: { leads, attributed, lines, pnames: pNames, salesDaily: [...salesDaily.values()].map((v) => ({ ...v, net: Math.round(v.net) })), products: [...productRev.values()].map((v) => ({ ...v, net: Math.round(v.net), gross: Math.round(v.gross) })).sort((a, b) => b.net - a.net) },
+    call: { leads, attributed, lines, pnames: pNames, salesDaily: [...salesDaily.values()].map((v) => ({ ...v, net: Math.round(v.net), gross: Math.round(v.gross) })), products: [...productRev.values()].map((v) => ({ ...v, net: Math.round(v.net), gross: Math.round(v.gross) })).sort((a, b) => b.net - a.net) },
     agents,
     quality: { ...quality, wonStageNoOrder: wonStageNoOrder.length, orderNoWonStage: orderNoWonStage.length, rawRecords: raw.length, uniquePhones: firstByPhone.size },
     rules: { attribution: 'Order on or after lead date · same phone · any store', uniqueLead: 'First record per phone', revenue: 'Total Revenue = gross − discount' },

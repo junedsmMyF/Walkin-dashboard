@@ -40,7 +40,7 @@ export function storeOrders(salesRows) {
     if (!o) { o = { id, date, store, phone: phone10(r['Customer Phone']), type: (r['Order Type'] || '').toUpperCase() || 'RETAIL', net: 0, gross: 0, lines: [] }; orders.set(id, o); }
     const g = r.__gross != null ? num(r.__gross) : num(r['Amount Paid']);
     const n = r.__net != null ? num(r.__net) : g - num(r['Return Amount']);
-    o.gross += g; o.net += n; o.lines.push({ p: String(r['Product Name'] || '(no product name)').trim(), net: n, qty: num(r['Quantity']) || 1 });
+    o.gross += g; o.net += n; o.lines.push({ p: String(r['Product Name'] || '(no product name)').trim(), net: n, gross: g, qty: num(r['Quantity']) || 1 });
   }
   return [...orders.values()];
 }
@@ -130,7 +130,7 @@ export function computeRetention({ broadcasts = [], orders = [], touches = [], c
       row.first = buyer.has(camp.campaign + '|' + p) ? 0 : 1; buyer.add(camp.campaign + '|' + p);
       row.prior = rival ? rival.src : ''; // customer also had an older lead (credit stays with retention)
       credited.push(row);
-      for (const ln of o.lines) lines.push({ o: o.id, c: row.c, d: o.date, s: o.store, p: pid(ln.p), cat: categoryOf(ln.p), net: Math.round(ln.net), qty: ln.qty });
+      for (const ln of o.lines) lines.push({ o: o.id, c: row.c, d: o.date, s: o.store, p: pid(ln.p), cat: categoryOf(ln.p), net: Math.round(ln.net), gross: Math.round(ln.gross ?? ln.net), qty: ln.qty });
     }
   }
 
@@ -198,9 +198,9 @@ export function sampleInputs(cutoff) {
       if (rc() < pBuy) {
         const lag = Math.min(WINDOW_DAYS, Math.floor(-Math.log(1 - rc() * 0.98) * 9)); const d = addDays(run, lag);
         const store = rc() < 0.82 ? c.home : pick(rc, storeIds);
-        const n = rc() < 0.2 ? 2 : 1; const lines = []; for (let q = 0; q < n; q++) { const [p, price] = pick(rc, PRODUCTS); const net = Math.round(price * (0.8 + rc() * 0.12)); lines.push({ p, net, qty: 1 }); }
+        const n = rc() < 0.2 ? 2 : 1; const lines = []; for (let q = 0; q < n; q++) { const [p, price] = pick(rc, PRODUCTS); const net = Math.round(price * (0.8 + rc() * 0.12)); lines.push({ p, net, gross: price, qty: 1 }); }
         const net = lines.reduce((s, x) => s + x.net, 0);
-        orders.push({ id: 'S-R' + (++k), date: d, store, phone: c.phone, type: rc() < 0.08 ? 'ONLINE' : 'RETAIL', net, gross: Math.round(net / 0.86), lines });
+        orders.push({ id: 'S-R' + (++k), date: d, store, phone: c.phone, type: rc() < 0.08 ? 'ONLINE' : 'RETAIL', net, gross: lines.reduce((t, l) => t + l.gross, 0), lines });
         if (rc() < 0.07) touches.push({ phone: c.phone, d: addDays(run, Math.floor(rc() * Math.max(1, lag))), src: pick(rc, ['pdp_call', 'pdp_text', 'walkin', 'meta']) });
       }
       if (rc() < 0.004) { const d = addDays(run, WINDOW_DAYS + 3 + Math.floor(rc() * 20)); const [p, price] = pick(rc, PRODUCTS); orders.push({ id: 'S-L' + (++k), date: d, store: c.home, phone: c.phone, type: 'RETAIL', net: price, gross: price, lines: [{ p, net: price, qty: 1 }] }); }
