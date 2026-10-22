@@ -211,7 +211,7 @@ async function pdpMetrics(env, ctx) {
   if (env.ROUTING_CSV_URL) { try { routingRows = await sheet(env.ROUTING_CSV_URL, env); } catch (e) { rtErr = String(e.message || e); } }
   let sales = { rows: [], meta: {}, late: false };
   try { sales = await salesCombined(env); } catch (e) { sales.error = String(e.message || e); }
-  const m = computePdp({ callbacks: callbacks || [], walkinLeads: walkin || [], salesRows: sales.rows, limechatRows, routingRows, pdpInv: pinv.recs ? pinv : null, startDate: env.PDP_START_DATE || '2026-10-08', cutoff, backendAgents: String(env.BACKEND_AGENTS || '').split(',').map((x) => x.trim()).filter(Boolean) });
+  const m = computePdp({ callbacks: callbacks || [], walkinLeads: walkin || [], salesRows: sales.rows, limechatRows, routingRows, pdpInv: pinv.recs ? pinv : null, pdpInvFrom: env.PDP_INV_FROM || null, startDate: env.PDP_START_DATE || '2026-10-08', cutoff, backendAgents: String(env.BACKEND_AGENTS || '').split(',').map((x) => x.trim()).filter(Boolean) });
   m.sources = {
     pdpinv: { status: pinv.recs ? pinv.meta?.status || 'ok' : (pinv.meta?.status === 'error' ? 'error' : 'waiting_first_refresh'), refreshedAt: pinv.meta?.refreshedAt || null, records: pinv.recs ? pinv.recs.length : 0, error: pinv.meta?.status === 'error' ? pinv.meta.error || null : null },
     callback: { status: callbacks ? meta.status || 'ok' : (env.CALLBACK_PIPELINE_ID ? 'waiting_first_refresh' : 'not_configured'), refreshedAt: meta.refreshedAt || null, records: callbacks ? callbacks.length : 0 },

@@ -22,7 +22,7 @@ import { categoryOf } from './categories.js';
 import { salesDate, biginDate, daysBetween, phone10, addDays } from './dates.js';
 import { standardiseLimechat, coverageGaps } from './limechat.js';
 import { standardiseRouting } from './routing.js';
-import { computePdpInv } from './pdpinv.js';
+import { computePdpInv, pinvAsTextTickets, mergeTextSources, reconcile } from './pdpinv.js';
 
 // Website store labels (Store_Name1, set by the Call Store pop-up) that the store master does not already know.
 export const WEB_STORE_ALIASES = {
@@ -56,9 +56,12 @@ export function isAgentName(emp, agents) {
   return agents.some((a) => { const k = agentKey(a); if (!k.length) return false; if (k.join(' ') === e.join(' ')) return true;
     return k[0] === e[0] && (!k[1] || !e[1] || k[1][0] === e[1][0]); }); // "Raj B" ~ "Raj Bhardwaj"
 }
-export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], limechatRows = null, routingRows = null, pdpInv = null, startDate, cutoff, sample = true, backendAgents = [] }) {
+export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], limechatRows = null, routingRows = null, pdpInv = null, pdpInvFrom = null, startDate, cutoff, sample = true, backendAgents = [] }) {
   const callStart = startDate;
-  const LC = limechatRows ? standardiseLimechat(limechatRows, { cutoff }) : null;
+  const LC0 = limechatRows ? standardiseLimechat(limechatRows, { cutoff }) : null;
+  // WhatsApp source (owner, 22 Oct 2026): LimeChat export before PDP_INV_FROM, Bigin PDP Inventories from it. One lead per phone across both.
+  const cut = pdpInvFrom && pdpInv && pdpInv.recs ? pdpInvFrom : null;
+  const LC = cut ? mergeTextSources(LC0 ? LC0.tickets.filter((x) => x.d < cut) : [], pinvAsTextTickets(pdpInv.recs, { from: cut, storeOf: (l) => storeFromWeb(l) })) : LC0;
   if (LC && LC.tickets.length && LC.tickets[0].d < startDate) startDate = LC.tickets[0].d; // LimeChat history starts earlier than Callback Requests
   const inRange = (d) => d && d >= startDate && d <= cutoff;
   const quality = { noPhone: 0, badPhone: 0, unmappedStores: {}, futureDates: 0 };
@@ -152,8 +155,8 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
     }
     const mask = (n) => String(n || '').replace(/\d{7,}/g, '#').slice(0, 120);
     text = {
-      source: 'LimeChat export (WhatsApp inbox FES - WA - Karix - 9096417888)', start: LC.tickets[0]?.d || null, end: LC.tickets[LC.tickets.length - 1]?.d || null,
-      tickets: LC.tickets.filter((x) => inRange(x.d)).map((x) => ({ i: x.id, d: x.d, st: x.stage, raw: x.status, ho: x.ho ? 1 : 0, ag: x.fa, ca: x.ca, am: x.am ? 1 : 0, oc: x.oc, note: mask(x.note), entry: x.entry, pdp: x.pdp, s: x.store || 'UNMAPPED', intent: x.intent, svc: x.svc ? 1 : 0, dup: x.dup ? 1 : 0, ooh: x.ooh ? 1 : 0, ma: x.minsToAssign, mm: x.minsToAgentMsg, mr: x.minsToReply, l1: x.l1, fl: x.flags, last: x.lastBy, rnr: x.rnrVariant, ageD: daysBetween(x.d, cutoff), call: x.phone && callPhones.has(x.phone) ? 1 : 0 })),
+      source: cut ? `LimeChat export until ${addDays(cut, -1)} · Bigin PDP Inventories from ${cut}` : 'LimeChat export (WhatsApp inbox FES - WA - Karix - 9096417888)', cutover: cut, start: LC.tickets[0]?.d || null, end: LC.tickets[LC.tickets.length - 1]?.d || null,
+      tickets: LC.tickets.filter((x) => inRange(x.d)).map((x) => ({ i: x.id, d: x.d, st: x.stage, raw: x.status, src: x.src === 'bigin' ? 'b' : 'l', bst: x.bst || '', ho: x.ho ? 1 : 0, ag: x.fa, ca: x.ca, am: x.am ? 1 : 0, oc: x.oc, note: mask(x.note), entry: x.entry, pdp: x.pdp, s: x.store || 'UNMAPPED', intent: x.intent, svc: x.svc ? 1 : 0, dup: x.dup ? 1 : 0, ooh: x.ooh ? 1 : 0, ma: x.minsToAssign, mm: x.minsToAgentMsg, mr: x.minsToReply, l1: x.l1, fl: x.flags, last: x.lastBy, rnr: x.rnrVariant, ageD: daysBetween(x.d, cutoff), call: x.phone && callPhones.has(x.phone) ? 1 : 0 })),
       attributed: tAttr, gaps: coverageGaps(LC.tickets),
     };
   }
@@ -195,7 +198,8 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
   };
   // Bigin PDP Inventories (LimeChat → Bigin) — read-only stage / disposition hygiene review, PII-free
   if (pdpInv) out.pinv = computePdpInv({ ...pdpInv, cutoff, ordersByPhone, storeOf: (l) => storeFromWeb(l),
-    routedOn: (p) => (RT && RT.firstByPhone.has(p) ? RT.firstByPhone.get(p).d : null), lcFirst: (p) => (LC && LC.firstByPhone.has(p) ? LC.firstByPhone.get(p).d : null) });
+    routedOn: (p) => (RT && RT.firstByPhone.has(p) ? RT.firstByPhone.get(p).d : null), lcFirst: (p) => (LC0 && LC0.firstByPhone.has(p) ? LC0.firstByPhone.get(p).d : null) });
+  if (out.pinv && cut && LC0) out.pinv.recon = reconcile(LC0.tickets, pdpInv.recs, { from: cut });
   if (sample) out.sample = buildSample({ startDate, cutoff, stores: STORE_MASTER });
   return out;
 }

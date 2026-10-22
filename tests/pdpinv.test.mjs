@@ -50,3 +50,33 @@ test('computePdp carries the PDP Inventories review without changing other figur
   const { pinv, generatedAt: g1, ...restB } = b; const { generatedAt: g2, ...restA } = a;
   assert.deepEqual(restB, restA);
 });
+
+test('cutover: LimeChat export before 22 Oct, Bigin from 22 Oct; one lead per phone; stages map to the call rule; coverage check', () => {
+  const T = (id, created, o = {}) => ({ 'Ticket ID': id, 'Created At': created, 'Ticket Status': 'closed', 'is_handoff?': 'FALSE', 'is_resolved?': 'TRUE', 'is_outside_working_hours?': 'FALSE',
+    'First Assignee Name': '', 'Current Agent': '', 'First Assigned Time': '', 'First Agent Message Time': '', 'Agent Message Blocks': '0', 'Private Notes': '',
+    'Level 1 Tags (Main)': 'storewidget', 'System Tags': 'bot', 'Last Message Sent By': 'Bot', 'Phone Number': '919000000001', 'Customer Name': 'Test', ...o });
+  const limechatRows = [
+    T('77001', '2026-10-21 10:00:00', { 'Phone Number': '919000000001' }),                 // before cutover → from the export
+    T('77700', '2026-10-22 09:00:00', { 'Phone Number': '919000000009' }),                 // export row after cutover → not used for figures
+    T('77701', '2026-10-22 09:30:00', { 'Phone Number': '919000000008' }),                 // in the export, missing in Bigin → coverage gap
+  ];
+  const recs = [
+    rec('1', '76000', 'New Enquiry', '2026-10-18T10:00:00+05:30', { p: '9000000005' }),     // before cutover → ignored (export covers it)
+    rec('2', '77700', 'Store Visit Scheduled', '2026-10-22T09:00:00+05:30', { p: '9000000009' }),
+    rec('3', '77702', 'RNR 1', '2026-10-22T10:00:00+05:30', { p: '9000000001' }),          // repeat of a 21 Oct export lead → duplicate
+    rec('4', '77703', 'Connected - In Discussion', '2026-10-22T11:00:00+05:30', { p: '9000000003' }),
+    rec('5', '77704', 'Not Interested', '2026-10-22T12:00:00+05:30', { p: '9000000004' }),
+    rec('6', '77705', 'New Enquiry', '2026-10-22T13:00:00+05:30', { p: '9000000006' }),
+  ];
+  const salesRows = [{ 'POS Order ID': 'A', 'Customer Phone': '9000000009', 'POS Created At': '22/10/2026', 'Store ID': 'FRIDO_0010', __gross: '2000', __net: '2000', 'Order Type': 'RETAIL', 'Ret/Exc': '-', 'Product Name': 'Frido Test Chair' }];
+  const m = computePdp({ startDate: '2026-10-08', cutoff: '2026-10-22', sample: false, limechatRows, salesRows, pdpInv: { recs, hist: {}, meta: { status: 'ok' } }, pdpInvFrom: '2026-10-22' });
+  const t = Object.fromEntries(m.text.tickets.map((x) => [x.i, x]));
+  assert.deepEqual(Object.keys(t).sort(), ['77001', '77700', '77702', '77703', '77704', '77705']);
+  assert.equal(t['77700'].src, 'b'); assert.equal(t['77001'].src, 'l');
+  assert.deepEqual(['77700', '77702', '77703', '77704', '77705'].map((k) => [t[k].st, t[k].am]), [['qualified', 1], ['not_reached', 1], ['qualified', 1], ['lost', 1], ['assigned_no_action', 0]]);
+  assert.equal(t['77702'].dup, 1); assert.equal(t['77001'].dup, 0);
+  assert.deepEqual(m.text.attributed.map((x) => [x.i, x.net]), [['77700', 2000]]);
+  const day = m.pinv.recon.days.find((x) => x.d === '2026-10-22');
+  assert.deepEqual([day.lcLeads, day.inBigin, day.missing, day.bigin, day.notInExport], [2, 1, 1, 5, 4]);
+  const s = JSON.stringify(m); assert.ok(!s.includes('9000000009') && !s.includes('Real Person'));
+});

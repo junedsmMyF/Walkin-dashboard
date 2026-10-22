@@ -81,3 +81,56 @@ export function computePdpInv({ recs, hist = {}, meta = null, cutoff, now = new 
     tickets,
   };
 }
+
+// ---------- Cutover: from PDP_INV_FROM the WhatsApp journey is read from Bigin instead of the LimeChat export ----------
+// Bigin stage group → the standardised WhatsApp stage the dashboard already uses (owner, 22 Oct 2026 — same as the call rule):
+//   consumed = moved past New Enquiry · connected = Connected - In Discussion, Store Visit / Video Call Scheduled, Converted, Not Interested
+//   qualified = Connected - In Discussion, Store Visit / Video Call Scheduled, Converted · RNR / Callback scheduled = tried, not connected
+const TEXT_STAGE = {
+  new: ['assigned_no_action', 0, ''], attempt: ['not_reached', 1, 'not_reached'], connected: ['qualified', 1, 'qualified_other'],
+  visit: ['qualified', 1, 'routed_store'], video: ['qualified', 1, 'routed_video'], converted: ['qualified', 1, 'purchased_stated'],
+  lost: ['lost', 1, 'lost_not_interested'], other: ['messaged_no_outcome', 1, 'unclassified'],
+};
+// LimeChat-shaped tickets (server side; the phone is used for matching and dropped before anything leaves the Worker).
+export function pinvAsTextTickets(recs, { from, storeOf = () => null } = {}) {
+  return (recs || []).map((x) => {
+    const created = x.tc || x.ct; const d = biginDate(created); if (!d || (from && d < from)) return null;
+    const p = phone10(x.p); const g = stageGroupOf(x.st); const [stage, am, oc] = TEXT_STAGE[g];
+    const { entry, pdp, tagStore } = entryOfTag(x.ctag);
+    const flags = [];
+    if (!(p && /^[6-9]/.test(p))) flags.push('invalid_phone');
+    if (g === 'other') flags.push('bigin_stage_unknown');
+    if (!x.own) flags.push('bigin_no_owner');
+    return {
+      id: x.cid || 'bigin:' + x.i, src: 'bigin', ts: Date.parse(created) || 0, d, phone: p, validPhone: !!(p && /^[6-9]/.test(p)),
+      status: 'bigin', ho: 1, fa: x.own || '', ca: x.own || '', am, oc, note: '', stage, bst: x.st, entry, pdp,
+      store: storeOf(x.loc) || tagStore || '', intent: '', svc: false, l1: [], ooh: false, out: false,
+      minsToAssign: null, minsToAgentMsg: null, minsToReply: null, lastBy: '', rnrVariant: [], flags, dup: 0,
+    };
+  }).filter(Boolean);
+}
+
+// One lead per phone across both sources (earliest ticket wins; later ones are duplicates, kept and flagged).
+export function mergeTextSources(lcTickets, biginTickets) {
+  const tickets = [...lcTickets, ...biginTickets].sort((a, b) => a.ts - b.ts || (String(a.id) < String(b.id) ? -1 : 1));
+  const seen = new Map();
+  for (const x of tickets) {
+    x.flags = (x.flags || []).filter((f) => f !== 'duplicate_phone');
+    if (x.svc) continue;
+    const k = x.phone || 'ticket:' + x.id;
+    if (seen.has(k)) { x.dup = 1; x.flags.push('duplicate_phone'); } else { seen.set(k, x); x.dup = 0; }
+  }
+  return { tickets, firstByPhone: seen };
+}
+
+// Daily coverage check: every LimeChat lead (export) from the cutover should exist in Bigin, by conversation id.
+export function reconcile(lcTickets, recs, { from }) {
+  const inBigin = new Set((recs || []).map((x) => String(x.cid)));
+  const lcIds = new Set(lcTickets.map((x) => String(x.id)));
+  const lcEnd = lcTickets.reduce((m, x) => (x.d > m ? x.d : m), '');
+  const days = {};
+  const day = (d) => (days[d] = days[d] || { d, lcLeads: 0, inBigin: 0, missing: 0, svcInBigin: 0, bigin: 0, notInExport: 0 });
+  for (const x of lcTickets) { if (x.d < from) continue; const o = day(x.d); if (x.svc) { if (inBigin.has(String(x.id))) o.svcInBigin++; continue; } o.lcLeads++; if (inBigin.has(String(x.id))) o.inBigin++; else o.missing++; }
+  for (const x of recs || []) { const d = biginDate(x.tc || x.ct); if (!d || d < from) continue; const o = day(d); o.bigin++; if (d <= lcEnd && !lcIds.has(String(x.cid))) o.notInExport++; }
+  return { from, lcEnd: lcEnd || null, days: Object.values(days).sort((a, b) => (a.d < b.d ? -1 : 1)) };
+}
