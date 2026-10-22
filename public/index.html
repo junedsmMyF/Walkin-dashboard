@@ -1499,8 +1499,8 @@ const ctaOk = (entry) => F.cta === 'all' || F.cta === (entry || 'generic');
 const callOn = () => ctaOk('call_popup');
 
 // ---------- aggregation: call route (real) ----------
-const CONTACTED = new Set(['ringing', 'engaged', 'visitPlan', 'visit', 'crmWon', 'lost', 'resolved', 'other']);
-const ENGAGED = new Set(['engaged', 'visitPlan', 'visit', 'crmWon']);
+const CONTACTED = new Set(['ringing', 'engaged', 'visitPlan', 'vcPlan', 'visit', 'crmWon', 'lost', 'resolved', 'other']);
+const ENGAGED = new Set(['engaged', 'visitPlan', 'vcPlan', 'visit', 'crmWon']);
 function callAgg(r){
   const on = callOn();
   const L = (PDATA.call.leads || []).filter((x) => on && inPR(x.d, r) && pStoreOk(x.s));
@@ -1512,6 +1512,7 @@ function callAgg(r){
     raw: L.length, dup: L.length - U.length, unique: U.length, near: U.filter((x) => x.near).length,
     contacted: U.filter((x) => CONTACTED.has(x.g)).length, engaged: U.filter((x) => ENGAGED.has(x.g)).length,
     visitPlan: U.filter((x) => x.g === 'visitPlan').length, visit: U.filter((x) => x.g === 'visit').length,
+    qualVisit: U.filter((x) => ENGAGED.has(x.g) && x.rt).length, qualVc: U.filter((x) => ENGAGED.has(x.g) && x.vc).length,
     lost: U.filter((x) => x.g === 'lost').length, notCalled: U.filter((x) => x.g === 'notCalled').length, ringing: U.filter((x) => x.g === 'ringing').length,
     purchased: buyers.length, orders: A.length, net: A.reduce((s, x) => s + x.net, 0), gross: A.reduce((s, x) => s + x.gross, 0),
     retailNet: A.filter((x) => x.t !== 'ONLINE').reduce((s, x) => s + x.net, 0), sharedNet: A.filter((x) => x.shared).reduce((s, x) => s + x.net, 0), sharedN: buyers.filter((x) => x.shared).length,
@@ -1571,6 +1572,7 @@ function textAgg(r){
     has: hasText(), chats: chats.length, svc: chats.filter((x) => x.svc).length,
     raw: L.length, dup: L.length - U.length, unique: U.length,
     botOnly: st('bot_only'), handoffNoAgent: st('handoff_unassigned'),
+    qualVisit: U.filter((x) => x.st === 'qualified' && x.rt).length, qualVc: U.filter((x) => x.st === 'qualified' && x.vc).length,
     assigned: assignedU.length, agents: new Set(assignedU.map((x) => x.ag)).size,
     consumed: U.filter((x) => x.am).length, replyMed: median(U.map((x) => x.mr).filter((v) => v != null && v >= 0)), noteOnly: U.filter((x) => !x.am && x.note).length,
     contacted: assignedU.filter((x) => x.acted).length, noAction: st('assigned_no_action'), messagedNoOutcome: st('messaged_no_outcome'),
@@ -1656,13 +1658,13 @@ function journeyData(r){
   const aOpen = Math.max(0, a.engaged - a.purchased), tOpen = Math.max(0, t.engaged + t.followup - t.purchased);
   const call = [
     { k: 'view', v: views, b: 's' }, { k: 'cta', v: callCta, b: 's' }, { k: 'lead', v: a.unique, b: 'v' }, { k: 'cons', v: a.consumed, b: 'u' },
-    { k: 'fu', v: a.connected, b: 'u' }, { k: 'qual', v: a.engaged, b: 'u' },
+    { k: 'fu', v: a.connected, b: 'u' }, { k: 'qual', v: a.engaged, b: 'u', split: `Store visit ${nf(a.qualVisit)} · VC ${nf(a.qualVc)}` },
     { k: 'conv', v: a.purchased, b: 'v', split: `Lost ${nf(a.lost)} · Open ${nf(aOpen)}` },
     { k: 'rev', v: a.net, b: 'v', money: 1 },
   ];
   const text = [
     { k: 'view', v: views, b: 's' }, { k: 'cta', v: t.chats, b: 'v', split: `${nf(t.svc)} order queries` }, { k: 'lead', v: t.unique, b: 'v' }, { k: 'cons', v: t.consumed, b: 'v' },
-    { k: 'fu', v: t.reached, b: 'u' }, { k: 'qual', v: t.engaged, b: 'u' },
+    { k: 'fu', v: t.reached, b: 'u' }, { k: 'qual', v: t.engaged, b: 'u', split: `Store visit ${nf(t.qualVisit)} · VC ${nf(t.qualVc)}` },
     { k: 'conv', v: t.purchased, b: 'v', split: `Lost ${nf(t.lost)} · Open ${nf(tOpen)}` },
     { k: 'rev', v: t.net, b: 'v', money: 1 },
   ];
@@ -1869,9 +1871,9 @@ function pAgents(r){
 }
 
 /* ---- PDP · Follow-up ---- */
-const OPEN = new Set(['notCalled', 'ringing', 'engaged', 'visitPlan']);
-const GLBL = { notCalled: 'Yet to Call', ringing: 'Ringing (RNR)', engaged: 'Engaged', visitPlan: 'Visit planned', visit: 'Visited', crmWon: 'Won (Bigin)', lost: 'Not Interested / lost', resolved: 'Resolved', other: 'Other', blank: 'Blank' };
-const GCOL = { notCalled: C.sand, ringing: C.sandDk, engaged: C.teal, visitPlan: C.tealMid, visit: C.tealMid, crmWon: C.teal, lost: C.rust, resolved: C.tealLt, other: C.tealLt, blank: C.track };
+const OPEN = new Set(['notCalled', 'ringing', 'engaged', 'visitPlan', 'vcPlan']);
+const GLBL = { notCalled: 'Yet to Call', ringing: 'Ringing (RNR)', engaged: 'Engaged', visitPlan: 'Visit planned', vcPlan: 'Video call arranged', visit: 'Visited', crmWon: 'Won (Bigin)', lost: 'Not Interested / lost', resolved: 'Resolved', other: 'Other', blank: 'Blank' };
+const GCOL = { notCalled: C.sand, ringing: C.sandDk, engaged: C.teal, visitPlan: C.tealMid, vcPlan: C.tealMid, visit: C.tealMid, crmWon: C.teal, lost: C.rust, resolved: C.tealLt, other: C.tealLt, blank: C.track };
 const hbar = (rows, opts = {}) => { const mx = Math.max(1, ...rows.map((x) => x[1])); return `<div class="wl-rank" style="grid-template-columns:minmax(120px,${opts.w || 180}px) minmax(0,1fr) 54px ${opts.extra ? '70px' : ''}">` + rows.map(([l, n, c, ex]) => `<span class="wl-sn">${esc(l)}</span><div class="wl-track"><div class="wl-fill" style="width:${(n / mx * 100).toFixed(1)}%;background:${c || C.teal}"></div></div><span style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${nf(n)}</span>${opts.extra ? `<span class="k-s" style="text-align:right">${ex || ''}</span>` : ''}`).join('') + `</div>`; };
 function pFollow(r){
   const p = pPrev(r), a = callAgg(r), b = p ? callAgg(p) : null, t = textAgg(r);

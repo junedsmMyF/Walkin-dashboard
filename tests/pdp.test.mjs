@@ -71,3 +71,13 @@ test('purchase path: ONLINE punch-in = video consult; cash & carry = store visit
   assert.equal(m.call.leads[0].ag, 'Raj B');
   assert.deepEqual(m.agents, ['Raj B']);
 });
+
+test('qualified split: routed (routing sheet) and VC arranged (Bigin stage) are marked per lead', () => {
+  const row = (id, at, p) => ({ 'Lead ID': id, 'Submitted at': at, Store: 'Sky City Mall, Borivali', 'Customer name': 'Real Customer', 'Customer number': p, 'Product name': 'NM - Chair', 'Expected visit date': '10/12/2026', 'Expected visit time': '5 PM' });
+  const m = run({
+    callbacks: [cb('1000000000000000001', '9000000001', '2026-10-08T11:00:00+05:30', 'SkyCity Mall, Mumbai', 'Connected'), cb('1000000000000000002', '9000000002', '2026-10-09T11:00:00+05:30', 'SkyCity Mall, Mumbai', 'Video call arrange')],
+    routingRows: [row('L1', '10/10/2026 10:00:00', '9000000001')],
+  });
+  assert.deepEqual(m.call.leads.map((x) => [x.g, x.rt, x.vc]), [['engaged', 1, 0], ['vcPlan', 0, 1]]);
+  assert.ok(!JSON.stringify(m).includes('9000000002'));
+});
