@@ -15,7 +15,7 @@ binding = "DASH_KV"
 id = "557386ba9dee45b3ae9f99d967109a42"
 
 [triggers]
-crons = ["30 0 * * *"]
+crons = ["30 0 * * *", "10 * * * *"]  # daily full Bigin refresh · hourly PDP Inventories stages (read-only)
 
 [vars]
 # Sign-in & roles — a one-time code is emailed to each approved person when they sign in (no Cloudflare setup).
@@ -30,6 +30,7 @@ ADMIN_EMAILS = "juned.m@myfrido.com"                          # permanent admins
 START_DATE = "2026-09-01"
 WALKIN_PIPELINE_ID = "1371203000000480122"
 CALLBACK_PIPELINE_ID = "1371203000000629516"   # Bigin "Callback Requests" — website Call Store pop-up (PDP inventories)
+PDP_INV_PIPELINE_ID = "1371203000000675914"    # Bigin "PDP Inventories" — LimeChat → Bigin (live 21 Oct 2026), read-only
 PDP_START_DATE = "2026-10-08"                   # Callback Requests pipeline went live
 META_PIPELINE_ID = "1371203000000558349"       # Bigin "Meta Ergo Workspace Assessment" — Meta Lead Gen leads (Meta ads)
 META_START_DATE = "2026-09-09"                  # Meta Lead Gen ads went live

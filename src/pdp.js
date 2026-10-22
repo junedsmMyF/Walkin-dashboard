@@ -22,6 +22,7 @@ import { categoryOf } from './categories.js';
 import { salesDate, biginDate, daysBetween, phone10, addDays } from './dates.js';
 import { standardiseLimechat, coverageGaps } from './limechat.js';
 import { standardiseRouting } from './routing.js';
+import { computePdpInv } from './pdpinv.js';
 
 // Website store labels (Store_Name1, set by the Call Store pop-up) that the store master does not already know.
 export const WEB_STORE_ALIASES = {
@@ -55,7 +56,7 @@ export function isAgentName(emp, agents) {
   return agents.some((a) => { const k = agentKey(a); if (!k.length) return false; if (k.join(' ') === e.join(' ')) return true;
     return k[0] === e[0] && (!k[1] || !e[1] || k[1][0] === e[1][0]); }); // "Raj B" ~ "Raj Bhardwaj"
 }
-export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], limechatRows = null, routingRows = null, startDate, cutoff, sample = true, backendAgents = [] }) {
+export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], limechatRows = null, routingRows = null, pdpInv = null, startDate, cutoff, sample = true, backendAgents = [] }) {
   const callStart = startDate;
   const LC = limechatRows ? standardiseLimechat(limechatRows, { cutoff }) : null;
   if (LC && LC.tickets.length && LC.tickets[0].d < startDate) startDate = LC.tickets[0].d; // LimeChat history starts earlier than Callback Requests
@@ -192,6 +193,9 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
     quality: { ...quality, wonStageNoOrder: wonStageNoOrder.length, orderNoWonStage: orderNoWonStage.length, rawRecords: raw.length, uniquePhones: firstByPhone.size },
     rules: { attribution: 'Order on or after lead date · same phone · any store', uniqueLead: 'First record per phone', revenue: 'Total Revenue = gross − discount' },
   };
+  // Bigin PDP Inventories (LimeChat → Bigin) — read-only stage / disposition hygiene review, PII-free
+  if (pdpInv) out.pinv = computePdpInv({ ...pdpInv, cutoff, ordersByPhone, storeOf: (l) => storeFromWeb(l),
+    routedOn: (p) => (RT && RT.firstByPhone.has(p) ? RT.firstByPhone.get(p).d : null), lcFirst: (p) => (LC && LC.firstByPhone.has(p) ? LC.firstByPhone.get(p).d : null) });
   if (sample) out.sample = buildSample({ startDate, cutoff, stores: STORE_MASTER });
   return out;
 }
