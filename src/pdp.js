@@ -51,7 +51,11 @@ const nameKey = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '').slic
 //   store  = agent routes the lead to a store on the WhatsApp DSR group → customer visits → bill by store staff
 //   video  = video consult with the store team → order placed by the store team
 // (The earlier "order punched by backend agent" branch was removed from the flow.)
-// Purchase path (proposed, pending sign-off): ONLINE punch-in → "video"; cash & carry → "store". pb = basis: online | retail.
+// Conversion route of each order (owner, 22 Oct 2026):
+//   store = lead is in the routing sheet and the order date = its expected visit date (store visit conversion)
+//   video = lead is NOT in the routing sheet, a video call was arranged (Bigin "Video call arrange" / "Video Call Scheduled",
+//           LimeChat video outcome) and the order is on/after the lead date (video call conversion)
+//   other = anything else (routed but bought on another day, or no routing / video call). pb = basis of the route.
 const agentKey = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, ' ').trim().split(/\s+/).filter(Boolean);
 export function isAgentName(emp, agents) {
   const e = agentKey(emp); if (!e.length) return false;
@@ -129,8 +133,11 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
 
   // ---------- Attribution: order on/after the unique lead date, same phone, any store ----------
   const agents = [...new Set([...raw.map((x) => x.ag).filter(Boolean), ...(LC ? LC.tickets.map((x) => x.fa).filter(Boolean) : []), ...backendAgents])];
-  const pathOf = (o) => (o.type === 'ONLINE' ? 'video' : 'store');
-  const pathBasis = (o) => (o.type === 'ONLINE' ? 'online' : 'retail');
+  const vcPhones = new Set([...raw.filter((x) => x.p && isVcStage(x.st)).map((x) => x.p), ...(LC ? LC.tickets.filter((x) => !x.svc && x.phone && x.oc === 'routed_video').map((x) => x.phone) : [])]);
+  const pathBasis = (p, o) => { const r = p && RT && RT.firstByPhone.get(p);
+    if (r && r.d <= cutoff) return r.vd && o.date === r.vd ? 'visit_day' : 'routed_other_day';
+    return vcPhones.has(p) ? 'vc_arranged' : 'none'; };
+  const pathOf = (p, o) => ({ visit_day: 'store', vc_arranged: 'video' })[pathBasis(p, o)] || 'other';
   // Lead routing sheet (store routing from the WhatsApp DSR group). Routed phone → earliest routing date.
   const routedOn = (p, d) => (RT && p && RT.firstByPhone.has(p) && RT.firstByPhone.get(p).d <= d ? 1 : 0);
   const attributed = []; const wonStageNoOrder = []; const orderNoWonStage = [];
@@ -142,7 +149,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
     const os = (ordersByPhone.get(p) || []).filter((o) => o.date >= first.d && o.date <= cutoff);
     const wk = walkinFirst.has(p) && walkinFirst.get(p) < (os[0]?.date || '9999');
     os.forEach((o, k) => {
-      attributed.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.s, t: o.type || 'RETAIL', net: Math.round(o.net), gross: Math.round(o.gross), first: k === 0 ? 1 : 0, lag: daysBetween(first.d, o.date), shared: wk ? 1 : 0, same: o.date === first.d ? 1 : 0, path: pathOf(o), pb: pathBasis(o), ag: first.ag || '', by: isAgentName(o.emp, agents) ? o.emp : '', rtd: routedOn(p, o.date) });
+      attributed.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.s, t: o.type || 'RETAIL', net: Math.round(o.net), gross: Math.round(o.gross), first: k === 0 ? 1 : 0, lag: daysBetween(first.d, o.date), shared: wk ? 1 : 0, same: o.date === first.d ? 1 : 0, path: pathOf(p, o), pb: pathBasis(p, o), ag: first.ag || '', by: isAgentName(o.emp, agents) ? o.emp : '', rtd: routedOn(p, o.date) });
       for (const ln of o.lines) lines.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.s, p: pid(ln.p), c: categoryOf(ln.p), net: Math.round(ln.net), gross: Math.round(ln.gross), qty: ln.qty, r: 'c' });
       for (const ln of o.lines) { const v = productRev.get(ln.p) || { p: ln.p, c: categoryOf(ln.p), net: 0, gross: 0, qty: 0, n: 0 }; v.net += ln.net; v.gross += ln.gross; v.qty += ln.qty; v.n++; productRev.set(ln.p, v); }
     });
@@ -160,7 +167,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
       const os = (ordersByPhone.get(first.phone) || []).filter((o) => o.date >= first.d && o.date <= cutoff);
       const wk = walkinFirst.has(first.phone) && walkinFirst.get(first.phone) < (os[0]?.date || '9999');
       os.forEach((o, j) => {
-        tAttr.push({ o: o.id, i: first.id, d: o.date, ld: first.d, s: o.store, cs: first.store || 'UNMAPPED', t: o.type || 'RETAIL', net: Math.round(o.net), gross: Math.round(o.gross), first: j === 0 ? 1 : 0, lag: daysBetween(first.d, o.date), shared: wk ? 1 : 0, call: callPhones.has(first.phone) ? 1 : 0, path: pathOf(o), pb: pathBasis(o), ag: first.fa || '', stage: first.stage, pdp: first.pdp, entry: first.entry, rtd: routedOn(first.phone, o.date) });
+        tAttr.push({ o: o.id, i: first.id, d: o.date, ld: first.d, s: o.store, cs: first.store || 'UNMAPPED', t: o.type || 'RETAIL', net: Math.round(o.net), gross: Math.round(o.gross), first: j === 0 ? 1 : 0, lag: daysBetween(first.d, o.date), shared: wk ? 1 : 0, call: callPhones.has(first.phone) ? 1 : 0, path: pathOf(first.phone, o), pb: pathBasis(first.phone, o), ag: first.fa || '', stage: first.stage, pdp: first.pdp, entry: first.entry, rtd: routedOn(first.phone, o.date) });
         for (const ln of o.lines) lines.push({ o: o.id, d: o.date, ld: first.d, s: o.store, cs: first.store || 'UNMAPPED', p: pid(ln.p), c: categoryOf(ln.p), net: Math.round(ln.net), gross: Math.round(ln.gross), qty: ln.qty, r: 't' });
       });
     }
@@ -189,7 +196,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
           disc: x.disc ? 1 : 0, dv: x.disc.slice(0, 12), rem: x.remarks ? 1 : 0, by: x.by, fl: x.flags, test: x.test, dup: x.dup, after: x.d > cutoff ? 1 : 0,
           src: cl && tl ? 'both' : cl ? 'call' : tl ? 'text' : '', en: lead ? lead.en : '', ld: lead ? lead.d : '', lag: lead ? daysBetween(lead.d, x.d) : null, ag: lead ? lead.ag || '' : '',
           od: o ? o.date : '', os: o ? o.store : '', same: o ? (o.store === x.s ? 1 : 0) : 0, net: Math.round(os.reduce((s, y) => s + y.net, 0)), gross: Math.round(os.reduce((s, y) => s + y.gross, 0)), n: os.length,
-          path: o ? pathOf(o) : '', onTime: o && x.vd ? (o.date <= x.vd ? 1 : 0) : 0, vlag: o && x.vd ? daysBetween(x.vd, o.date) : null,
+          path: o ? pathOf(x.phone, o) : '', onTime: o && x.vd ? (o.date <= x.vd ? 1 : 0) : 0, vlag: o && x.vd ? daysBetween(x.vd, o.date) : null,
         };
       }),
     };
