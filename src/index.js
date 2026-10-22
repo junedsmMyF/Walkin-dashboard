@@ -1,7 +1,7 @@
 // Cloudflare Worker: serves the dashboard (static assets), a PII-free metrics API, the Bigin admin page,
 // and the 6:00 AM IST daily Bigin refresh (cron "30 0 * * *" UTC).
 import { parseCsv } from './csv.js';
-import { istDate, addDays, dsrDate } from './dates.js';
+import { istDate, addDays, dsrDate, phone10, biginDate } from './dates.js';
 import { computeMetrics } from './metrics.js';
 import { standardizeTab, combineTabs } from './standardize.js';
 import { cleanToEngineRows, excludedSummary } from './clean.js';
@@ -13,6 +13,8 @@ import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, normStoreName, suggestS
 import { refreshBigin, biginLeads, biginCallbacks, biginMetaAds, biginMeta, biginConnected, startConnect, finishConnect } from './bigin.js';
 import { computePdp } from './pdp.js';
 import { computeMeta } from './meta.js';
+import { computeRetention, parseBroadcastRows, storeOrders, sampleInputs } from './retention.js';
+import { standardiseLimechat } from './limechat.js';
 
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra } });
 const html = (body, status = 200) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Dashboard admin</title><style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 16px;color:#101820}button,a.btn{display:inline-block;padding:10px 16px;border-radius:999px;border:0;background:#FFD100;color:#101820;font-weight:600;text-decoration:none;cursor:pointer;margin:4px 8px 4px 0}pre{background:#F4F6F9;padding:12px;border-radius:8px;overflow:auto}</style></head><body>${body}</body></html>`, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' } });
@@ -233,6 +235,36 @@ async function metaMetrics(env, ctx) {
   };
   ctx.waitUntil(env.DASH_KV.put('meta:cache', JSON.stringify({ k: ver, at: Date.now(), body: m })));
   return json(m, 200, { 'cache-control': 'private, max-age=60', 'x-meta-cache': 'miss' });
+}
+
+// ---- Retail retention: offer broadcasts (LimeChat) × retail store orders; sample until the broadcast report is connected ----
+async function retentionMetrics(env, ctx) {
+  const cutoff = addDays(istDate(), -1);
+  const live = !!env.RETENTION_CSV_URL;
+  const meta = (await biginMeta(env)) || {}; const idx = live ? await env.DASH_KV.get('sales:index', 'json') : null;
+  const ver = ['ret1', live ? Math.floor(Date.now() / 900e3) : 'sample', idx?.uploadedAt || 'none', live ? meta.refreshedAt || 'none' : '', cutoff].join('|');
+  const cached = await env.DASH_KV.get('retention:cache', 'json');
+  if (cached && cached.k === ver) return json(cached.body, 200, { 'cache-control': 'private, max-age=60', 'x-retention-cache': 'hit' });
+  let m, bErr = null, sales = { meta: {} };
+  if (live) {
+    let rows = null; try { rows = await sheet(env.RETENTION_CSV_URL, env); } catch (e) { bErr = String(e.message || e); }
+    try { sales = await salesCombined(env); } catch (e) { sales.error = String(e.message || e); }
+    const [walkin, callbacks, metaLeads] = await Promise.all([biginLeads(env), biginCallbacks(env), biginMetaAds(env)]);
+    const touches = [];
+    const add = (arr, src, dOf) => (arr || []).forEach((l) => { const p = phone10(l.p); const d = dOf(l); if (p && d) touches.push({ phone: p, d, src }); });
+    add(walkin, 'walkin', (l) => biginDate(l.d) || biginDate(l.ct)); add(callbacks, 'pdp_call', (l) => biginDate(l.ct)); add(metaLeads, 'meta', (l) => biginDate(l.ct));
+    if (env.LIMECHAT_CSV_URL) { try { for (const t of standardiseLimechat(await sheet(env.LIMECHAT_CSV_URL, env), { cutoff }).firstByPhone.values()) if (t.phone && t.d) touches.push({ phone: t.phone, d: t.d, src: 'pdp_text' }); } catch {} }
+    m = computeRetention({ broadcasts: parseBroadcastRows(rows || []), orders: storeOrders(sales.rows || []), touches, cutoff });
+  } else {
+    m = computeRetention({ ...sampleInputs(cutoff), cutoff }); m.sample = true;
+  }
+  m.sources = {
+    broadcasts: { status: live ? (bErr ? 'error' : (SHEET_STATUS.get(env.RETENTION_CSV_URL) || { ok: true }).ok ? 'live' : 'stale') : 'sample', error: bErr },
+    sales: { status: !live ? 'sample' : sales.error ? 'error' : sales.late ? 'stale' : 'live', uploadedAt: sales.meta?.uploadedAt || null },
+    touches: { status: live ? 'live' : 'sample' },
+  };
+  ctx.waitUntil(env.DASH_KV.put('retention:cache', JSON.stringify({ k: ver, at: Date.now(), body: m })));
+  return json(m, 200, { 'cache-control': 'private, max-age=60', 'x-retention-cache': 'miss' });
 }
 
 function isAdmin(env, url) {
@@ -500,6 +532,11 @@ export default {
         if (!id.approved) return json({ error: id.reason, auth: false }, 401);
         if (!can(id, 'meta')) return json({ error: 'You do not have access to the Meta ads dashboard.' }, 403);
         return await metaMetrics(env, ctx);
+      }
+      if (url.pathname === '/api/retention') {
+        if (!id.approved) return json({ error: id.reason, auth: false }, 401);
+        if (!can(id, 'retention')) return json({ error: 'You do not have access to the Retail retention dashboard.' }, 403);
+        return await retentionMetrics(env, ctx);
       }
       if (url.pathname === '/api/ask' && request.method === 'POST') return await botAsk(request, env, ctx, id);
       if (url.pathname === '/api/log' && request.method === 'POST') {
