@@ -672,7 +672,7 @@ function crumbs(list){
 
 /* ---------- Live data (Cloudflare Worker /api/metrics — aggregated, no customer data) ---------- */
 let DATA = null, DATA_ERR = null, LOADING = false;
-const F = { rcamp: 'all', rprod: 'net', oFrom: null, oTo: null, oLabel: null, mtype: 'all', mcity: 'all', mstore: 'all', mleads: 'net', range: 'mtd', format: 'all', city: 'all', store: 'all', cta: 'all', ex: {}, cx: {}, rev: 'net', cmp: 'prev', day: 'all', from: null, to: null, crf: '1', dpLabel: null };
+const F = { rcamp: 'all', rFrom: null, rTo: null, rLabel: null, rprod: 'net', oFrom: null, oTo: null, oLabel: null, mtype: 'all', mcity: 'all', mstore: 'all', mleads: 'net', range: 'mtd', format: 'all', city: 'all', store: 'all', cta: 'all', ex: {}, cx: {}, rev: 'net', cmp: 'prev', day: 'all', from: null, to: null, crf: '1', dpLabel: null };
 const dayOk = (d) => F.day === 'all' || (F.day === 'weekend' ? ((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7) >= 5 : ((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7) < 5);
 async function loadData(force){
   if (LOADING || (DATA && !force)) return;
@@ -917,7 +917,8 @@ const kpiTip = (label) => { const i = kpiInfo(label); return i ? `<span class="k
 
 /* ---------- Date-range picker (standard for every dashboard: quick select · start → end · two-month calendar · Cancel / Apply) ---------- */
 const DP = { open: false, from: null, to: null, view: null, pick: 0, sub: null, label: null, tgt: '' }; // tgt '' = page range (F.range) · 'ord' = retention order-placed range (F.oFrom/F.oTo)
-const dpHostId = () => (DP.tgt === 'ord' ? 'dpHostOrd' : 'dpHost');
+const dpHostId = () => (DP.tgt === 'ord' ? 'dpHostOrd' : DP.tgt === 'run' ? 'dpHostRun' : 'dpHost');
+const retRunDefault = () => [RDATA?.campaigns?.[0]?.first || DATA.startDate, RDATA?.cutoff || DATA.cutoff]; // retention: first campaign → latest data
 const dpMonths = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const dpShort = (d) => { const [y, m, dd] = d.split('-').map(Number); return `${dd} ${dpMonths[m - 1].slice(0, 3)} ${y}`; };
 const dpYm = (d) => d.slice(0, 7);
@@ -948,7 +949,7 @@ function dpPresets() {
   };
 }
 const dpClamp = (p) => { const min = DATA.startDate, max = DATA.cutoff; if (p.to < min || p.from > max) return null; return { ...p, from: p.from < min ? min : p.from, to: p.to > max ? max : p.to }; };
-function dpOpen(tgt = '') { const ord = tgt === 'ord'; const r = ord ? [F.oFrom || DATA.startDate, F.oTo || DATA.cutoff] : rangeOf(F.range); Object.assign(DP, { tgt, open: true, from: r[0], to: r[1], view: dpAddMonth(dpYm(r[1]), -1) < dpYm(DATA.startDate) ? dpYm(DATA.startDate) : dpAddMonth(dpYm(r[1]), -1), pick: 0, sub: null, label: ord ? F.oLabel || 'All data' : F.range === 'custom' ? F.dpLabel : (RANGE_LABEL[F.range] || null) }); if (dpAddMonth(DP.view, 1) > dpYm(DATA.cutoff) && DP.view > dpYm(DATA.startDate)) DP.view = dpAddMonth(dpYm(DATA.cutoff), -1); dpDraw(); }
+function dpOpen(tgt = '') { const ord = tgt === 'ord', run = tgt === 'run'; const r = ord ? [F.oFrom || DATA.startDate, F.oTo || DATA.cutoff] : run ? (F.rFrom ? [F.rFrom, F.rTo] : retRunDefault()) : rangeOf(F.range); Object.assign(DP, { tgt, open: true, from: r[0], to: r[1], view: dpAddMonth(dpYm(r[1]), -1) < dpYm(DATA.startDate) ? dpYm(DATA.startDate) : dpAddMonth(dpYm(r[1]), -1), pick: 0, sub: null, label: ord ? F.oLabel || 'All data' : run ? (F.rFrom ? F.rLabel : 'Since first campaign') : F.range === 'custom' ? F.dpLabel : (RANGE_LABEL[F.range] || null) }); if (dpAddMonth(DP.view, 1) > dpYm(DATA.cutoff) && DP.view > dpYm(DATA.startDate)) DP.view = dpAddMonth(dpYm(DATA.cutoff), -1); dpDraw(); }
 function dpClose() { DP.open = false; const h = document.getElementById(dpHostId()); if (h) h.innerHTML = ''; }
 function dpCal(ym, nav) {
   const [y, m] = ym.split('-').map(Number); const first = `${ym}-01`; const lead = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
@@ -988,7 +989,7 @@ if (!window.__dpBound) {
     if (t.hasAttribute('data-dp-preset')) { const p = DP._flat[+t.dataset.dpPreset]; if (!p) return; Object.assign(DP, { from: p.from, to: p.to, label: p.label, pick: 0, view: dpAddMonth(dpYm(p.to), -1) < dpYm(DATA.startDate) ? dpYm(DATA.startDate) : dpAddMonth(dpYm(p.to), -1) }); dpDraw(); return; }
     if (t.hasAttribute('data-dp-nav')) { DP.view = dpAddMonth(DP.view, +t.dataset.dpNav); dpDraw(); return; }
     if (t.hasAttribute('data-dp-day')) { const d = t.dataset.dpDay; if (!DP.pick) Object.assign(DP, { from: d, to: d, pick: 1, label: null }); else { if (d < DP.from) Object.assign(DP, { to: DP.from, from: d }); else DP.to = d; DP.pick = 0; } dpDraw(); return; }
-    if (t.hasAttribute('data-dp-apply')) { if (!DP.from || !DP.to) return; if (DP.tgt === 'ord') Object.assign(F, { oFrom: DP.from, oTo: DP.to, oLabel: DP.label }); else Object.assign(F, { range: 'custom', from: DP.from, to: DP.to, dpLabel: DP.label }); dpClose(); rerender(); }
+    if (t.hasAttribute('data-dp-apply')) { if (!DP.from || !DP.to) return; if (DP.tgt === 'ord') Object.assign(F, { oFrom: DP.from, oTo: DP.to, oLabel: DP.label }); else if (DP.tgt === 'run') Object.assign(F, { rFrom: DP.from, rTo: DP.to, rLabel: DP.label }); else Object.assign(F, { range: 'custom', from: DP.from, to: DP.to, dpLabel: DP.label }); dpClose(); rerender(); }
   });
   document.addEventListener('change', (e) => { const t = e.target.closest('[data-dp-in]'); if (!t || !DP.open) return; const v = dpParse(t.value); if (!v) { t.style.borderColor = '#C9784A'; return; } const c = v < DATA.startDate ? DATA.startDate : v > DATA.cutoff ? DATA.cutoff : v;
     if (t.dataset.dpIn === 'from') { DP.from = c; if (DP.to < c) DP.to = c; } else { DP.to = c; if (DP.from > c) DP.from = c; } DP.label = null; DP.pick = 0; DP.view = dpAddMonth(dpYm(DP.to), -1) < dpYm(DATA.startDate) ? dpYm(DATA.startDate) : dpAddMonth(dpYm(DP.to), -1); dpDraw(); });
@@ -2592,7 +2593,7 @@ const RET = (() => {
   const start = () => RDATA.campaigns[0]?.first || RDATA.cutoff;
 
   /* ---------- range & filters: campaigns whose run date falls in the range ---------- */
-  function rRange(){ const r = rangeOf(F.range); return [r[0], r[1] > RDATA.cutoff ? RDATA.cutoff : r[1]]; }
+  function rRange(){ const r = F.rFrom ? [F.rFrom, F.rTo] : retRunDefault(); return [r[0], r[1] > RDATA.cutoff ? RDATA.cutoff : r[1]]; }
   // walk-in filters: store format / city / store on the home store (recipients) or the billing store (orders)
   const storeOk = (id) => { if (F.store !== 'all') return id === F.store; const s = RDATA.stores.find((x) => x.id === id); if (!s) return F.format === 'all' && F.city === 'all'; if (F.format !== 'all' && s.format !== F.format) return false; return F.city === 'all' || s.city === F.city; };
   const inR = (x, r) => x.run >= r[0] && x.run <= r[1] && (F.rcamp === 'all' || String(x.c) === F.rcamp);
@@ -2621,7 +2622,8 @@ const RET = (() => {
     const sf = sharedFilters(RDATA.stores);
     return `<div class="wl-filters">
       ${sf.format}
-      <div class="wl-fl">CAMPAIGN RUN DATE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
+      <div class="wl-fl">CAMPAIGN RUN DATE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open="run" aria-haspopup="dialog" aria-expanded="${DP.open && DP.tgt === 'run'}">${esc(F.rFrom ? (F.rLabel || `${dpShort(F.rFrom)} → ${dpShort(F.rTo)}`) : `Since first campaign (${dpShort(retRunDefault()[0])})`)}</button><div id="dpHostRun"></div></div></div>
+      ${F.rFrom ? '<button type="button" class="wl-btn" data-rrclear style="min-height:32px;padding:4px 12px;font-size:12px;align-self:flex-end">Since first campaign</button>' : ''}
       <label class="wl-fl">CAMPAIGN<select data-f="rcamp">${opt('all', `All campaigns (${camps.length})`, F.rcamp)}${camps.map((c) => opt(String(c.i), c.name, F.rcamp)).join('')}</select></label>
       ${sf.city}${sf.store}${sf.rest}
       <span class="wl-note" style="align-self:center">Campaigns run ${dpShort(r[0])} → ${dpShort(r[1])} · orders counted to ${dpShort(RDATA.cutoff)}</span>
@@ -2817,6 +2819,7 @@ const RET = (() => {
     document.querySelectorAll('[data-rex]').forEach((el) => { const go = () => { const k = el.dataset.rex; EX[k] = !EX[k]; rerender(); }; el.addEventListener('click', go); el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }); });
     document.querySelectorAll('[data-rprod]').forEach((el) => el.addEventListener('click', () => { F.rprod = el.dataset.rprod; rerender(); }));
     document.querySelectorAll('[data-roclear]').forEach((el) => el.addEventListener('click', () => { Object.assign(F, { oFrom: null, oTo: null, oLabel: null }); rerender(); }));
+    document.querySelectorAll('[data-rrclear]').forEach((el) => el.addEventListener('click', () => { Object.assign(F, { rFrom: null, rTo: null, rLabel: null }); rerender(); }));
     const rl = document.getElementById('rReloadBtn'); if (rl) rl.addEventListener('click', () => { RDATA = null; loadRet(true); rerender(); });
     const rt = document.getElementById('rRetryBtn'); if (rt) rt.addEventListener('click', () => { RDATA_ERR = null; DATA_ERR = null; loadRet(true); if (!DATA) loadData(true); rerender(); });
   }
