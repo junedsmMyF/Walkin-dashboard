@@ -29,3 +29,14 @@ Frido Founders Office dashboard. Owner: Abdal (AVP Founders Office). Deployed fr
 - PDP pages have a global **CTA toggle** (`F.cta`: all · call_popup · store_card · store_widget · pdp · store_inquiry · generic) applied in callAgg/textAgg/allAttributed/routeAgg; the CTA performance card always compares all CTAs. Get Direction is not a lead CTA — removed everywhere.
 - Customer journey page (exec layout, Oct 2026): story band → 5 KPIs → lead funnel → CTA performance → how qualified leads convert + what to fix → stage-by-stage detail (collapsed toggle, full call-vs-WhatsApp chapters in Whimsical order).
 - Lead funnel (Oct 2026): PDP → lead capture → consumed → connected → qualified → conversion outcome (converted / lost / open). Store visit and video consultation are **routing outside the funnel**, never a funnel stage.
+
+## Standing rules (owner, Oct 2026 handoff)
+- **Metric rules pending sign-off** (built, not agreed): PDP conversion = order on/after lead date, same phone, any store; dedupe call + WhatsApp → earlier lead; sale route ONLINE = video consult, else store visit; WhatsApp "call note, no reply" not counted as consumed (switch offered, not chosen); monthly targets for report KPIs. Do not change any of these without the owner.
+- **Secrets** go in Cloudflare as type **Secret** (a Text variable is wiped on deploy). Never commit the LimeChat CSV link or the routing sheet link.
+- **Cost ₹0**: no paid APIs, no service accounts; Apps Script runs on the owner's Google login; bot stays on Workers AI + D1.
+- **Do not reintroduce**: agent-assignment KPIs, grouping toggles (use click-to-expand rows), a separate exec page, the Stores & cities page, Get Direction, store visit / video consult as funnel stages, the Bigin PDP Inventories lifecycle module and the LimeChat → Bigin backfill (reverted 21 Oct, history at 8d101cb).
+- **Data honesty**: badges Verified / Unverified / Sample / Not tracked; never fake or hide a card without a source.
+- **Date filters**: always the date-range picker (Quick select, start → end, two-month calendar, Cancel / Apply) — never a plain dropdown.
+- **Text**: KPI sub-text and tooltips as short as possible.
+- **Working style**: direct, concise answers; clarifying questions as multiple choice, one at a time. Spell "Frido" and "Saiyed".
+- Keep the migration pack (handoff docs) out of this public repo. `npm test` must pass before every push to `main` (push = deploy); check `/api/pdp` → `sources` and `/api/status` after.
