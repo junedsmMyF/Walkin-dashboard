@@ -2072,13 +2072,14 @@ function pQuality(r){
     chk('Duplicate phone', a.dup, a.raw, 'Dedupe on phone; update the existing deal'),
     chk('Likely typo phone (1 digit off)', a.near, a.unique, 'OTP already verifies; check form'),
     chk('Not Interested, no lost reason', a.lostNoReason, a.lost, 'Make Close_Lost_Reason mandatory'),
+    chk('Routed to store, stage not qualified', a.U.filter((x) => x.rsm).length, a.unique, 'Move to Store Visit Scheduled when routed'),
     chk('Yet to Call 2+ days', a.stale, a.unique, 'Same-day call SLA'),
     chk('Store label not recognised', a.unmapped, a.raw, 'Add alias in src/pdp.js'),
     chk('Visit stage never used', a.visitPlan + a.visit ? 0 : a.unique, a.unique, 'Use "Store Visit Scheduled" / "Cx Visited Store"'),
     chk('Bigin "Sold" with no order', q.wonStageNoOrder || 0, a.unique, 'Check phone on bill'),
     chk('Order found, stage not won', q.orderNoWonStage || 0, a.unique, 'Auto-move to Sold on match'),
   ]);
-  const TF = { invalid_phone: ['Invalid phone number', 'Validate +91 mobile at chat start'], junk_name: ['Junk customer name ("?", ".", 9.20E+11)', 'Fix the Excel export (phones as text)'], duplicate_phone: ['Duplicate phone (repeat chat)', 'Merge into one lead per phone'],
+  const TF = { invalid_phone: ['Invalid phone number', 'Validate +91 mobile at chat start'], junk_name: ['Junk customer name ("?", ".", 9.20E+11)', 'Fix the Excel export (phones as text)'], duplicate_phone: ['Duplicate phone (repeat chat)', 'Merge into one lead per phone'], routed_stage_mismatch: ['Routed to store, stage not qualified', 'Log the visit outcome when routing'],
     closed_without_action: ['Closed with no agent action', 'Block close without a note'], reply_time_missing: ['Agent messages but no reply time', 'LimeChat export inconsistency'], outbound: ['Outbound ticket (agent-started)', 'Keep outbound out of PDP leads'], open_stale: ['Open 2+ days, no action', 'Same-day SLA on assigned chats'], note_unclassifiable: ['Note not classifiable', 'Use an outcome dropdown'] };
   // assignment flags are not shown — every lead is assigned to an agent (owner's rule, Oct 2026)
   const HIDE = new Set(['assigned_without_handoff', 'handoff_without_agent', 'assigned_but_bot_status', 'reassigned']);

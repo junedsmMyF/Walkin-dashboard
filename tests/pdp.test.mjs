@@ -81,3 +81,16 @@ test('qualified split: routed (routing sheet) and VC arranged (Bigin stage) are 
   assert.deepEqual(m.call.leads.map((x) => [x.g, x.rt, x.vc]), [['engaged', 1, 0], ['vcPlan', 0, 1]]);
   assert.ok(!JSON.stringify(m).includes('9000000002'));
 });
+
+test('routed lead counts as qualified whatever its stage; raw stage kept and mismatch flagged', () => {
+  const row = (id, at, p) => ({ 'Lead ID': id, 'Submitted at': at, Store: 'Sky City Mall, Borivali', 'Customer name': 'Real Customer', 'Customer number': p, 'Product name': 'NM - Chair', 'Expected visit date': '10/12/2026', 'Expected visit time': '5 PM' });
+  const T = { 'Ticket ID': '5', 'Created At': '2026-10-09 10:00:00', 'Ticket Status': 'closed', 'is_handoff?': 'FALSE', 'is_resolved?': 'TRUE', 'is_outside_working_hours?': 'FALSE', 'First Assignee Name': '', 'Current Agent': '', 'First Assigned Time': '', 'First Agent Message Time': '', 'Agent Message Blocks': '0', 'Private Notes': '', 'Level 1 Tags (Main)': 'storewidget', 'System Tags': 'bot', 'Last Message Sent By': 'Bot', 'Phone Number': '919000000007', 'Customer Name': 'Test' };
+  const m = run({
+    callbacks: [cb('1000000000000000001', '9000000001', '2026-10-08T11:00:00+05:30', 'SkyCity Mall, Mumbai', 'RNR 1'), cb('1000000000000000002', '9000000002', '2026-10-08T12:00:00+05:30', 'SkyCity Mall, Mumbai', 'RNR 1')],
+    limechatRows: [T],
+    routingRows: [row('L1', '10/10/2026 10:00:00', '9000000001'), row('L2', '10/10/2026 11:00:00', '9000000007'), row('L3', '10/20/2026 11:00:00', '9000000002')], // L3 is after the cutoff
+  });
+  assert.deepEqual(m.call.leads.map((x) => [x.st, x.g, x.rsm, x.cons, x.rt]), [['RNR 1', 'visitPlan', 1, 1, 1], ['RNR 1', 'ringing', 0, 1, 0]]);
+  const t = m.text.tickets[0];
+  assert.deepEqual([t.st, t.sr, t.am, t.oc, t.rt, t.fl.includes('routed_stage_mismatch')], ['qualified', 'bot_only', 1, 'routed_store', 1, true]);
+});

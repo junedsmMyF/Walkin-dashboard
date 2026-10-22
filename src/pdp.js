@@ -91,6 +91,11 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
 
   // Lead routing sheet (store routing from the WhatsApp DSR group) — read first so every lead can be marked routed.
   const RT = routingRows ? standardiseRouting(routingRows, { storeOf: (l) => storeFromWeb(l), cutoff }) : null;
+  // In the routing sheet (routed by the cutoff) = store visit scheduled = qualified, whatever the recorded stage (owner, 22 Oct 2026).
+  // The raw stage is kept; the mismatch is flagged on Data quality.
+  const routedBy = (p) => !!(p && RT && RT.firstByPhone.has(p) && RT.firstByPhone.get(p).d <= cutoff);
+  const QUAL_G = new Set(['engaged', 'visitPlan', 'vcPlan', 'visit', 'crmWon']);
+  if (LC) for (const x of LC.tickets) if (!x.svc && x.stage !== 'qualified' && routedBy(x.phone)) { x.stageRaw = x.stage; x.stage = 'qualified'; x.am = 1; x.oc = 'routed_store'; x.flags.push('routed_stage_mismatch'); }
 
   // ---------- Callback leads ----------
   const raw = callbacks.map((c) => {
@@ -110,14 +115,15 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
     if (x.d > cutoff) { if (daysBetween(cutoff, x.d) > 2) quality.futureDates++; continue; }
     if (!inRange(x.d)) continue;
     const ageD = daysBetween(x.d, cutoff);
+    const rt = routedBy(x.p), rsm = rt && !QUAL_G.has(x.g) ? 1 : 0; const g = rsm ? 'visitPlan' : x.g; // routed → qualified (visit planned)
     leads.push({
-      i: x.id.slice(-6), d: x.d, s: x.s, st: x.st, g: x.g, dup, near, ag: x.ag || '', cons: x.st && x.st !== 'Yet to Call' ? 1 : 0, // consumed = moved past Yet to Call
+      i: x.id.slice(-6), d: x.d, s: x.s, st: x.st, g, rsm, dup, near, ag: x.ag || '', cons: rsm || (x.st && x.st !== 'Yet to Call') ? 1 : 0, // consumed = moved past Yet to Call
       prod: x.prod ? 1 : 0, cat: x.cat || (x.prod ? categoryOf(x.prod.split(' || ')[0]) : ''), utm: x.utm ? 1 : 0,
-      lostNoReason: x.g === 'lost' && !x.lr ? 1 : 0, lr: x.lr || '',
-      stale: x.g === 'notCalled' && ageD >= 2 ? 1 : 0, ageD,
+      lostNoReason: g === 'lost' && !x.lr ? 1 : 0, lr: x.lr || '',
+      stale: g === 'notCalled' && ageD >= 2 ? 1 : 0, ageD,
       untouched: x.touchedH < 0.05 ? 1 : 0,
       wk: x.p && walkinFirst.has(x.p) && walkinFirst.get(x.p) <= x.d ? 1 : 0, // caller was already a walk-in lead
-      rt: x.p && RT && RT.firstByPhone.has(x.p) ? 1 : 0, vc: isVcStage(x.st) ? 1 : 0, // store visit scheduled (routing sheet) · VC arranged (Bigin)
+      rt: rt ? 1 : 0, vc: isVcStage(x.st) ? 1 : 0, // store visit scheduled (routing sheet) · VC arranged (Bigin)
     });
   }
 
@@ -161,7 +167,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
     const mask = (n) => String(n || '').replace(/\d{7,}/g, '#').slice(0, 120);
     text = {
       source: cut ? `LimeChat export until ${addDays(cut, -1)} · Bigin PDP Inventories from ${cut}` : 'LimeChat export (WhatsApp inbox FES - WA - Karix - 9096417888)', cutover: cut, start: LC.tickets[0]?.d || null, end: LC.tickets[LC.tickets.length - 1]?.d || null,
-      tickets: LC.tickets.filter((x) => inRange(x.d)).map((x) => ({ i: x.id, d: x.d, st: x.stage, rt: x.phone && RT && RT.firstByPhone.has(x.phone) ? 1 : 0, vc: x.oc === 'routed_video' ? 1 : 0, raw: x.status, src: x.src === 'bigin' ? 'b' : 'l', bst: x.bst || '', ho: x.ho ? 1 : 0, ag: x.fa, ca: x.ca, am: x.am ? 1 : 0, oc: x.oc, note: mask(x.note), entry: x.entry, pdp: x.pdp, s: x.store || 'UNMAPPED', intent: x.intent, svc: x.svc ? 1 : 0, dup: x.dup ? 1 : 0, ooh: x.ooh ? 1 : 0, ma: x.minsToAssign, mm: x.minsToAgentMsg, mr: x.minsToReply, l1: x.l1, fl: x.flags, last: x.lastBy, rnr: x.rnrVariant, ageD: daysBetween(x.d, cutoff), call: x.phone && callPhones.has(x.phone) ? 1 : 0 })),
+      tickets: LC.tickets.filter((x) => inRange(x.d)).map((x) => ({ i: x.id, d: x.d, st: x.stage, sr: x.stageRaw || '', rt: routedBy(x.phone) ? 1 : 0, vc: x.oc === 'routed_video' ? 1 : 0, raw: x.status, src: x.src === 'bigin' ? 'b' : 'l', bst: x.bst || '', ho: x.ho ? 1 : 0, ag: x.fa, ca: x.ca, am: x.am ? 1 : 0, oc: x.oc, note: mask(x.note), entry: x.entry, pdp: x.pdp, s: x.store || 'UNMAPPED', intent: x.intent, svc: x.svc ? 1 : 0, dup: x.dup ? 1 : 0, ooh: x.ooh ? 1 : 0, ma: x.minsToAssign, mm: x.minsToAgentMsg, mr: x.minsToReply, l1: x.l1, fl: x.flags, last: x.lastBy, rnr: x.rnrVariant, ageD: daysBetween(x.d, cutoff), call: x.phone && callPhones.has(x.phone) ? 1 : 0 })),
       attributed: tAttr, gaps: coverageGaps(LC.tickets),
     };
   }
