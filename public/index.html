@@ -672,7 +672,7 @@ function crumbs(list){
 
 /* ---------- Live data (Cloudflare Worker /api/metrics — aggregated, no customer data) ---------- */
 let DATA = null, DATA_ERR = null, LOADING = false;
-const F = { rcamp: 'all', rcity: 'all', mtype: 'all', mcity: 'all', mstore: 'all', mleads: 'net', range: 'mtd', format: 'all', city: 'all', store: 'all', cta: 'all', ex: {}, cx: {}, rev: 'net', cmp: 'prev', day: 'all', from: null, to: null, crf: '1', dpLabel: null };
+const F = { rcamp: 'all', rcity: 'all', rprod: 'net', oFrom: null, oTo: null, oLabel: null, mtype: 'all', mcity: 'all', mstore: 'all', mleads: 'net', range: 'mtd', format: 'all', city: 'all', store: 'all', cta: 'all', ex: {}, cx: {}, rev: 'net', cmp: 'prev', day: 'all', from: null, to: null, crf: '1', dpLabel: null };
 const dayOk = (d) => F.day === 'all' || (F.day === 'weekend' ? ((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7) >= 5 : ((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7) < 5);
 async function loadData(force){
   if (LOADING || (DATA && !force)) return;
@@ -916,7 +916,8 @@ function kpiInfo(label){
 const kpiTip = (label) => { const i = kpiInfo(label); return i ? `<span class="k-i" role="button" tabindex="0" aria-label="What is this?">i</span><span class="k-tip" role="tooltip"><b>${esc(String(label).replace(/<[^>]+>/g, ''))}</b>${esc(i.text)}<em>Source: ${esc(i.src)}</em></span>` : ''; };
 
 /* ---------- Date-range picker (standard for every dashboard: quick select · start → end · two-month calendar · Cancel / Apply) ---------- */
-const DP = { open: false, from: null, to: null, view: null, pick: 0, sub: null, label: null };
+const DP = { open: false, from: null, to: null, view: null, pick: 0, sub: null, label: null, tgt: '' }; // tgt '' = page range (F.range) · 'ord' = retention order-placed range (F.oFrom/F.oTo)
+const dpHostId = () => (DP.tgt === 'ord' ? 'dpHostOrd' : 'dpHost');
 const dpMonths = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const dpShort = (d) => { const [y, m, dd] = d.split('-').map(Number); return `${dd} ${dpMonths[m - 1].slice(0, 3)} ${y}`; };
 const dpYm = (d) => d.slice(0, 7);
@@ -947,8 +948,8 @@ function dpPresets() {
   };
 }
 const dpClamp = (p) => { const min = DATA.startDate, max = DATA.cutoff; if (p.to < min || p.from > max) return null; return { ...p, from: p.from < min ? min : p.from, to: p.to > max ? max : p.to }; };
-function dpOpen() { const r = rangeOf(F.range); Object.assign(DP, { open: true, from: r[0], to: r[1], view: dpAddMonth(dpYm(r[1]), -1) < dpYm(DATA.startDate) ? dpYm(DATA.startDate) : dpAddMonth(dpYm(r[1]), -1), pick: 0, sub: null, label: F.range === 'custom' ? F.dpLabel : (RANGE_LABEL[F.range] || null) }); if (dpAddMonth(DP.view, 1) > dpYm(DATA.cutoff) && DP.view > dpYm(DATA.startDate)) DP.view = dpAddMonth(dpYm(DATA.cutoff), -1); dpDraw(); }
-function dpClose() { DP.open = false; const h = document.getElementById('dpHost'); if (h) h.innerHTML = ''; }
+function dpOpen(tgt = '') { const ord = tgt === 'ord'; const r = ord ? [F.oFrom || DATA.startDate, F.oTo || DATA.cutoff] : rangeOf(F.range); Object.assign(DP, { tgt, open: true, from: r[0], to: r[1], view: dpAddMonth(dpYm(r[1]), -1) < dpYm(DATA.startDate) ? dpYm(DATA.startDate) : dpAddMonth(dpYm(r[1]), -1), pick: 0, sub: null, label: ord ? F.oLabel || 'All data' : F.range === 'custom' ? F.dpLabel : (RANGE_LABEL[F.range] || null) }); if (dpAddMonth(DP.view, 1) > dpYm(DATA.cutoff) && DP.view > dpYm(DATA.startDate)) DP.view = dpAddMonth(dpYm(DATA.cutoff), -1); dpDraw(); }
+function dpClose() { DP.open = false; const h = document.getElementById(dpHostId()); if (h) h.innerHTML = ''; }
 function dpCal(ym, nav) {
   const [y, m] = ym.split('-').map(Number); const first = `${ym}-01`; const lead = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
   const start = dAdd(first, -lead); const cells = [];
@@ -960,7 +961,7 @@ function dpCal(ym, nav) {
     <div class="dp-grid">${['Su','Mo','Tu','We','Th','Fr','Sa'].map((x) => `<span class="dp-wd">${x}</span>`).join('')}${cells.join('')}</div></div>`;
 }
 function dpDraw() {
-  const h = document.getElementById('dpHost'); if (!h) return; if (!DP.open) { h.innerHTML = ''; return; }
+  const h = document.getElementById(dpHostId()); if (!h) return; if (!DP.open) { h.innerHTML = ''; return; }
   const P = dpPresets(); let idx = 0; const flat = [];
   const item = (p, cls = '') => { const c = dpClamp(p); flat.push(c ? { ...c, label: p.label } : null); const on = c && DP.from === c.from && DP.to === c.to;
     return `<button type="button" class="dp-q ${cls} ${on ? 'on' : ''}" data-dp-preset="${idx++}" ${c ? '' : `disabled title="${esc(p.note || 'No data in this period')}"`}>${esc(p.label)}</button>`; };
@@ -981,13 +982,13 @@ if (!window.__dpBound) {
     const t = e.target.closest('[data-dp-open],[data-dp-preset],[data-dp-sub],[data-dp-day],[data-dp-nav],[data-dp-apply],[data-dp-cancel]');
     if (!t) { if (DP.open && !e.target.closest('.dp')) dpClose(); return; }
     e.preventDefault();
-    if (t.hasAttribute('data-dp-open')) { DP.open ? dpClose() : dpOpen(); return; }
+    if (t.hasAttribute('data-dp-open')) { const tg = t.dataset.dpOpen || ''; const same = DP.open && DP.tgt === tg; if (DP.open) dpClose(); if (!same) dpOpen(tg); return; }
     if (t.hasAttribute('data-dp-cancel')) { dpClose(); return; }
     if (t.hasAttribute('data-dp-sub')) { DP.sub = DP.sub === t.dataset.dpSub ? null : t.dataset.dpSub; dpDraw(); return; }
     if (t.hasAttribute('data-dp-preset')) { const p = DP._flat[+t.dataset.dpPreset]; if (!p) return; Object.assign(DP, { from: p.from, to: p.to, label: p.label, pick: 0, view: dpAddMonth(dpYm(p.to), -1) < dpYm(DATA.startDate) ? dpYm(DATA.startDate) : dpAddMonth(dpYm(p.to), -1) }); dpDraw(); return; }
     if (t.hasAttribute('data-dp-nav')) { DP.view = dpAddMonth(DP.view, +t.dataset.dpNav); dpDraw(); return; }
     if (t.hasAttribute('data-dp-day')) { const d = t.dataset.dpDay; if (!DP.pick) Object.assign(DP, { from: d, to: d, pick: 1, label: null }); else { if (d < DP.from) Object.assign(DP, { to: DP.from, from: d }); else DP.to = d; DP.pick = 0; } dpDraw(); return; }
-    if (t.hasAttribute('data-dp-apply')) { if (!DP.from || !DP.to) return; Object.assign(F, { range: 'custom', from: DP.from, to: DP.to, dpLabel: DP.label }); dpClose(); rerender(); }
+    if (t.hasAttribute('data-dp-apply')) { if (!DP.from || !DP.to) return; if (DP.tgt === 'ord') Object.assign(F, { oFrom: DP.from, oTo: DP.to, oLabel: DP.label }); else Object.assign(F, { range: 'custom', from: DP.from, to: DP.to, dpLabel: DP.label }); dpClose(); rerender(); }
   });
   document.addEventListener('change', (e) => { const t = e.target.closest('[data-dp-in]'); if (!t || !DP.open) return; const v = dpParse(t.value); if (!v) { t.style.borderColor = '#C9784A'; return; } const c = v < DATA.startDate ? DATA.startDate : v > DATA.cutoff ? DATA.cutoff : v;
     if (t.dataset.dpIn === 'from') { DP.from = c; if (DP.to < c) DP.to = c; } else { DP.to = c; if (DP.from > c) DP.from = c; } DP.label = null; DP.pick = 0; DP.view = dpAddMonth(dpYm(DP.to), -1) < dpYm(DATA.startDate) ? dpYm(DATA.startDate) : dpAddMonth(dpYm(DP.to), -1); dpDraw(); });
@@ -2539,7 +2540,7 @@ const META = (() => {
 })();
 
 /* ---------- Retail retention module (offer broadcasts → retail store orders · sample until the LimeChat broadcast report is connected) ---------- */
-const RTABS = [{ id: 'overview', name: 'Overview' }, { id: 'campaigns', name: 'Campaigns' }, { id: 'stores', name: 'Stores & products' }, { id: 'definitions', name: 'Flow & definitions' }];
+const RTABS = [{ id: 'overview', name: 'Overview' }, { id: 'stores', name: 'Stores' }, { id: 'definitions', name: 'Flow & definitions' }];
 let RDATA = null, RDATA_ERR = null, RLOADING = false;
 async function loadRet(force){
   if (RLOADING || (RDATA && !force)) return;
@@ -2564,7 +2565,6 @@ const RET = (() => {
   const card = (title, sub, body, badge = '', right = '') => `<section class="wl-card ${badge === 's' ? 'smp' : ''}"><div class="wl-ch"><div><h2>${title} ${badge ? VB[badge] : ''}</h2>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${right}</div>${body}</section>`;
   const href = (t) => '#/retail/retention/' + t;
   const smp = () => RDATA?.sample ? 's' : 'v';
-  const SRC = { walkin: 'Walk-in lead', pdp_call: 'PDP call lead', pdp_text: 'PDP WhatsApp lead', meta: 'Meta lead' };
   const EX = {}; // expanded city rows (click-to-expand)
   const store = (id) => (RDATA.stores.find((s) => s.id === id) || { name: id || 'No earlier store order', city: '—' });
   const start = () => RDATA.campaigns[0]?.first || RDATA.cutoff;
@@ -2575,20 +2575,19 @@ const RET = (() => {
   const inR = (x, r) => x.run >= r[0] && x.run <= r[1] && (F.rcamp === 'all' || String(x.c) === F.rcamp);
   const recs = (r) => RDATA.recipients.filter((x) => inR(x, r) && cityOk(x.hs));
   const cred = (r) => RDATA.credited.filter((x) => inR(x, r) && cityOk(x.s));
-  const lost = (r) => RDATA.lostTo.filter((x) => inR(x, r) && cityOk(x.s));
   function agg(R, O){
     const a = { n: 0, sent: 0, failed: 0, del: 0, read: 0, rep: 0, clk: 0, buy: 0, repBuy: 0 };
     R.forEach((x) => { for (const k in a) a[k] += x[k] || 0; });
     a.orders = O.length; a.net = O.reduce((s, x) => s + x.net, 0); a.qty = O.reduce((s, x) => s + (x.qty || 0), 0); a.buyers = O.filter((x) => x.first).length;
     return a;
   }
-  const ctx = (r) => { const R = recs(r), O = cred(r); return { r, R, O, L: lost(r), a: agg(R, O) }; };
+  const ctx = (r) => { const R = recs(r), O = cred(r); return { r, R, O, a: agg(R, O) }; };
 
   function header(){
     const s = RDATA?.sources || {};
     const asof = RDATA ? `Data as of ${dpShort(RDATA.cutoff)} (T-1) · ${s.broadcasts?.status === 'sample' ? 'LimeChat broadcast report not connected — every figure is sample' : 'LimeChat broadcast report ' + esc(s.broadcasts?.status || '—') + ' · DevX ' + esc(s.sales?.status || '—')}` : 'Connecting to sources…';
     return `<div class="wl-head"><div><div class="wl-eyebrow">FRIDO · FOUNDERS OFFICE · RETAIL REVENUE</div><h1>Retail retention</h1></div>
-      <div class="wl-meta"><div class="wl-asof">${asof}</div><div class="wl-pills">${RDATA?.sample ? '<span class="wl-pill p-peach">Sample data</span>' : '<span class="wl-pill p-teal">Broadcasts live</span>'}<span class="wl-pill p-grey">${RDATA ? RDATA.windowDays : 60}-day window · most recent touch wins</span><button type="button" class="wl-btn" id="rReloadBtn" style="min-height:28px;padding:4px 12px;font-size:12px">Reload data</button></div></div></div>
+      <div class="wl-meta"><div class="wl-asof">${asof}</div><div class="wl-pills">${RDATA?.sample ? '<span class="wl-pill p-peach">Sample data</span>' : '<span class="wl-pill p-teal">Broadcasts live</span>'}<span class="wl-pill p-grey">${RDATA ? RDATA.windowDays : 60}-day window · read leads only</span><button type="button" class="wl-btn" id="rReloadBtn" style="min-height:28px;padding:4px 12px;font-size:12px">Reload data</button></div></div></div>
       <nav class="wl-tabs" aria-label="Dashboard pages">${RTABS.map((t) => `<a class="wl-tab ${t.id === CUR ? 'on' : ''} ${t.id === 'definitions' ? 'aux' : ''}" href="${href(t.id)}" ${t.id === CUR ? 'aria-current="page"' : ''}>${t.name}</a>`).join('')}</nav>`;
   }
   let CUR = 'overview';
@@ -2612,7 +2611,7 @@ const RET = (() => {
     return card('Campaign flow', 'From offer to retention revenue · counts for this view', `<div class="flow">
       <div class="flow-row"><span class="flow-tag">Set-up</span>${box('Exclusive offer', 'e.g. Diwali', 'lead')}${ar}${box('Creatives', 'From the retention team', 'lead')}${ar}${box('Campaign flow', 'Built on LimeChat', 'lead')}${ar}${box('Broadcast', 'Existing retail customers', 'lead')}</div>
       <div class="flow-row"><span class="flow-tag">Reach</span>${box(nf(a.n) + ' messages', `${nf(a.failed)} failed`)}${ar}${box(nf(a.sent) + ' sent', pct(a.sent, a.n, 0) + ' of messages')}${ar}${box(nf(a.del) + ' delivered', pct(a.del, a.n, 0) + ' of messages')}${ar}${box(nf(a.read) + ' read', pct(a.read, a.del, 0) + ' of delivered')}</div>
-      <div class="flow-row"><span class="flow-tag">Revenue</span>${box('Store order', `Read leads only · day 0–${RDATA.windowDays}`)}${ar}${box('Most recent touch?', 'Broadcast vs walk-in / PDP / Meta lead', 'gap')}${ar}${box(nf(a.orders) + ' orders · ' + inr(a.net), `ROAS ${spendOf(a) ? (a.net / spendOf(a)).toFixed(1) + '×' : '—'} on ${inr(spendOf(a))} spend`, 'rev')}</div>
+      <div class="flow-row"><span class="flow-tag">Revenue</span>${box('Store order', `Read leads only · day 0–${RDATA.windowDays}`)}${ar}${box(nf(a.orders) + ' orders · ' + inr(a.net), `ROAS ${spendOf(a) ? (a.net / spendOf(a)).toFixed(1) + '×' : '—'} on ${inr(spendOf(a))} spend`, 'rev')}</div>
     </div>`, smp());
   }
   function funnel(a){
@@ -2625,12 +2624,6 @@ const RET = (() => {
     const F1 = O.filter((x) => x.first); const n = F1.length; let cum = 0;
     const v = BUCKETS.map(([l, lo, hi]) => { const k = F1.filter((x) => x.lag >= lo && x.lag <= hi).length; cum += k; return { l, k, cum }; }); const mx = Math.max(1, ...v.map((x) => x.k));
     return card('Days from run to first order', 'When buyers act · cumulative share', n ? `<div class="wl-rank" style="grid-template-columns:70px minmax(0,1fr) 54px 64px">` + v.map((x) => `<span class="wl-sn">${x.l}</span><div class="wl-track"><div class="wl-fill" style="width:${100 * x.k / mx}%;background:${C.teal}"></div></div><span class="wl-val">${nf(x.k)}</span><span style="text-align:right;font-size:12px;color:#5B6068">${pct(x.cum, n, 0)} cum.</span>`).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No buyers in this view yet.</p>', smp());
-  }
-  function creditCard(c){
-    const prior = c.O.filter((x) => x.prior); const by = {}; c.L.forEach((x) => { by[x.to] = (by[x.to] || 0) + 1; });
-    const total = c.O.length + c.L.length;
-    const rows = [[`Credited to retention`, c.O.length, 'Broadcast was the most recent touch', true, total], ...Object.entries(by).sort((x, y) => y[1] - x[1]).map(([k, n]) => [`To a newer ${SRC[k] || k}`, n, 'Lead came after the broadcast', false, total]), ['Credited, with an older lead', prior.length, 'Share of credited orders · credit stays with retention', true, c.O.length]];
-    return card('Who gets the order', `${nf(total)} store orders from read leads inside the window`, `<div class="wl-list">${rows.map(([t, n, s, ok, of]) => `<div class="row"><span>${t}<small>${s}</small></span><b class="${ok ? 'ok' : ''}">${nf(n)} · ${pct(n, of, 0)}</b></div>`).join('')}</div>`, smp());
   }
   function failCard(r){
     const by = {}; RDATA.fails.filter((x) => x.run >= r[0] && x.run <= r[1] && (F.rcamp === 'all' || String(x.c) === F.rcamp)).forEach((x) => { by[x.why] = (by[x.why] || 0) + x.n; });
@@ -2681,22 +2674,13 @@ const RET = (() => {
       { l: 'Spend', v: inr(sp), d: `₹${RDATA.costPerDelivered} × delivered`, s: `${nf(a.del)} delivered`, b: smp() },
       { l: 'ROAS', v: roas(a), d: 'revenue ÷ spend', s: a.orders ? `${inr(sp / a.orders)} per order` : '—', tone: sp && a.net >= sp ? 'good' : 'flat', b: smp() },
     ]);
-    return kp + campaignTable(r, false) + `<div class="wl-g2">${roasChart(r)}${card('Message funnel', 'Customers at each step', funnel(a), smp())}</div>` + flowCard(a) + `<div class="wl-g2">${creditCard(c)}${failCard(r)}</div>`;
-  }
-  function pCampaigns(r){
     const data = campaignRows(r);
     const cols = [['Day 7', 'd7'], ['Day 14', 'd14'], ['Day 30', 'd30'], ['Day 60', 'd60']];
     const mx = Math.max(1, ...data.flatMap((x) => cols.map(([, k]) => x[k] || 0)));
     const cohort = card('Conversion by days since run', 'Buyers ÷ delivered by day N · blank = not reached yet', data.length ? `<div class="wl-heat" style="grid-template-columns:minmax(140px,220px) repeat(4,minmax(0,1fr))"><span></span>${cols.map(([l]) => `<span class="wl-hh">${l}</span>`).join('')}` + data.map((x) => `<span class="wl-hn">${esc(x.name)}</span>` + cols.map(([, k]) => x[k] == null ? '<div class="wl-cell wl-na">—</div>' : `<div class="wl-cell" style="${heatBg(x[k], mx)}">${pctTxt(x[k])}</div>`).join('')).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No broadcast ran in this range.</p>', smp());
-    const conv = (x) => pctv(x.a.orders, x.a.del) || 0, ro = (x) => spendOf(x.a) ? x.a.net / spendOf(x.a) : 0;
-    const best = data.slice().sort((x, y) => conv(y) - conv(x))[0], top = data.slice().sort((x, y) => ro(y) - ro(x))[0];
-    const kp = kpis([
-      { l: 'Broadcasts', v: nf(data.length), d: `${data.filter((x) => x.cp.open).length} window open`, s: `${RDATA.windowDays}-day window`, b: smp() },
-      { l: 'Best conversion', v: best ? best.name : '—', d: best ? pctTxt(conv(best)) : '', s: 'Orders ÷ delivered', b: smp() },
-      { l: 'Best ROAS', v: top ? top.name : '—', d: top ? roas(top.a) : '', s: top ? `${inr(top.a.net)} revenue` : '', b: smp() },
-    ]);
-    const c = ctx(r);
-    return kp + campaignTable(r, true) + `<div class="wl-g2">${roasChart(r)}${lagCard(c.O)}</div>` + cohort + failCard(r);
+    return kp + campaignTable(r, true) + `<div class="wl-g2">${roasChart(r)}${card('Message funnel', 'Customers at each step', funnel(a), smp())}</div>` +
+      revenueAnalysis(c) +
+      `<p class="wl-colhead" style="margin:22px 0 0">TIMING &amp; DELIVERY</p><div class="wl-g2">${lagCard(c.O)}${cohort}</div>` + failCard(r) + flowCard(a);
   }
   function pStores(r){
     const c = ctx(r);
@@ -2712,14 +2696,35 @@ const RET = (() => {
     const tbl = card('Retention by city and store', 'Click a city to see its stores · messaged & buyers by home store, orders & revenue by billing store', `<div class="wl-tw"><table><thead><tr><th>City / store</th><th class="r">Messaged</th><th class="r">Buyers</th><th class="r">Conversion</th><th class="r">Orders billed</th><th class="r">Revenue billed</th><th class="r">Same store</th></tr></thead><tbody>` +
       cities.map((g) => `<tr data-rex="${esc(g.city)}" tabindex="0" style="cursor:pointer"><td class="b">${EX[g.city] ? '▾' : '▸'} ${esc(g.city)} <span class="wl-sm" style="display:inline">${g.list.length} store${g.list.length === 1 ? '' : 's'}</span></td>${line(g.t)}</tr>` + (EX[g.city] ? g.list.map((id) => ({ id, t: sum([id]) })).sort((x, y) => y.t.net - x.t.net).map((s) => `<tr style="background:#FAF9F5"><td style="padding-left:28px">${esc(store(s.id).name)}</td>${line(s.t)}</tr>`).join('') : '')).join('') +
       `</tbody></table></div>${noHome ? `<p class="wl-note" style="margin-top:10px">${nf(noHome)} messaged customers have no earlier store order, so no home store. They stay in totals.</p>` : ''}`, smp());
-    const keep = new Set(c.O.map((x) => x.o)); const L = RDATA.lines.filter((x) => keep.has(x.o));
+    return tbl;
+  }
+  // Revenue analysis — own "Order placed" range (picker target 'ord'); daily revenue, category, top products
+  function revenueAnalysis(c){
+    const oR = [F.oFrom || DATA.startDate, F.oTo || RDATA.cutoff];
+    const OD = c.O.filter((x) => x.d >= oR[0] && x.d <= oR[1]);
+    const keep = new Set(OD.map((x) => x.o)); const L = RDATA.lines.filter((x) => keep.has(x.o));
+    const oLbl = F.oFrom ? (F.oLabel || `${dpShort(oR[0])} → ${dpShort(oR[1])}`) : 'All order dates';
+    const obar = `<p class="wl-colhead" style="margin:22px 0 0">REVENUE ANALYSIS</p><div class="wl-filters" style="margin-top:6px">
+      <div class="wl-fl">ORDER PLACED<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open="ord" aria-haspopup="dialog" aria-expanded="${DP.open && DP.tgt === 'ord'}">${esc(oLbl)}</button><div id="dpHostOrd"></div></div></div>
+      ${F.oFrom ? '<button type="button" class="wl-btn" data-roclear style="min-height:32px;padding:4px 12px;font-size:12px;align-self:flex-end">All order dates</button>' : ''}
+      <span class="wl-note" style="align-self:center">Applies to daily revenue, category and products · ${nf(OD.length)} orders · ${inr(OD.reduce((t, x) => t + x.net, 0))}</span>
+    </div>`;
+    const dayMap = {}; OD.forEach((x) => { const v = dayMap[x.d] || (dayMap[x.d] = { net: 0, n: 0 }); v.net += x.net; v.n++; });
+    const dFirst = F.oFrom ? oR[0] : (OD.length ? OD.reduce((m, x) => (x.d < m ? x.d : m), OD[0].d) : oR[0]), dLast = F.oTo ? oR[1] : (OD.length ? OD.reduce((m, x) => (x.d > m ? x.d : m), OD[0].d) : oR[1]);
+    const days = []; for (let d = dFirst; d <= dLast && days.length < 400; d = dAdd(d, 1)) days.push(d);
+    const mxD = Math.max(1, ...days.map((d) => (dayMap[d] || {}).net || 0)); const peak = days.reduce((b, d) => (((dayMap[d] || {}).net || 0) > ((dayMap[b] || {}).net || 0) ? d : b), days[0]);
+    const dLbl = (d) => dpShort(d).replace(/ \d{4}$/, '');
+    const daily = card('Daily revenue', 'Credited orders by order date', OD.length ? `<div class="wl-trend" role="img" aria-label="Daily retention revenue"><div class="wl-bars">${days.map((d) => { const v = dayMap[d] || { net: 0, n: 0 }; return `<div title="${dLbl(d)}: ${inr(v.net)} · ${v.n} order${v.n === 1 ? '' : 's'}" style="height:${(v.net / mxD * 100).toFixed(1)}%">${v.net ? `<i style="flex:1;background:${C.teal}"></i>` : ''}</div>`; }).join('')}</div></div>
+      <div class="wl-axis"><span>${dLbl(days[0])}</span><span>Peak ${inr((dayMap[peak] || {}).net || 0)} on ${dLbl(peak)} · avg ${inr(OD.reduce((t, x) => t + x.net, 0) / days.length)} / day</span><span>${dLbl(days[days.length - 1])}</span></div>` : '<p class="sub" style="margin-top:14px">No credited orders in this order-date range.</p>', smp());
     const cat = {}; L.forEach((x) => { const k = x.cat || 'Other'; const v = cat[k] || (cat[k] = { net: 0, qty: 0 }); v.net += x.net; v.qty += x.qty; });
     const cats = Object.entries(cat).sort((x, y) => y[1].net - x[1].net); const mx = Math.max(1, ...cats.map((x) => x[1].net)); const tot = cats.reduce((s, x) => s + x[1].net, 0);
-    const catCard = card('Revenue by category', 'Credited orders', cats.length ? `<div class="wl-rank" style="grid-template-columns:minmax(100px,140px) minmax(0,1fr) 80px 50px">` + cats.map(([k, v]) => `<span class="wl-sn">${esc(k)}</span><div class="wl-track"><div class="wl-fill" style="width:${100 * v.net / mx}%;background:${C.teal}"></div></div><span style="text-align:right;font-size:13px;font-weight:600">${inr(v.net)}</span><span style="text-align:right;font-size:12px;color:#5B6068">${pct(v.net, tot, 0)}</span>`).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No credited orders in this view.</p>', smp());
+    const catCard = card('Revenue by category', 'Credited orders · order-date range above', cats.length ? `<div class="wl-rank" style="grid-template-columns:minmax(100px,140px) minmax(0,1fr) 80px 50px">` + cats.map(([k, v]) => `<span class="wl-sn">${esc(k)}</span><div class="wl-track"><div class="wl-fill" style="width:${100 * v.net / mx}%;background:${C.teal}"></div></div><span style="text-align:right;font-size:13px;font-weight:600">${inr(v.net)}</span><span style="text-align:right;font-size:12px;color:#5B6068">${pct(v.net, tot, 0)}</span>`).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No credited orders in this order-date range.</p>', smp());
     const prod = {}; L.forEach((x) => { const v = prod[x.p] || (prod[x.p] = { net: 0, qty: 0 }); v.net += x.net; v.qty += x.qty; });
-    const tp = Object.entries(prod).sort((x, y) => y[1].net - x[1].net).slice(0, 10);
-    const prodCard = card('Top products', 'Credited orders · top 10 by revenue', tp.length ? `<div class="wl-tw"><table><thead><tr><th>Product</th><th class="r">Units</th><th class="r">Revenue</th></tr></thead><tbody>${tp.map(([p, v]) => `<tr><td class="wrap">${esc(RDATA.pnames[p])}</td><td class="r">${nf(v.qty)}</td><td class="r b">${inr(v.net)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="sub" style="margin-top:14px">No credited orders in this view.</p>', smp());
-    return tbl + `<div class="wl-g2">${catCard}${prodCard}</div>`;
+    const byQty = F.rprod === 'qty';
+    const tp = Object.entries(prod).sort((x, y) => (byQty ? y[1].qty - x[1].qty || y[1].net - x[1].net : y[1].net - x[1].net)).slice(0, 10);
+    const pseg = `<div class="wl-seg" role="group" aria-label="Rank products by">${[['net', 'By revenue'], ['qty', 'By qty']].map(([v, l]) => `<button type="button" data-rprod="${v}" class="${F.rprod === v ? 'on' : ''}" aria-pressed="${F.rprod === v}">${l}</button>`).join('')}</div>`;
+    const prodCard = card('Top products', `Credited orders · top 10 by ${byQty ? 'units' : 'revenue'}`, tp.length ? `<div class="wl-tw"><table><thead><tr><th>Product</th><th class="r ${byQty ? 'b' : ''}">Units</th><th class="r ${byQty ? '' : 'b'}">Revenue</th></tr></thead><tbody>${tp.map(([p, v]) => `<tr><td class="wrap">${esc(RDATA.pnames[p])}</td><td class="r ${byQty ? 'b' : ''}">${nf(v.qty)}</td><td class="r ${byQty ? '' : 'b'}">${inr(v.net)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="sub" style="margin-top:14px">No credited orders in this order-date range.</p>', smp(), pseg);
+    return obar + daily + `<div class="wl-g2">${catCard}${prodCard}</div>`;
   }
   function pDefs(){
     const box = (t, s, cl = '') => `<div class="fbox ${cl}"><b>${t}</b><span>${s}</span></div>`;
@@ -2729,8 +2734,7 @@ const RET = (() => {
       <div class="flow-row"><span class="flow-tag">1 · Offer</span>${box('Exclusive offer', 'e.g. Diwali offer', 'lead')}${ar}${box('Creatives', 'Retention team sends them', 'lead')}</div>
       <div class="flow-row"><span class="flow-tag">2 · LimeChat</span>${box('Campaign flow', 'Built on LimeChat')}${ar}${box('Broadcast', 'All existing retail customers · run date per customer')}</div>
       <div class="flow-row"><span class="flow-tag">3 · Reach</span>${box('Sent', 'Unique phone per campaign')}${ar}${box('Delivered', 'On WhatsApp')}${ar}${box('Read', 'Read Status = Read', 'gap')}${or}${box('Failed', 'WhatsApp error reason', 'leak')}</div>
-      <div class="flow-row"><span class="flow-tag">4 · Order</span>${box('DevX order', 'Read lead only · same phone · Frido store')}${ar}${box(`Day 0 – ${W}`, 'On/after this customer’s run date', 'gap')}${or}${box('Outside window', 'Before the run or after day ' + W, 'leak')}</div>
-      <div class="flow-row"><span class="flow-tag">5 · Credit</span>${box('Most recent touch?', 'Broadcast vs walk-in / PDP / Meta lead', 'gap')}${ar}${box('Retention revenue', 'Broadcast was the last touch', 'rev')}${or}${box('Other dashboard', 'A newer lead gets the order', 'leak')}</div>
+      <div class="flow-row"><span class="flow-tag">4 · Order</span>${box('DevX order', 'Read lead only · same phone · Frido store')}${ar}${box(`Day 0 – ${W}`, 'On/after this customer’s run date', 'gap')}${ar}${box('Retention revenue', 'Credited to the broadcast', 'rev')}${or}${box('Outside window', 'Before the run or after day ' + W, 'leak')}</div>
     </div>`);
     const D = [
       ['Total · sent · delivered · failed · read', 'Message Status (Sent / Delivered / Failed) and Read Status from the LimeChat export', 'Sent = total − failed. One broadcast per send date; names in BROADCAST_NAMES.'],
@@ -2739,9 +2743,8 @@ const RET = (() => {
       ['Unique recipient', 'Unique phones per campaign in the LimeChat broadcast', 'A resend to the same phone is a duplicate; it only upgrades delivered / read / replied.'],
       ['Run date', 'The date this customer was sent this campaign', 'Campaigns sent in waves have one run date per wave.'],
       ['Credited order', `DevX order at a Frido retail store, same phone, on/after the run date and within ${W} days`, 'Any order type billed at a store (ONLINE punch-ins too). Website orders with no store and the test store do not count. Cancelled and refunded orders are kept.'],
-      ['Most recent touch wins', 'If a walk-in, PDP or Meta lead came after the broadcast and before the order, that lead gets the order', 'Two campaigns in window → the later run date. Same-day tie with a lead → the lead. A walk-in lead logged on the order day does not count (captured after the purchase).'],
       ['Buyers', 'Customers with a credited order', 'A buyer counts once per campaign; later orders add revenue.'],
-      ['Retention revenue', 'Total Revenue (gross − discount) of credited orders', 'Same revenue rule as walk-in and PDP.'],
+      ['Retention revenue', 'Total Revenue (gross − discount) of credited orders', 'Same revenue rule as every Retail Revenue dashboard.'],
       ['Home store', "Store of the customer's last order before the run date", 'Used for messaged and buyers by store; revenue goes to the billing store.'],
     ];
     const defs = card('Definitions', 'Pending owner sign-off', D.map((f) => `<div class="def"><strong>${f[0]}</strong><div class="formula">${f[1]}</div><p class="sub">${f[2]}</p></div>`).join(''));
@@ -2749,12 +2752,11 @@ const RET = (() => {
     const pill = (st) => st === 'sample' ? '<span class="wl-pill p-peach">Sample</span>' : st === 'live' ? '<span class="wl-pill p-teal">Live</span>' : `<span class="wl-pill p-peach">${esc(st || '—')}</span>`;
     const src = card('Sources', '', `<div class="wl-tw"><table><thead><tr><th>Data</th><th>Source</th><th>Refresh</th><th>Status</th></tr></thead><tbody>
       <tr><td class="b">Broadcast recipients</td><td class="wrap">LimeChat broadcast export (published Google Sheet, Cloudflare secret)</td><td>Live (15-min cache)</td><td>${pill(s.broadcasts?.status)}</td></tr>
-      <tr><td class="b">Store orders</td><td class="wrap">DevX orders (BigQuery), phone match</td><td>Daily 8:00 AM IST</td><td>${pill(s.sales?.status)}</td></tr>
-      <tr><td class="b">Other touches</td><td class="wrap">Walk-in (Bigin), PDP call (Bigin), PDP WhatsApp (LimeChat), Meta Lead Gen (Bigin)</td><td>Daily 6:00 AM IST</td><td>${pill(s.touches?.status)}</td></tr></tbody></table></div>`);
+      <tr><td class="b">Store orders</td><td class="wrap">DevX orders (BigQuery), phone match</td><td>Daily 8:00 AM IST</td><td>${pill(s.sales?.status)}</td></tr></tbody></table></div>`);
     return flow + `<div class="wl-g2">${defs}${src}</div>`;
   }
 
-  const PAGES = { overview: pOverview, campaigns: pCampaigns, stores: pStores };
+  const PAGES = { overview: pOverview, stores: pStores };
   function page(tab){
     if (!RTABS.find((t) => t.id === tab)) tab = 'overview'; CUR = tab;
     const i = RTABS.findIndex((t) => t.id === tab);
@@ -2778,6 +2780,8 @@ const RET = (() => {
   }
   function bindPage(){
     document.querySelectorAll('[data-rex]').forEach((el) => { const go = () => { const k = el.dataset.rex; EX[k] = !EX[k]; rerender(); }; el.addEventListener('click', go); el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }); });
+    document.querySelectorAll('[data-rprod]').forEach((el) => el.addEventListener('click', () => { F.rprod = el.dataset.rprod; rerender(); }));
+    document.querySelectorAll('[data-roclear]').forEach((el) => el.addEventListener('click', () => { Object.assign(F, { oFrom: null, oTo: null, oLabel: null }); rerender(); }));
     const rl = document.getElementById('rReloadBtn'); if (rl) rl.addEventListener('click', () => { RDATA = null; loadRet(true); rerender(); });
     const rt = document.getElementById('rRetryBtn'); if (rt) rt.addEventListener('click', () => { RDATA_ERR = null; DATA_ERR = null; loadRet(true); if (!DATA) loadData(true); rerender(); });
   }
