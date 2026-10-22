@@ -3,10 +3,10 @@
 // order_type (CASH_AND_CARRY | ONLINE_ORDER), phone (10 digits), financial_status, is_cancelled, sku,
 // product_name, category, quantity, price, gross, discount, net, discount_codes.
 
-// For now (Oct 2026) the dashboard leaves out cancelled orders and every refunded order (fully or partially),
-// everywhere: revenue, order counts, conversion, capture and attribution. The data itself is still stored in full,
-// so setting these to false brings the orders back without re-syncing.
-export const EXCLUDE = { cancelled: true, refunded: true, partially_refunded: true };
+// Owner decision (22 Oct 2026): keep all orders, including cancelled and refunded (fully or partially), as recorded —
+// everywhere: revenue, order counts, conversion, capture and attribution. Setting a flag to true leaves those orders out
+// again without re-syncing.
+export const EXCLUDE = { cancelled: false, refunded: false, partially_refunded: false };
 
 export const isExcluded = (r) => {
   const canc = r.is_cancelled === true || String(r.is_cancelled).toLowerCase() === 'true';

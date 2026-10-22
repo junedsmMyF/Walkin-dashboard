@@ -9,7 +9,7 @@ export const MODEL_CHAIN = {
 const ALLOWED = new Set(['sales_orders', 'sales_lines', 'leads', 'store_day']);
 
 export const SCHEMA_DOC = `TABLES (SQLite). Dates are TEXT 'YYYY-MM-DD' (IST). Money in ₹. Data covers start_date → data_through (yesterday).
-sales_orders — one row per store order (cancelled, refunded and partially refunded orders already removed; test store removed)
+sales_orders — one row per store order (cancelled, refunded and partially refunded orders kept as recorded; test store removed)
   order_id, order_date, weekday('Mon'..'Sun'), store_id, store_name, city, format('Mall'|'High street'), order_type('Cash & carry'|'Online punch-in'),
   units, lines, gross(qty×price), discount, total_revenue(gross−discount), is_walkin(1 = walk-in attributed order), walkin_basis('Bigin lead'|'Manual override'),
   lead_walkin_date, days_lead_to_order, is_first_walkin_order(1 = customer's first walk-in order)

@@ -94,7 +94,7 @@ test('standardize: a column mixing month-first and day-first cells is resolved v
   assert.deepEqual(t.rows.map((x) => x['POS Created At']), ['02/09/2026', '13/09/2026', '20/09/2026', '26/09/2026', '10/09/2026', '28/09/2026']);
   assert.equal(t.summary.dateResolution['POS Created At'].unresolved, 0);
 });
-test('BigQuery clean rows: gross = qty × price, revenue = gross − discount, order type mapped; cancelled and refunded orders left out', async () => {
+test('BigQuery clean rows: gross = qty × price, revenue = gross − discount, order type mapped; cancelled and refunded orders kept', async () => {
   const { cleanToEngineRows, excludedSummary } = await import('../src/clean.js');
   const base = { order_date: '2026-10-02', store_id: 'FRIDO_0014', store_name: 'Kompally Store', quantity: 1, financial_status: 'paid', is_cancelled: false };
   const raw = [
@@ -105,11 +105,11 @@ test('BigQuery clean rows: gross = qty × price, revenue = gross − discount, o
     { ...base, order_id: '#MF5', order_type: 'ONLINE_ORDER', phone: '9987538484', product_name: 'x', gross: 700, net: 700, financial_status: 'partially_refunded' },
   ];
   const rows = cleanToEngineRows(raw);
-  assert.equal(rows.length, 2);
-  assert.deepEqual(excludedSummary(raw), { orders: 3, revenue: 2199, cancelled: 1, refunded: 1, partially_refunded: 1 });
+  assert.equal(rows.length, 5);
+  assert.deepEqual(excludedSummary(raw), { orders: 0, revenue: 0, cancelled: 0, refunded: 0, partially_refunded: 0 });
   const L = (id, p, d, loc) => ({ i: id, p: '+91' + p, d: d + 'T12:00:00+05:30', ct: d + 'T12:00:00+05:30', loc, own: '', st: 'Yet to Call' });
   const m = computeMetrics({ startDate: '2026-10-01', cutoff: '2026-10-02', dsrRows: [], salesRows: rows, overrides: new Map(), leads: [L('1', '9052429555', '2026-09-30', 'Kompally Hyderabad'), L('2', '9987538484', '2026-09-28', 'Kopa Mall Mundhwa Rd Pune')] });
-  assert.deepEqual(m.attributed.map((a) => [a.t, a.gross, a.net]).sort(), [['ONLINE', 36999, 33669], ['RETAIL', 1899, 1899]].sort());
+  assert.deepEqual(m.attributed.map((a) => [a.t, a.gross, a.net]).sort(), [['ONLINE', 36999, 33669], ['RETAIL', 1899, 1899], ['ONLINE', 999, 999], ['ONLINE', 500, 500], ['ONLINE', 700, 700]].sort());
 });
 
 test('bot: SQL guard allows only single read-only queries on the bot tables', async () => {

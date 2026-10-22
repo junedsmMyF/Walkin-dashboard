@@ -37,7 +37,7 @@ Keep both Google Sheets **published to the web as CSV** (File → Share → Publ
 | Capture + conversion rate | (Captured + Same-day orders) ÷ Walk-ins |
 | Attributed order | Order date **after** a Bigin lead date for the same phone (last 10 digits), any store, no time limit |
 | Sales credit | Store that billed the order; capturing store keeps capture credit ("captured here, bought elsewhere") |
-| Revenue | Net = Amount Paid − Return Amount (headline); Gross = Amount Paid; `CANCELLED` lines dropped; `FRIDO_0000` excluded |
+| Revenue | Gross = qty × price; Revenue (headline) = Gross − discount; cancelled and refunded orders kept as recorded; `FRIDO_0000` excluded |
 | Store format | Mall or High street per store (`src/stores.js`); leaderboards rank each format separately |
 | Leads without a store | Owner is a person and Store Location is empty → counted in totals, left out of store-level views |
 | Manual overrides | Orders listed in `src/overrides.js` count as walk-in orders even without a Bigin lead; shown under Data quality |
