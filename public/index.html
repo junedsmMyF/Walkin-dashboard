@@ -482,6 +482,28 @@ a.proj:hover{background:#FAFBFD;color:var(--ink)}
   h1{font-size:24px}
 }
 @media (prefers-reduced-motion: reduce){ *{transition:none!important} }
+/* Meta ads module (scoped .mt — same design board as walk-in) */
+.mt .wl-bars > div{flex:1 1 0;display:flex;flex-direction:column-reverse;gap:2px;overflow:hidden;min-width:0}
+.mt .wl-bars > div > i{display:block;width:100%}
+.mt .k-v.txt{font-size:20px;white-space:normal;line-height:1.25}
+.mt .wl-tag{white-space:nowrap}
+.mt th[data-k]{cursor:pointer}.mt th[data-k]:hover,.mt th.sorted{color:#1B1F24}.mt th.sorted::after{content:" ▾"}.mt th.sorted.asc::after{content:" ▴"}
+.mt td.wrap{white-space:normal}
+.mt .wl-tw.tall{max-height:460px;overflow:auto}.mt .wl-tw.tall th{position:sticky;top:0;background:#fff}
+.mt .wl-list .row:last-child{border-bottom:0}.mt .wl-list .row b{white-space:nowrap}.mt .wl-list .row b.ok{color:#1F5E7A}.mt .wl-list .row small{display:block;color:#5B6068;font-size:12px}
+.mt .pill-t{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}.mt .pt-lg{background:#DCE9EF;color:#123C4F}.mt .pt-ct{background:#F6E1D1;color:#7A3610}
+.mt .idc{font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:12px}
+.mt .lane{align-items:stretch;margin-top:12px}.mt .lane-name{width:96px;font-weight:600;color:#5B6068;align-self:center}
+.mt .stage{border:1px solid #E3DFD4;background:#F8F7F3;border-radius:10px;min-width:98px}
+.mt .stage.hot{background:#F6E1D1;border-color:#E9B999}.mt .stage.await{background:#FAF9F5;border-style:dashed;border-color:#D5D0C4}
+.mt .stage .s-n{font-variant-numeric:tabular-nums}.mt .stage .s-n.none{color:#A7A39A}.mt .stage .s-l{font-weight:600;color:#5B6068}.mt .stage .s-v{font-size:12px;color:#5B6068}
+.mt .fbox{border-color:#E3DFD4;background:#F8F7F3;max-width:260px}.mt .fbox span{color:#5B6068}
+.mt .fbox.rev{background:#DCE9EF;border-color:#B7CFDA}.mt .fbox.lead{background:#EEF3F5}.mt .fbox.leak{background:#F6E1D1;border-color:#E9B999}.mt .fbox.gap{background:#FAF9F5;border-style:dashed;border-color:#D5D0C4}
+.mt .flow-tag{font-weight:600;color:#5B6068}
+.mt .def{padding:12px 0;border-bottom:1px solid #EFECE4}.mt .def:last-child{border-bottom:0}.mt .def .sub{margin-top:6px}
+.mt .formula{background:#F6F4EE;border-color:#EFECE4;overflow-wrap:anywhere}
+@media (max-width:860px){.mt .flow-tag{width:100%}.mt .fbox{max-width:100%;min-width:0;flex:1 1 140px}}
+@media (max-width:600px){.mt .hide-sm{display:none}.mt .wl-rank{grid-template-columns:minmax(90px,120px) minmax(0,1fr) 54px !important}}
 </style>
 </head>
 <body>
@@ -521,9 +543,9 @@ const PROJECTS = [
 ];
 const VERTICALS = [
   { id:'walk-in', name:'Walk in lead management', live:true, desc:'Store walk-ins, lead capture, follow-up calls and the revenue they convert into.' },
-  { id:'meta-ads', name:'Meta ads', live:false, desc:'Revenue from Meta ad campaigns that route to retail stores.' },
+  { id:'meta-ads', name:'Meta ads', live:true, desc:'Meta Lead Gen and Click-to-WhatsApp ads → agent → store visit → retail revenue.' },
   { id:'pdp', name:'PDP inventories', live:true, desc:'Website product pages → call & WhatsApp leads → store visits → retail revenue.' },
-  { id:'retention', name:'Retail retention', live:false, desc:'Repeat purchases from existing retail customers, split with walk in lead management by campaign attribution.' }
+  { id:'retention', name:'Retail retention', live:true, desc:'Exclusive-offer broadcasts to existing retail customers → store orders within 60 days.' }
 ];
 const WTABS = [
   { id:'overview', name:'Overview' },{ id:'capture', name:'Capture' },{ id:'follow-up', name:'Follow-up' },
@@ -548,6 +570,8 @@ function routePerm(p) {
   if (p.length === 0) return 'home';
   if (p[0] === 'retail' && p[1] === 'walk-in') return WTAB_PERM[p[2] || 'overview'] || 'walkin.overview';
   if (p[0] === 'retail' && p[1] === 'pdp') return 'pdp';
+  if (p[0] === 'retail' && p[1] === 'meta-ads') return 'meta';
+  if (p[0] === 'retail' && p[1] === 'retention') return 'retention';
   if (p[0] === 'retail') return 'retail';
   return 'home';
 }
@@ -597,6 +621,8 @@ function go(){
   bind();
   if (!DATA && !DATA_ERR) loadData();
   if ((p.length === 0 || p[0] === 'retail') && !PDATA && !PDATA_ERR && canP('pdp')) loadPdp();
+  if ((p.length === 0 || p[0] === 'retail') && !MDATA && !MDATA_ERR && canP('meta')) loadMeta();
+  if ((p.length === 0 || p[0] === 'retail') && !RDATA && !RDATA_ERR && canP('retention')) loadRet();
   document.getElementById('side').classList.remove('open');
   document.getElementById('menuBtn').setAttribute('aria-expanded','false');
   updateNavButtons(p);
@@ -609,6 +635,8 @@ function renderView(p){
   else if (p[0] === 'retail' && p.length === 1) view.innerHTML = pageRetail();
   else if (p[0] === 'retail' && p[1] === 'walk-in') view.innerHTML = pageWalkIn(p[2] || 'overview');
   else if (p[0] === 'retail' && p[1] === 'pdp') view.innerHTML = pagePdp(p[2] || 'journey');
+  else if (p[0] === 'retail' && p[1] === 'meta-ads') view.innerHTML = META.page(p[2] || 'overview');
+  else if (p[0] === 'retail' && p[1] === 'retention') view.innerHTML = RET.page(p[2] || 'overview');
   else if (p[0] === 'retail') { const v = VERTICALS.find(x => x.id === p[1]); view.innerHTML = v ? pageSoon(v.name, v.desc, [['Founders Office','#/'],['Retail Revenue','#/retail']], '#/retail', 'Back to Retail Revenue') : pageNotFound(); }
   else { const pr = PROJECTS.find(x => x.id === p[0]); view.innerHTML = pr ? pageSoon(pr.name, pr.desc, [['Founders Office','#/']], '#/', 'Back to all projects') : pageNotFound(); }
 }
@@ -627,7 +655,7 @@ function renderSide(p){
     const active = cur === href;
     html += `<a class="nav-link ${active?'active':''}" href="${href}" ${active?'aria-current="page"':''}>${pr.name}${pr.live ? '' : '<span class="soon">Soon</span>'}</a>`;
     if (pr.id === 'retail' && retailOpen) {
-      html += `<div class="nav-sub">` + VERTICALS.filter(v => v.id === 'walk-in' ? canWalkinAny() : v.id === 'pdp' ? canP('pdp') : canP('retail')).map(v => {
+      html += `<div class="nav-sub">` + VERTICALS.filter(v => v.id === 'walk-in' ? canWalkinAny() : v.id === 'pdp' ? canP('pdp') : v.id === 'meta-ads' ? canP('meta') : v.id === 'retention' ? canP('retention') : canP('retail')).map(v => {
         const vh = '#/retail/' + v.id; const a = is(vh);
         const firstTab = v.id === 'walk-in' ? (WTABS.find((x) => canP(WTAB_PERM[x.id])) || { id: 'overview' }).id : v.id === 'pdp' ? 'journey' : 'overview';
         return `<a class="nav-link ${a?'active':''}" href="${v.live ? vh + '/' + firstTab : vh}" ${a?'aria-current="page"':''}>${v.name}${v.live ? '' : '<span class="soon">Soon</span>'}</a>`;
@@ -644,7 +672,7 @@ function crumbs(list){
 
 /* ---------- Live data (Cloudflare Worker /api/metrics — aggregated, no customer data) ---------- */
 let DATA = null, DATA_ERR = null, LOADING = false;
-const F = { range: 'mtd', format: 'all', city: 'all', store: 'all', cta: 'all', ex: {}, cx: {}, rev: 'net', cmp: 'prev', day: 'all', from: null, to: null, crf: '1', dpLabel: null };
+const F = { rcamp: 'all', rcity: 'all', mtype: 'all', mcity: 'all', mstore: 'all', mleads: 'net', range: 'mtd', format: 'all', city: 'all', store: 'all', cta: 'all', ex: {}, cx: {}, rev: 'net', cmp: 'prev', day: 'all', from: null, to: null, crf: '1', dpLabel: null };
 const dayOk = (d) => F.day === 'all' || (F.day === 'weekend' ? ((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7) >= 5 : ((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7) < 5);
 async function loadData(force){
   if (LOADING || (DATA && !force)) return;
@@ -802,7 +830,7 @@ function pageHome(){
   const item = (t, sub, href, color) => `<a class="item" href="${href}"><span class="dot" style="background:${color}"></span><span><span class="i-title">${t}</span><span class="i-sub">${sub}</span></span><span class="i-go">Open →</span></a>`;
   const att = attentionItems(), well = wellItems();
   const hier = PROJECTS.map((pr) => {
-    const projects = pr.id === 'retail' ? VERTICALS.map((v) => `<a class="proj" href="#/retail/${v.id}${v.live ? '/overview' : ''}"><span><b>${v.name}</b><br><span class="p-meta">${v.desc}</span></span>${v.id === 'pdp' ? `<span class="proj-stats"><span>${pdpStatsLine()}</span></span><span class="badge b-good">Live</span>` : v.live ? `<span class="proj-stats"><span>Revenue <b>${inr(a.net)}</b></span><span>Capture <b>${a.cr == null ? '—' : a.cr.toFixed(1) + '%'}</b></span><span>Walk-ins <b>${nf(a.walk)}</b></span></span><span class="badge b-good">Live</span>` : '<span class="badge b-grey">Coming soon</span>'}</a>`).join('') : '<div class="proj"><span class="p-meta">No projects added yet</span><span class="badge b-grey">Coming soon</span></div>';
+    const projects = pr.id === 'retail' ? VERTICALS.map((v) => `<a class="proj" href="#/retail/${v.id}${v.live ? '/overview' : ''}"><span><b>${v.name}</b><br><span class="p-meta">${v.desc}</span></span>${v.id === 'pdp' ? `<span class="proj-stats"><span>${pdpStatsLine()}</span></span><span class="badge b-good">Live</span>` : v.id === 'meta-ads' ? `<span class="proj-stats"><span>${META.statsLine()}</span></span><span class="badge b-good">Live</span>` : v.id === 'retention' ? `<span class="proj-stats"><span>${RET.statsLine()}</span></span><span class="badge b-good">Live</span>` : v.live ? `<span class="proj-stats"><span>Revenue <b>${inr(a.net)}</b></span><span>Capture <b>${a.cr == null ? '—' : a.cr.toFixed(1) + '%'}</b></span><span>Walk-ins <b>${nf(a.walk)}</b></span></span><span class="badge b-good">Live</span>` : '<span class="badge b-grey">Coming soon</span>'}</a>`).join('') : '<div class="proj"><span class="p-meta">No projects added yet</span><span class="badge b-grey">Coming soon</span></div>';
     return `<div class="vert"><a class="vert-head" href="#/${pr.id}"><span><b>${pr.name}</b><br><span class="p-meta">${pr.desc}</span></span>${pr.live ? `<span class="badge b-good">${VERTICALS.filter((v) => v.live).length} of ${VERTICALS.length} projects live</span>` : '<span class="badge b-grey">Coming soon</span>'}</a>${projects}</div>`;
   }).join('');
   return hero + freshness() + `<div class="hl-grid">` + HL.map((h) => `<a class="hl" href="${h[5]}">${kpiTip(h[0])}<span class="h-label">${h[0]}</span><span class="h-value num">${h[1]}</span><span class="k-delta ${toneOf(h[2])}">${h[2]}</span><span class="h-src">${h[3]}</span>${src(h[4])}</a>`).join('') + `</div>
@@ -822,7 +850,11 @@ function pageRetail(){
     ['Projects live', `${VERTICALS.filter((v) => v.live).length} of ${VERTICALS.length}`, '— others soon', VERTICALS.filter((v) => v.live).map((v) => v.name.split(' ')[0]).join(' · ') + ' live', 'mix'],
     ['Needs attention', String(attentionItems().length), '▼ act today', 'All live projects', 'mix'],
   ], 5);
-  const row = (v) => v.id === 'pdp'
+  const row = (v) => v.id === 'retention'
+    ? `<tr><td class="strong"><a href="#/retail/retention/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td><span class="vb vb-s">Sample</span></td><td>—</td><td>${RET.statsLine()}</td><td><a href="#/retail/retention/overview">Open →</a></td></tr>`
+    : v.id === 'meta-ads'
+    ? `<tr><td class="strong"><a href="#/retail/meta-ads/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td><span class="vb vb-s">Sample</span></td><td>—</td><td>${META.statsLine()}</td><td><a href="#/retail/meta-ads/overview">Open →</a></td></tr>`
+    : v.id === 'pdp'
     ? `<tr><td class="strong"><a href="#/retail/pdp/journey">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td class="strong">${PDATA ? inr(pdpAllNet()) : '—'}</td><td>—</td><td>${pdpStatsLine()} · since ${PDATA ? PDATA.startDate : '8 Oct'}</td><td><a href="#/retail/pdp/journey">Open →</a></td></tr>`
     : v.live
     ? `<tr><td class="strong"><a href="#/retail/${v.id}/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td class="strong">${inr(a.net)}</td><td class="${toneOf(deltaTxt(a.net, b?.net))} strong">${deltaTxt(a.net, b?.net).replace(' vs previous period', '')}</td><td>Capture ${a.cr == null ? '—' : a.cr.toFixed(1) + '%'} · Walk-ins ${nf(a.walk)}</td><td><a href="#/retail/${v.id}/overview">Open →</a></td></tr>`
@@ -2132,8 +2164,628 @@ function pDefs(){
 function pdpAllNet(){ return allAttributed(false).filter((x) => x.d >= PDATA.startDate && x.d <= PDATA.cutoff).reduce((u, x) => u + x.net, 0); }
 function pdpStatsLine(){ if (!PDATA) return 'Loading'; const keep = [F.city, F.store, F.cta]; F.city = 'all'; F.store = 'all'; F.cta = 'all'; const R = [PDATA.startDate, PDATA.cutoff]; const a = callAgg(R), t = textAgg(R); [F.city, F.store, F.cta] = keep; return `Leads <b>${nf(a.unique + t.unique)}</b> (call ${nf(a.unique)} · WhatsApp ${nf(t.unique)}) · Bought <b>${nf(a.purchased + t.purchased)}</b> · Revenue <b>${inr(pdpAllNet())}</b>`; }
 
+/* ---------- Meta ads module (Lead Gen = Bigin live · CTWA, spend, revenue = sample until connected) ---------- */
+const MTABS = [
+  { id: 'overview', name: 'Overview' }, { id: 'funnel', name: 'Funnel & drop-off' }, { id: 'cities', name: 'Cities & stores' },
+  { id: 'ads', name: 'Ads · UTM content' }, { id: 'won', name: 'Closed won' }, { id: 'loss', name: 'Loss analysis' }, { id: 'definitions', name: 'Funnel & definitions' },
+];
+let MDATA = null, MDATA_ERR = null, MLOADING = false;
+async function loadMeta(force){
+  if (MLOADING || (MDATA && !force)) return;
+  MLOADING = true; MDATA_ERR = null;
+  try { const r = await fetch('/api/meta', { cache: 'no-store' }); const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status)); MDATA = j; }
+  catch (e) { MDATA_ERR = String(e.message || e); }
+  MLOADING = false; rerender();
+}
+const META = (() => {
+  const TYPE_COLOR = { leadgen: C.teal, ctwa: C.rust };
+  const HIST = 'Needs Bigin stage history (not synced yet)';
+  const MTIP = {
+    'Meta spend': ['Ads Manager spend, ad level.', 'Sample · Ads Manager pending'],
+    'Leads': ['Leads created from Meta ads. Net of duplicates & tests.', 'Bigin · LimeChat (sample)'],
+    'Unconsumed leads': ['Never moved out of Yet to Call / not replied.', 'Bigin stage'],
+    'Store visits': ['Reached a Bigin visit stage. Never inferred from a sale.', 'Bigin stage'],
+    'Closed won': ['Service Completed & Sold (CTWA: Purchased).', 'Bigin stage'],
+    'FO revenue': ['DevX orders on/after capture date, phone match.', 'Sample · DevX match pending'],
+    'ROAS': ['FO revenue ÷ Meta spend.', 'Sample'],
+    'Time to first touch': ['Hours from lead to first stage change.', 'Bigin stage history'],
+  };
+  const mtip = (l) => { const t = MTIP[l]; return t ? `<span class="k-i" role="button" tabindex="0" aria-label="What is this?">i</span><span class="k-tip" role="tooltip"><b>${esc(l)}</b>${esc(t[0])}<em>Source: ${esc(t[1])}</em></span>` : ''; };
+  // KPI tiles: b = badge (v verified · u as recorded · s sample · n not tracked); await = no source yet
+  const kpis = (items) => `<div class="wl-kpis">` + items.map((k) => k.await
+    ? `<div class="wl-kpi" tabindex="0">${mtip(k.l)}<div class="k-l">${k.l}</div><div class="k-v none">—</div><div class="k-d flat">${AWAIT}</div><div class="k-s">${k.need}</div></div>`
+    : `<div class="wl-kpi ${k.b === 's' ? 'smp' : ''}" tabindex="0">${mtip(k.l)}<div class="k-l">${k.l}</div><div class="k-v ${String(k.v).replace(/<[^>]+>/g, '').length > 9 ? 'txt' : ''}">${k.v}</div><div class="k-d ${k.tone || ''}">${k.d}</div><div class="k-s">${k.s}</div>${k.b ? `<div>${VB[k.b]}</div>` : ''}</div>`).join('') + `</div>`;
+  const mcard = (title, sub, body, badge = '', right = '') => `<section class="wl-card ${badge === 's' ? 'smp' : ''}"><div class="wl-ch"><div><h2>${title} ${badge ? VB[badge] : ''}</h2>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${right}</div>${body}</section>`;
+  const awaitBox = (need, extra) => `<div class="wl-await"><span class="wl-tag">${AWAIT}</span><b>${need}</b><span>${extra || 'This card fills in automatically once the source is connected.'}</span></div>`;
+  const href = (t) => '#/retail/meta-ads/' + t;
+  const dLbl = (d) => dpShort(d).replace(/ \d{4}$/, '');
+  const typeName = (t) => t === 'ctwa' ? 'CTWA' : 'Lead Gen';
+  const typePill = (t) => `<span class="pill-t ${t === 'ctwa' ? 'pt-ct' : 'pt-lg'}">${typeName(t)}</span>`;
+  const shortStore = (s) => String(s || 'Unmapped').split(', ')[0];
+  const areaOf = (s) => String(s || '—').split(', ').slice(-1)[0];
+  const shortAd = (a) => a.startsWith('Unattributed') ? 'Unattributed' : a.startsWith('Test') ? 'Test' : a.split(' · ').slice(1, 3).join(' · ') || a;
+  const CITY_LIST = ['Pune', 'Mumbai', 'Delhi NCR'];
+
+  /* ---------- range & filters (date range = the shared picker, clamped to the Meta launch) ---------- */
+  function mRange(){ const r = rangeOf(F.range); const s = MDATA.startDate; if (r[1] < s) return null; return [r[0] < s ? s : r[0], r[1] > MDATA.cutoff ? MDATA.cutoff : r[1]]; }
+  function mPrev(r){ if (!r) return null; const len = dDiff(r[0], r[1]) + 1; const pb = dAdd(r[0], -1), pa = dAdd(r[0], -len); if (pb < MDATA.startDate) return null; return [pa < MDATA.startDate ? MDATA.startDate : pa, pb]; }
+  const L = () => MDATA.leads;
+  const base = (r) => L().filter((x) => (F.mtype === 'all' || x.type === F.mtype) && (F.mcity === 'all' || x.city === F.mcity) && (F.mstore === 'all' || x.store === F.mstore) && x.created >= r[0] && x.created <= r[1]);
+  const rows = (r) => base(r).filter((x) => F.mleads === 'all' || !x.junk);
+  const cplOf = (x) => { const t = MDATA.cpl[x.type] || {}; return x.ad in t ? t[x.ad] : MDATA.cplDefault; };
+  const spendOf = (arr) => arr.reduce((s, x) => s + cplOf(x), 0);
+  function agg(arr){
+    const a = { leads: arr.length, consumed: 0, connected: 0, assessed: 0, vsched: 0, visited: 0, won: 0, lost: 0, open: 0, revenue: 0, junk: 0, rnrOpen: 0, noUtm: 0, lostNoReason: 0, connNoVisit: 0 };
+    arr.forEach((x) => { a.consumed += x.consumed; a.connected += x.connected; a.assessed += !!x.assessed; a.vsched += x.vsched; a.visited += x.visited; a.won += x.won; a.lost += x.lost; a.junk += x.junk;
+      if (!x.won && !x.lost) { a.open++; if (/^RNR/.test(x.stage)) a.rnrOpen++; if (x.connected && !x.vsched) a.connNoVisit++; }
+      if (x.won) a.revenue += x.orderValue || 0;
+      if (x.lost && !x.lostReason) a.lostNoReason++;
+      if (x.type === 'leadgen' && x.ad.startsWith('Unattributed')) a.noUtm++; });
+    a.unconsumed = a.leads - a.consumed; return a;
+  }
+  function ctx(r){ const p = mPrev(r); const R = rows(r), P = p ? rows(p) : null;
+    return { r, p, R, P, a: agg(R), b: P ? agg(P) : null, spend: spendOf(base(r)), spendP: p ? spendOf(base(p)) : null }; }
+  const dl = (cur, prev, o = {}) => wdelta(cur, prev, { short: true, ...o });
+  function groupBy(arr, fn){ const g = {}; arr.forEach((x) => { const k = fn(x); (g[k] = g[k] || []).push(x); }); return Object.entries(g).map(([k, v]) => ({ k, rows: v, a: agg(v) })); }
+
+  /* ---------- sortable tables ---------- */
+  const SORT = {};
+  function stable(id, cols, data, defKey, rowFn){
+    const st = SORT[id] || (SORT[id] = { k: defKey, asc: false });
+    const d = data.slice().sort((x, y) => { const a = x[st.k], b = y[st.k]; const c = (typeof a === 'number' || typeof b === 'number') ? (a ?? -1) - (b ?? -1) : String(a ?? '').localeCompare(String(b ?? '')); return st.asc ? c : -c; });
+    return `<table data-msort="${id}"><thead><tr>${cols.map((c) => `<th ${c.k ? `data-k="${c.k}" tabindex="0"` : ''} class="${c.r ? 'r' : ''} ${st.k === c.k ? 'sorted' + (st.asc ? ' asc' : '') : ''}">${c.h}</th>`).join('')}</tr></thead><tbody>${d.map(rowFn).join('')}</tbody></table>`;
+  }
+  const sortBy = (id, k) => { const st = SORT[id]; if (!st) return; if (st.k === k) st.asc = !st.asc; else { st.k = k; st.asc = false; } };
+  const bar = (v, max, color) => `<span style="display:inline-flex;align-items:center;gap:8px;justify-content:flex-end"><span style="display:inline-block;height:8px;width:${Math.max(2, 56 * v / (max || 1))}px;background:${color};border-radius:0 3px 3px 0"></span>${nf(v)}</span>`;
+
+  /* ---------- header, filters ---------- */
+  function header(tab){
+    const s = MDATA?.sources || {}; const lg = s.leadgen || {};
+    const asof = MDATA ? `Data as of ${dpShort(MDATA.cutoff)} (T-1) · Bigin ${lg.refreshedAt ? 'refreshed ' + new Date(lg.refreshedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : lg.status === 'waiting_first_refresh' ? 'waiting for the first refresh' : (lg.status || '—')} · LimeChat, Ads Manager &amp; DevX match not connected` : 'Connecting to live sources…';
+    return `<div class="wl-head"><div><div class="wl-eyebrow">FRIDO · FOUNDERS OFFICE · RETAIL REVENUE</div><h1>Meta ads</h1></div>
+      <div class="wl-meta"><div class="wl-asof">${asof}</div><div class="wl-pills"><span class="wl-pill p-teal">Lead Gen · Bigin live</span><span class="wl-pill p-peach">CTWA, spend &amp; revenue: sample</span><span class="wl-pill p-grey">Strict funnel · visit stages only</span>${lg.status === 'error' ? '<span class="wl-pill p-peach">Last Bigin refresh failed</span>' : ''}<button type="button" class="wl-btn" id="mReloadBtn" style="min-height:28px;padding:4px 12px;font-size:12px">Reload data</button></div></div></div>
+      <nav class="wl-tabs" aria-label="Dashboard pages">${MTABS.map((t) => `<a class="wl-tab ${t.id === tab ? 'on' : ''} ${t.id === 'definitions' ? 'aux' : ''}" href="${href(t.id)}" ${t.id === tab ? 'aria-current="page"' : ''}>${t.name}</a>`).join('')}</nav>`;
+  }
+  function filters(r){
+    const opt = (v, l, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`;
+    const seg = [['all', 'All'], ['ctwa', 'CTWA · WhatsApp'], ['leadgen', 'Lead Gen · website']].map(([v, l]) => `<button type="button" data-mtype="${v}" class="${F.mtype === v ? 'on' : ''}" aria-pressed="${F.mtype === v}">${l}</button>`).join('');
+    const stores = [...new Set(L().filter((x) => x.store && (F.mcity === 'all' || x.city === F.mcity)).map((x) => x.store))].sort();
+    const p = r ? mPrev(r) : null; const full = rangeOf(F.range);
+    return `<div class="wl-filters">
+      <div class="wl-fl">AD TYPE<div class="wl-seg" role="group" aria-label="Ad type">${seg}</div></div>
+      <div class="wl-fl">DATE RANGE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
+      <label class="wl-fl">CITY<select data-f="mcity">${opt('all', `All ${CITY_LIST.length} cities`, F.mcity)}${CITY_LIST.map((c) => opt(c, c, F.mcity)).join('')}</select></label>
+      <label class="wl-fl">STORE<select data-f="mstore">${opt('all', 'All stores', F.mstore)}${stores.map((s) => opt(s, s, F.mstore)).join('')}</select></label>
+      <label class="wl-fl">LEADS<select data-f="mleads">${opt('net', 'Net of duplicates & tests', F.mleads)}${opt('all', 'All, incl. duplicates & tests', F.mleads)}</select></label>
+      <span class="wl-note" style="align-self:center">${r ? `${dpShort(r[0])} → ${dpShort(r[1])}${p ? ` · vs ${dpShort(p[0])} → ${dpShort(p[1])}` : ' · no earlier period'}` : 'No Meta leads in this range'}${full[0] < MDATA.startDate ? ` · ads live from ${dpShort(MDATA.startDate)}` : ''}</span>
+    </div>`;
+  }
+
+  /* ---------- funnel pieces ---------- */
+  const STEPS = [['leads', 'Leads', 'Created from the ad'], ['consumed', 'Consumed', 'Agent actioned'], ['connected', 'Connected', 'Two-way contact'], ['vsched', 'Visit scheduled', 'Store or home'], ['visited', 'Store visit', 'Visit stage reached'], ['won', 'Closed won', 'Purchased']];
+  function worstStep(a){ let w = null; for (let i = 1; i < STEPS.length; i++){ const prev = a[STEPS[i - 1][0]], cur = a[STEPS[i][0]]; const d = prev - cur; if (prev && (!w || d > w.d)) w = { i, d, from: STEPS[i - 1][1], to: STEPS[i][1], rate: d / prev }; } return w; }
+  function journeyRank(arr, color){
+    const a = agg(arr); const max = a.leads || 1;
+    return `<div class="wl-rank" style="grid-template-columns:minmax(110px,150px) minmax(0,1fr) 70px 70px"><span class="wl-colhead">STAGE</span><span class="wl-colhead">LEADS</span><span class="wl-colhead" style="text-align:right">OF PREV.</span><span class="wl-colhead hide-sm" style="text-align:right">DROP</span>` +
+      STEPS.map(([k, l, s], i) => { const v = a[k], prev = i ? a[STEPS[i - 1][0]] : null; const over = i && v > prev; return `<div><span class="wl-sn">${l}</span><span class="wl-sm">${over ? 'Logged without the previous stage' : s}</span></div><div style="display:flex;align-items:center;gap:8px"><div class="wl-track"><div class="wl-fill" style="width:${100 * v / max}%;background:${color}"></div></div><span class="wl-val">${nf(v)}</span></div><span style="font-size:13px;text-align:right;font-variant-numeric:tabular-nums" class="${over ? 'k-d bad' : ''}">${!i ? '100%' : over ? 'gap' : pct(v, prev, 0)}</span><span class="k-d ${prev && prev > v ? 'bad' : 'flat'} hide-sm" style="text-align:right">${prev && prev > v ? '▼ ' + nf(prev - v) : '—'}</span>`; }).join('') + `</div>`;
+  }
+  function answers(c){
+    const R = c.R; const out = [];
+    const row = (q, a, sub = '', ok = false) => out.push(`<div class="row"><span>${q}${sub ? `<small>${sub}</small>` : ''}</span><b class="${ok ? 'ok' : ''}">${a}</b></div>`);
+    const cities = groupBy(R, (x) => x.city).filter((g) => g.a.leads >= 10 && g.k !== 'Unmapped');
+    const score = (g) => g.a.connected / g.a.leads + 3 * g.a.visited / g.a.leads + 6 * g.a.won / g.a.leads;
+    if (cities.length > 1){ const s = cities.slice().sort((x, y) => score(y) - score(x)); row('Best city', s[0].k, `${pct(s[0].a.connected, s[0].a.leads, 0)} connected · ${s[0].a.visited} visits · ${s[0].a.won} sold`, true); row('Weakest city', s[s.length - 1].k, `${pct(s[s.length - 1].a.connected, s[s.length - 1].a.leads, 0)} connected · ${s[s.length - 1].a.visited} visits · ${s[s.length - 1].a.won} sold`); }
+    const stores = groupBy(R.filter((x) => x.store), (x) => x.store);
+    if (stores.length){ const m = stores.slice().sort((x, y) => y.a.leads - x.a.leads)[0]; row('Store with most Meta leads', shortStore(m.k), `${nf(m.a.leads)} leads · ${pct(m.a.leads, c.a.leads, 0)} of all`, true);
+      const pool = stores.filter((g) => g.a.visited >= 2).length ? stores.filter((g) => g.a.visited >= 2) : stores.filter((g) => g.a.visited >= 1);
+      const cv = pool.sort((x, y) => y.a.won / y.a.visited - x.a.won / x.a.visited || y.a.won - x.a.won)[0];
+      if (cv && cv.a.won) row('Store converting best', shortStore(cv.k), `${cv.a.won} sold from ${cv.a.visited} visit${cv.a.visited > 1 ? 's' : ''}`, true); else row('Store converting best', '—', 'No store has converted a Meta lead in this view');
+    }
+    const ads = groupBy(R, (x) => x.ad).filter((g) => g.a.leads >= 10 && !g.k.startsWith('Unattributed') && !g.k.startsWith('Test'));
+    if (ads.length){ const q = (g) => g.a.connected / g.a.leads + 2 * g.a.visited / g.a.leads + 4 * g.a.won / g.a.leads; const t = ads.sort((x, y) => q(y) - q(x))[0]; row('Best-quality ad', shortAd(t.k), `${typeName(t.rows[0].type)} · ${pct(t.a.connected, t.a.leads, 0)} connected · ${t.a.visited} visits · ${t.a.won} sold`, true); }
+    const w = worstStep(c.a); if (w) row('Biggest drop-off', `${w.from} → ${w.to}`, `${nf(w.d)} leads (${(w.rate * 100).toFixed(0)}%) do not make it`);
+    const lr = groupBy(R.filter((x) => x.lost), (x) => x.lostReason || 'No reason recorded').sort((x, y) => y.a.leads - x.a.leads);
+    if (lr.length) row('Losing the most to', lr[0].k, `${nf(lr[0].a.leads)} of ${nf(c.a.lost)} lost leads`);
+    row('Revenue against spend', c.spend ? (c.a.revenue / c.spend).toFixed(2) + '× ROAS' : '—', `${inr(c.a.revenue)} from ${inr(c.spend)} · sample`, c.spend && c.a.revenue >= c.spend);
+    return `<div class="wl-list">${out.join('')}</div>`;
+  }
+  function cityScorecard(c){
+    const data = CITY_LIST.filter((x) => F.mcity === 'all' || x === F.mcity).map((city) => { const R = c.R.filter((x) => x.city === city), a = agg(R), sp = spendOf(base(c.r).filter((x) => x.city === city)); return { city, leads: a.leads, spend: sp, cpl: a.leads ? sp / a.leads : null, conn: pctv(a.connected, a.leads), visited: a.visited, vrate: pctv(a.visited, a.leads), won: a.won, lost: a.lost, revenue: a.revenue, roas: sp ? a.revenue / sp : null }; });
+    const sc = (d) => (d.conn || 0) / 100 + 3 * (d.vrate || 0) / 100 + 6 * (d.leads ? d.won / d.leads : 0);
+    const ranked = data.filter((d) => d.leads >= 10).sort((x, y) => sc(y) - sc(x)); const best = ranked.length > 1 ? ranked[0].city : null, worst = ranked.length > 1 ? ranked[ranked.length - 1].city : null;
+    const cols = [{ h: 'City', k: 'city' }, { h: 'Leads', k: 'leads', r: 1 }, { h: 'Spend (alloc.)', k: 'spend', r: 1 }, { h: 'CPL', k: 'cpl', r: 1 }, { h: 'Connected', k: 'conn', r: 1 }, { h: 'Store visits', k: 'visited', r: 1 }, { h: 'Visit rate', k: 'vrate', r: 1 }, { h: 'Won', k: 'won', r: 1 }, { h: 'Lost', k: 'lost', r: 1 }, { h: 'FO revenue', k: 'revenue', r: 1 }, { h: 'ROAS', k: 'roas', r: 1 }];
+    return mcard('City scorecard', 'Click a city to filter every page', `<div class="wl-tw">${stable('city', cols, data, 'leads', (d) => `<tr><td class="b"><a href="#" data-mcity="${esc(d.city)}">${esc(d.city)}</a> ${d.city === best ? '<span class="wl-pill p-teal" style="padding:2px 8px">Best</span>' : ''}${d.city === worst ? '<span class="wl-pill p-peach" style="padding:2px 8px">Weakest</span>' : ''}</td><td class="r">${nf(d.leads)}</td><td class="r smpc">${inr(d.spend)}</td><td class="r smpc">${d.cpl == null ? '—' : inr(d.cpl)}</td><td class="r">${pctTxt(d.conn, 0)}</td><td class="r">${nf(d.visited)}</td><td class="r">${pctTxt(d.vrate)}</td><td class="r b">${nf(d.won)}</td><td class="r">${nf(d.lost)}</td><td class="r smpc">${inr(d.revenue)}</td><td class="r smpc">${d.roas == null ? '—' : d.roas.toFixed(2) + '×'}</td></tr>`)}</div><p class="wl-note" style="margin-top:10px">City from the preferred store. Shaded columns are sample; city spend is ad spend split by lead share.</p>`);
+  }
+
+  /* ---------- pages ---------- */
+  function pOverview(r){
+    const c = ctx(r), a = c.a, b = c.b;
+    const k1 = dl(c.spend, c.spendP), k2 = dl(a.leads, b?.leads), k3 = dl(a.unconsumed, b?.unconsumed, { invert: true }), k4 = dl(a.visited, b?.visited), k5 = dl(a.won, b?.won), k6 = dl(a.revenue, b?.revenue);
+    const roas = c.spend ? a.revenue / c.spend : null, roasP = c.spendP && b ? b.revenue / c.spendP : null; const k7 = dl(roas, roasP);
+    const kp = kpis([
+      { l: 'Meta spend', v: inr(c.spend), d: k1.d, tone: k1.tone, s: 'Ads Manager, ad level', b: 's' },
+      { l: 'Leads', v: nf(a.leads), d: k2.d, tone: k2.tone, s: `CPL ${a.leads ? inr(c.spend / a.leads) : '—'} (sample) · ${F.mleads === 'net' ? nf(base(c.r).length - a.leads) + ' dup/test out' : 'incl. dup/test'}`, b: 'v' },
+      { l: 'Unconsumed leads', v: nf(a.unconsumed), d: k3.d, tone: k3.tone, s: `${pct(a.consumed, a.leads, 0)} consumed`, b: 'u' },
+      { l: 'Store visits', v: nf(a.visited), d: k4.d, tone: k4.tone, s: `${nf(a.vsched)} scheduled`, b: 'u' },
+      { l: 'Closed won', v: nf(a.won), d: k5.d, tone: k5.tone, s: `${pct(a.won, a.leads)} lead → sale`, b: 'u' },
+      { l: 'FO revenue', v: inr(a.revenue), d: k6.d, tone: k6.tone, s: `AOV ${a.won ? inr(a.revenue / a.won) : '—'}`, b: 's' },
+      { l: 'ROAS', v: roas == null ? '—' : roas.toFixed(2) + '×', d: k7.d, tone: k7.tone, s: 'FO revenue ÷ spend', b: 's' },
+    ]);
+    const w = worstStep(a);
+    const node = (k, label, sub, to, i) => { const prev = i ? a[STEPS[i - 1][0]] : null; const d = dl(a[k], b ? b[k] : null); return `<a class="wl-node ${w && w.i === i ? 'hot' : ''}" href="${href(to)}"><span class="n-l">${label}</span><span class="n-v">${nf(a[k])}</span><span class="n-s">${i ? (a[k] > prev ? 'More than previous step · visit stage skipped' : pct(a[k], prev, 0) + ' of previous step') : sub}</span><span class="k-d ${d.tone}">${d.d}</span></a>`; };
+    const tree = mcard('Lead driver tree', 'Shaded node = biggest drop-off', `<div class="wl-tree">` +
+      [node('leads', 'Leads', 'Both ad types', 'ads', 0), node('consumed', 'Consumed', '', 'funnel', 1), node('connected', 'Connected', '', 'funnel', 2), node('vsched', 'Visit scheduled', '', 'funnel', 3), node('visited', 'Store visit', '', 'cities', 4), node('won', 'Closed won', '', 'won', 5),
+       `<a class="wl-node await" href="${href('won')}"><span class="n-l">FO revenue ${VB.s}</span><span class="n-v">${inr(a.revenue)}</span><span class="n-s">DevX match pending</span><span class="k-d flat">ROAS ${roas == null ? '—' : roas.toFixed(2) + '×'}</span></a>`].join('<span class="wl-arrow" aria-hidden="true">→</span>') + `</div>`, '', `<span class="wl-note">Click a node to open its page</span>`);
+    const types = F.mtype === 'all' ? ['ctwa', 'leadgen'] : [F.mtype];
+    const boards = types.map((t) => mcard(t === 'ctwa' ? 'CTWA · WhatsApp → LimeChat' : 'Lead Gen · website → Bigin', t === 'ctwa' ? 'Until the LimeChat export is connected' : 'Bigin "Meta Ergo Workspace Assessment"', journeyRank(c.R.filter((x) => x.type === t), TYPE_COLOR[t]), t === 'ctwa' ? 's' : 'u')).join('');
+    const days = []; for (let d = c.r[0]; d <= c.r[1]; d = dAdd(d, 1)) days.push(d);
+    const ser = days.map((d) => { const x = c.R.filter((y) => y.created === d); return { d, lg: x.filter((y) => y.type === 'leadgen').length, ct: x.filter((y) => y.type === 'ctwa').length }; });
+    const maxD = Math.max(1, ...ser.map((s) => s.lg + s.ct));
+    const trend = mcard('Daily leads', 'By ad type · CTWA is sample', `<div class="wl-legend"><span><i class="wl-sw" style="background:${C.teal}"></i>Lead Gen</span><span><i class="wl-sw" style="background:${C.rust}"></i>CTWA (sample)</span></div>
+      <div class="wl-trend" role="img" aria-label="Daily leads by ad type"><div class="wl-bars">${ser.map((s) => `<div title="${dLbl(s.d)}: ${s.lg} Lead Gen · ${s.ct} CTWA" style="height:${((s.lg + s.ct) / maxD * 100).toFixed(1)}%">${s.lg ? `<i style="flex:${s.lg};background:${C.teal}"></i>` : ''}${s.ct ? `<i style="flex:${s.ct};background:${C.rust}"></i>` : ''}</div>`).join('')}</div></div>
+      <div class="wl-axis"><span>${dLbl(days[0])}</span><span>Peak ${nf(maxD)} · ${(c.a.leads / days.length).toFixed(1)} per day</span><span>${dLbl(days[days.length - 1])}</span></div>`);
+    const att = [['Unconsumed leads', nf(a.unconsumed), 'First call pending', !a.unconsumed], ['Open, stuck in RNR 1–3', nf(a.rnrOpen), 'Keep the retry cadence', !a.rnrOpen], ['Connected, no visit scheduled', nf(a.connNoVisit), 'Report and store hand-off gap', !a.connNoVisit], ['Sales without a visit stage', '—', HIST, true], ['Lead Gen leads without UTM', nf(a.noUtm), 'Cannot be tied to an ad', !a.noUtm], ['Lost with no reason', nf(a.lostNoReason), 'CRM hygiene', !a.lostNoReason]];
+    const attention = mcard('Needs attention', 'Open issues in this view', `<div class="wl-list">${att.map(([t, n, s, ok]) => `<div class="row"><span>${t}<small>${s}</small></span><b class="${ok ? 'ok' : ''}">${n}</b></div>`).join('')}</div>`);
+    const tset = ['ctwa', 'leadgen'].filter((t) => F.mtype === 'all' || F.mtype === t).map((t) => { const R = c.R.filter((x) => x.type === t), aa = agg(R), sp = spendOf(base(c.r).filter((x) => x.type === t)); return { t, aa, sp }; });
+    const mrow = (l, fn, smp) => `<tr><td class="b">${l}</td>${tset.map((o) => `<td class="r ${smp || o.t === 'ctwa' ? 'smpc' : ''}">${fn(o.aa, o.sp)}</td>`).join('')}</tr>`;
+    const typeTbl = mcard('Ad type comparison', 'Which journey brings cheaper, better leads · shaded = sample', `<div class="wl-tw"><table><thead><tr><th>Metric</th>${tset.map((o) => `<th class="r">${typePill(o.t)}</th>`).join('')}</tr></thead><tbody>` +
+      mrow('Spend', (aa, sp) => inr(sp), 1) + mrow('Leads', (aa) => nf(aa.leads)) + mrow('Cost per lead', (aa, sp) => aa.leads ? inr(sp / aa.leads) : '—', 1) + mrow('Connected', (aa) => pct(aa.connected, aa.leads, 0)) + mrow('Visit scheduled', (aa) => nf(aa.vsched)) + mrow('Store visits', (aa) => nf(aa.visited)) + mrow('Closed won', (aa) => nf(aa.won)) + mrow('Lead → sale', (aa) => pct(aa.won, aa.leads)) + mrow('FO revenue', (aa) => inr(aa.revenue), 1) + mrow('ROAS', (aa, sp) => sp ? (aa.revenue / sp).toFixed(2) + '×' : '—', 1) + mrow('Cost per sale', (aa, sp) => aa.won ? inr(sp / aa.won) : '—', 1) +
+      `</tbody></table></div>`);
+    const glance = mcard('At a glance', 'The questions a business leader asks first', answers(c));
+    return kp + tree + `<div class="wl-g2">${boards}</div><div class="wl-g21">${trend}${attention}</div><div class="wl-g2">${glance}${typeTbl}</div>` + cityScorecard(c);
+  }
+
+  function pFunnel(r){
+    const c = ctx(r), a = c.a, b = c.b;
+    const r1 = dl(pctv(a.consumed, a.leads), b ? pctv(b.consumed, b.leads) : null, { pts: true }), r2 = dl(pctv(a.connected, a.leads), b ? pctv(b.connected, b.leads) : null, { pts: true }), r3 = dl(pctv(a.vsched, a.connected), b ? pctv(b.vsched, b.connected) : null, { pts: true }), r4 = dl(pctv(a.won, a.leads), b ? pctv(b.won, b.leads) : null, { pts: true });
+    const kp = kpis([
+      { l: 'Consumed rate', v: pct(a.consumed, a.leads, 0), d: r1.d, tone: r1.tone, s: `${nf(a.consumed)} of ${nf(a.leads)} actioned`, b: 'u' },
+      { l: 'Connected rate', v: pct(a.connected, a.leads, 0), d: r2.d, tone: r2.tone, s: `${nf(a.connected)} two-way`, b: 'u' },
+      { l: 'Connected → visit scheduled', v: pct(a.vsched, a.connected, 0), d: r3.d, tone: r3.tone, s: `${nf(a.vsched)} of ${nf(a.connected)}`, b: 'u' },
+      { l: 'Lead → sale', v: pct(a.won, a.leads), d: r4.d, tone: r4.tone, s: `${nf(a.won)} closed won`, b: 'u' },
+      { await: true, l: 'Time to first touch', need: HIST },
+    ]);
+    const lane = (t) => { const R = c.R.filter((x) => x.type === t), aa = agg(R); const steps = [['Leads', aa.leads], ['Consumed', aa.consumed], ['Connected', aa.connected], ['Assessment / report', t === 'ctwa' ? aa.assessed : null], ['Visit scheduled', aa.vsched], ['Store visit', aa.visited], ['Closed won', aa.won]];
+      let prev = null, worst = -1, wd = -1; steps.forEach(([, v], i) => { if (v != null && prev != null && prev - v > wd) { wd = prev - v; worst = i; } if (v != null) prev = v; }); prev = null;
+      return `<div class="lane"><span class="lane-name">${typePill(t)}<br><span style="font-weight:500">${t === 'ctwa' ? 'LimeChat · sample' : 'Bigin'}</span></span>` + steps.map(([l, v], i) => { if (v == null) return `<div class="stage await"><span class="s-l">${l}</span><span class="s-n none">—</span><span class="s-v">Not a Bigin stage today</span></div>`; const s = `<div class="stage ${i === worst ? 'hot' : ''}"><span class="s-l">${l}</span><span class="s-n">${nf(v)}</span><span class="s-v">${prev == null ? '100%' : v > prev ? 'Logged without a visit stage' : pct(v, prev, 0) + ' of previous'}</span></div>`; prev = v; return s; }).join('') + `</div>`; };
+    const types = F.mtype === 'all' ? ['ctwa', 'leadgen'] : [F.mtype];
+    const lanes = mcard('Stage by stage', 'Step conversion per journey · shaded = biggest drop', types.map(lane).join(''));
+    const stageRank = (t, order, note) => { const R = c.R.filter((x) => x.type === t); const cnt = {}; R.forEach((x) => cnt[x.stage] = (cnt[x.stage] || 0) + 1); const mx = Math.max(1, ...Object.values(cnt));
+      return `<div class="wl-rank" style="grid-template-columns:minmax(130px,190px) minmax(0,1fr) 54px">` + order.map((s) => `<div><span class="wl-sn">${esc(s)}</span>${note[s] && !cnt[s] ? `<span class="wl-sm">${note[s]}</span>` : ''}</div><div class="wl-track"><div class="wl-fill" style="width:${100 * (cnt[s] || 0) / mx}%;background:${TYPE_COLOR[t]}"></div></div><span class="wl-val">${nf(cnt[s] || 0)}</span>`).join('') + `</div>`; };
+    const never = { 'Visit Scheduled': 'Exists, not used yet', 'Store Visit Scheduled': 'Exists, not used yet', 'Store Visit Follow-up': 'Exists, not used yet', 'Physio Visited Home': 'Home-visit stage' };
+    const bigin = mcard('Current Bigin stage · Lead Gen', 'Where every Lead Gen lead sits today', stageRank('leadgen', ['Yet to Call', 'RNR 1', 'RNR 2', 'RNR 3', 'Whatsapp connected', 'Follow-up Scheduled', 'Visit Scheduled', 'Store Visit Scheduled', 'Physio Visited Home', 'Cx Visited Store', 'Store Visit Follow-up', 'Service Completed & Sold', 'Not Interested'], never), 'u');
+    const lime = mcard('Current LimeChat status · CTWA', 'Agent label on each WhatsApp chat', stageRank('ctwa', ['New – not replied yet', 'In conversation', 'Assessment completed', 'Report shared', 'Store visit scheduled', 'Visited store', 'Purchased', 'Lost'], {}), 's');
+    const buckets = [['0–3 days', 0, 3], ['4–7 days', 4, 7], ['8–14 days', 8, 14], ['15+ days', 15, 99999]];
+    const open = c.R.filter((x) => !x.won && !x.lost);
+    const grp = (x) => x.type === 'ctwa' ? (x.consumed ? 'CTWA · In conversation' : 'CTWA · Not replied') : (/^RNR/.test(x.stage) ? 'Lead Gen · RNR 1–3' : x.stage === 'Yet to Call' ? 'Lead Gen · Yet to Call' : 'Lead Gen · Contacted');
+    const groups = [...new Set(open.map(grp))].sort();
+    const cnt = (g, lo, hi) => open.filter((x) => grp(x) === g && dDiff(x.created, MDATA.cutoff) >= lo && dDiff(x.created, MDATA.cutoff) <= hi).length;
+    const ageMx = Math.max(1, ...groups.flatMap((g) => buckets.map(([, lo, hi]) => cnt(g, lo, hi))));
+    const ageing = mcard('Open pipeline ageing', 'Open leads by days since creation · darker = more', groups.length ? `<div class="wl-heat" style="grid-template-columns:minmax(130px,180px) repeat(4,minmax(0,1fr))"><span></span>${buckets.map(([l]) => `<span class="wl-hh">${l}</span>`).join('')}` + groups.map((g) => `<span class="wl-hn">${g}</span>` + buckets.map(([, lo, hi]) => { const n = cnt(g, lo, hi); return `<div class="wl-cell ${n ? '' : 'wl-na'}" style="${n ? heatBg(n, ageMx) : ''}">${n}</div>`; }).join('')).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No open leads in this view.</p>');
+    const touch = mcard('Time to first touch · Lead Gen', 'Hours from creation to first stage change', awaitBox(HIST, 'Fills in once Bigin DealHistory is synced with the daily refresh.'));
+    return kp + lanes + `<div class="wl-g2">${bigin}${lime}</div><div class="wl-g2">${touch}${ageing}</div>`;
+  }
+
+  function pCities(r){
+    const c = ctx(r), a = c.a;
+    const st = groupBy(c.R.filter((x) => x.store), (x) => x.store).map((g) => ({ store: g.k, city: g.rows[0].city, leads: g.a.leads, lg: g.rows.filter((x) => x.type === 'leadgen').length, ct: g.rows.filter((x) => x.type === 'ctwa').length, conn: pctv(g.a.connected, g.a.leads), visited: g.a.visited, won: g.a.won, lost: g.a.lost, sconv: pctv(g.a.won, g.a.visited), lconv: pctv(g.a.won, g.a.leads), revenue: g.a.revenue, a: g.a }));
+    const unm = c.R.filter((x) => !x.store).length;
+    const top = st.slice().sort((x, y) => y.leads - x.leads)[0];
+    const pool = st.filter((s) => s.visited >= 2).length ? st.filter((s) => s.visited >= 2) : st.filter((s) => s.visited >= 1);
+    const conv = pool.slice().sort((x, y) => (y.sconv || 0) - (x.sconv || 0) || y.won - x.won)[0];
+    const kp = kpis([
+      { l: 'Stores receiving Meta leads', v: nf(st.length), d: `${new Set(st.map((s) => s.city)).size} cities`, tone: 'flat', s: unm ? `${nf(unm)} leads with no store` : 'By preferred store', b: 'v' },
+      { l: 'Most Meta leads', v: top ? shortStore(top.store) : '—', d: top ? `${nf(top.leads)} leads · ${pct(top.leads, a.leads, 0)}` : '', tone: 'flat', s: top ? top.city : '', b: 'v' },
+      { l: 'Converting best', v: conv && conv.won ? shortStore(conv.store) : '—', d: conv && conv.won ? `${conv.won} sold / ${conv.visited} visits` : 'No conversions yet', tone: 'flat', s: conv ? conv.city : '', b: 'u' },
+      { l: 'Stores with no visit yet', v: nf(st.filter((s) => !s.visited).length), d: `of ${nf(st.length)} stores`, tone: st.filter((s) => !s.visited).length ? 'bad' : 'flat', s: 'No visit stage logged', b: 'u' },
+    ]);
+    const topN = st.slice().sort((x, y) => y.leads - x.leads).slice(0, 10); const mx = Math.max(1, ...topN.map((s) => s.leads));
+    const most = mcard('Most Meta-driven leads', 'Top stores · by ad type', `<div class="wl-legend"><span><i class="wl-sw" style="background:${C.teal}"></i>Lead Gen</span><span><i class="wl-sw" style="background:${C.rust}"></i>CTWA (sample)</span></div><div class="wl-rank" style="grid-template-columns:minmax(120px,170px) minmax(0,1fr) 54px">` + topN.map((s) => `<div><span class="wl-sn">${esc(shortStore(s.store))}</span><span class="wl-sm">${esc(s.city)}</span></div><div class="wl-track" style="background:transparent;display:flex"><div class="wl-fill" style="width:${100 * s.lg / mx}%;background:${C.teal}"></div><div class="wl-fill" style="width:${100 * s.ct / mx}%;background:${C.rust}"></div></div><span class="wl-val">${nf(s.leads)}</span>`).join('') + `</div>`);
+    const cv = st.filter((s) => s.visited).sort((x, y) => (y.sconv || 0) - (x.sconv || 0) || y.won - x.won);
+    const conversion = mcard('Converting Meta leads', 'Closed won ÷ store visits · stores with a visit', cv.length ? `<div class="wl-rank" style="grid-template-columns:minmax(120px,170px) minmax(0,1fr) 70px 80px"><span class="wl-colhead">STORE</span><span class="wl-colhead">STORE CONVERSION</span><span class="wl-colhead" style="text-align:right">WON</span><span class="wl-colhead hide-sm" style="text-align:right">VISITS</span>` + cv.map((s, i) => `<div><span class="wl-sn">${esc(shortStore(s.store))}</span><span class="wl-sm">${esc(s.city)}</span></div><div style="display:flex;align-items:center;gap:8px"><div class="wl-track"><div class="wl-fill" style="width:${Math.min(100, s.sconv || 0)}%;background:${i < 3 ? C.teal : i >= cv.length - 3 ? C.rust : C.tealMid}"></div></div><span class="wl-val">${pctTxt(s.sconv, 0)}</span></div><span style="text-align:right;font-size:13px;font-variant-numeric:tabular-nums">${s.won}</span><span class="hide-sm" style="text-align:right;font-size:13px;font-variant-numeric:tabular-nums">${s.visited}</span>`).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No store visits logged in this view.</p>', 'u');
+    const hm = st.slice().sort((x, y) => y.leads - x.leads);
+    const metrics = [['Connected', (s) => pctv(s.a.connected, s.leads)], ['Visit sched.', (s) => pctv(s.a.vsched, s.leads)], ['Visited', (s) => pctv(s.a.visited, s.leads)], ['Won', (s) => pctv(s.a.won, s.leads)], ['Lost', (s) => pctv(s.a.lost, s.leads)]];
+    const heat = mcard('Store funnel heatmap', 'Share of the store\'s Meta leads · darker = higher', `<div class="wl-heat" style="grid-template-columns:minmax(120px,190px) repeat(${metrics.length},minmax(0,1fr))"><span></span>${metrics.map(([l]) => `<span class="wl-hh">${l}</span>`).join('')}` + hm.map((s) => `<span class="wl-hn" title="${esc(s.store)}">${esc(shortStore(s.store))} <span class="wl-sm" style="display:inline">${nf(s.leads)}</span></span>` + metrics.map(([, fn], j) => { const v = fn(s) || 0; return `<div class="wl-cell" style="${heatBg(v, j === 0 ? 100 : 25)}">${pctTxt(v, 0)}</div>`; }).join('')).join('') + `</div><p class="wl-note" style="margin-top:10px">Connected scaled to 100%, others to 25%.</p>`);
+    const cols = [{ h: 'Store', k: 'store' }, { h: 'City', k: 'city' }, { h: 'Leads', k: 'leads', r: 1 }, { h: 'Lead Gen', k: 'lg', r: 1 }, { h: 'CTWA', k: 'ct', r: 1 }, { h: 'Connected', k: 'conn', r: 1 }, { h: 'Visits', k: 'visited', r: 1 }, { h: 'Won', k: 'won', r: 1 }, { h: 'Lost', k: 'lost', r: 1 }, { h: 'Store conv.', k: 'sconv', r: 1 }, { h: 'Lead conv.', k: 'lconv', r: 1 }, { h: 'FO revenue', k: 'revenue', r: 1 }];
+    const mxl = Math.max(1, ...st.map((s) => s.leads));
+    const tbl = mcard('All stores', 'Click a column to sort · leads with no store stay in totals only', `<div class="wl-tw">${stable('store', cols, st, 'leads', (s) => `<tr><td class="b">${esc(s.store)}</td><td>${esc(s.city)}</td><td class="r">${bar(s.leads, mxl, C.teal)}</td><td class="r">${nf(s.lg)}</td><td class="r smpc">${nf(s.ct)}</td><td class="r">${pctTxt(s.conn, 0)}</td><td class="r">${nf(s.visited)}</td><td class="r ${s.won ? 'good' : ''}">${nf(s.won)}</td><td class="r">${nf(s.lost)}</td><td class="r">${pctTxt(s.sconv, 0)}</td><td class="r">${pctTxt(s.lconv)}</td><td class="r smpc">${inr(s.revenue)}</td></tr>`)}</div>`);
+    return kp + cityScorecard(c) + `<div class="wl-g2">${most}${conversion}</div>` + heat + tbl;
+  }
+
+  function pAds(r){
+    const c = ctx(r);
+    const ads = groupBy(c.R, (x) => x.type + '|' + x.ad).map((g) => { const t = g.rows[0].type, ad = g.rows[0].ad; const sp = spendOf(base(c.r).filter((x) => x.type === t && x.ad === ad)); const q = g.a.leads ? (g.a.connected + 2 * g.a.visited + 4 * g.a.won) / g.a.leads * 100 : 0;
+      return { ad, type: t, adset: g.rows[0].adset, lang: g.rows[0].lang, spend: sp, leads: g.a.leads, cpl: g.a.leads ? sp / g.a.leads : null, conn: pctv(g.a.connected, g.a.leads), vsched: g.a.vsched, visited: g.a.visited, won: g.a.won, lost: g.a.lost, revenue: g.a.revenue, quality: q, a: g.a }; });
+    const real = ads.filter((x) => !x.ad.startsWith('Unattributed') && !x.ad.startsWith('Test'));
+    const lgAll = c.R.filter((x) => x.type === 'leadgen'); const attributed = lgAll.filter((x) => !x.ad.startsWith('Unattributed')).length;
+    const bestCpl = real.filter((x) => x.leads >= 10).sort((x, y) => x.cpl - y.cpl)[0], bestQ = real.filter((x) => x.leads >= 10).sort((x, y) => y.quality - x.quality)[0];
+    const kp = kpis([
+      { l: 'Ads with leads', v: nf(real.length), d: `${new Set(real.map((x) => x.adset)).size} ad sets`, tone: 'flat', s: 'UTM content · CTWA referral', b: 'v' },
+      { l: 'Lead Gen leads attributed', v: pct(attributed, lgAll.length, 0), d: `${nf(lgAll.length - attributed)} without UTM`, tone: lgAll.length - attributed ? 'bad' : 'flat', s: 'UTMs from 13 Sep evening', b: 'v' },
+      { l: 'Lowest CPL (10+ leads)', v: bestCpl ? inr(bestCpl.cpl) : '—', d: bestCpl ? shortAd(bestCpl.ad) + ' · ' + typeName(bestCpl.type) : '', tone: 'flat', s: 'Spend is sample', b: 's' },
+      { l: 'Best-quality ad (10+ leads)', v: bestQ ? shortAd(bestQ.ad) : '—', d: bestQ ? `Quality ${bestQ.quality.toFixed(0)} · ${typeName(bestQ.type)}` : '', tone: 'flat', s: bestQ ? `${pctTxt(bestQ.conn, 0)} conn. · ${bestQ.visited} visits · ${bestQ.won} sold` : '', b: 'u' },
+    ]);
+    const mxl = Math.max(1, ...ads.map((x) => x.leads)), mxq = Math.max(1, ...ads.map((x) => x.quality));
+    const cols = [{ h: 'Ad (ad set · creative · language · geo)', k: 'ad' }, { h: 'Type', k: 'type' }, { h: 'Spend', k: 'spend', r: 1 }, { h: 'Leads', k: 'leads', r: 1 }, { h: 'CPL', k: 'cpl', r: 1 }, { h: 'Connected', k: 'conn', r: 1 }, { h: 'Visit sched.', k: 'vsched', r: 1 }, { h: 'Visits', k: 'visited', r: 1 }, { h: 'Won', k: 'won', r: 1 }, { h: 'Lost', k: 'lost', r: 1 }, { h: 'Quality', k: 'quality', r: 1 }, { h: 'FO revenue', k: 'revenue', r: 1 }];
+    const tbl = mcard('Ad performance', 'Quality = connected + 2 × visits + 4 × wins, per 100 leads · ranking only', `<div class="wl-tw">${stable('ads', cols, ads, 'leads', (x) => `<tr><td class="b">${esc(x.ad)}</td><td>${typePill(x.type)}</td><td class="r smpc">${inr(x.spend)}</td><td class="r">${bar(x.leads, mxl, TYPE_COLOR[x.type])}</td><td class="r smpc">${x.cpl == null ? '—' : inr(x.cpl)}</td><td class="r">${pctTxt(x.conn, 0)}</td><td class="r">${nf(x.vsched)}</td><td class="r">${nf(x.visited)}</td><td class="r ${x.won ? 'good' : ''}">${nf(x.won)}</td><td class="r">${nf(x.lost)}</td><td class="r">${bar(Math.round(x.quality), mxq, TYPE_COLOR[x.type])}</td><td class="r smpc">${inr(x.revenue)}</td></tr>`)}</div>`);
+    const hm = ads.filter((x) => x.leads >= 5).sort((x, y) => y.leads - x.leads);
+    const ms = [['Connected', 'connected', 100], ['Visit sched.', 'vsched', 25], ['Visited', 'visited', 25], ['Won', 'won', 10], ['Lost', 'lost', 50]];
+    const heat = mcard('Ad quality heatmap', 'Share of each ad\'s leads · ads with 5+ leads', `<div class="wl-tw" style="margin-top:0"><div class="wl-heat" style="min-width:420px;grid-template-columns:minmax(150px,230px) repeat(${ms.length},minmax(0,1fr))"><span></span>${ms.map(([l]) => `<span class="wl-hh">${l}</span>`).join('')}` + hm.map((x) => `<span class="wl-hn" title="${esc(x.ad)}">${typePill(x.type)} ${esc(shortAd(x.ad))}</span>` + ms.map(([, k, mx]) => { const v = pctv(x.a[k], x.leads) || 0; return `<div class="wl-cell" style="${heatBg(v, mx)}">${pctTxt(v, 0)}</div>`; }).join('')).join('') + `</div></div>`);
+    const dim = (fn, title, col, sub) => { const g = groupBy(c.R.filter((x) => !x.ad.startsWith('Unattributed') && !x.ad.startsWith('Test')), fn).sort((x, y) => y.a.leads - x.a.leads); return mcard(title, sub, g.length ? `<div class="wl-tw"><table><thead><tr><th>${col}</th><th class="r">Leads</th><th class="r">Connected</th><th class="r">Visits</th><th class="r">Won</th></tr></thead><tbody>${g.map((x) => `<tr><td class="b">${esc(x.k)}</td><td class="r">${nf(x.a.leads)}</td><td class="r">${pct(x.a.connected, x.a.leads, 0)}</td><td class="r">${nf(x.a.visited)}</td><td class="r">${nf(x.a.won)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="sub" style="margin-top:14px">No attributed leads in this view.</p>'); };
+    const un = c.R.filter((x) => x.ad.startsWith('Unattributed')).length;
+    const note = un ? mcard('Unattributed leads', '', awaitBox(`${nf(un)} Lead Gen leads have no UTM content`, 'Landing page must pass UTMs on every submission. These stay in totals but can\'t be tied to an ad.')) : '';
+    return kp + tbl + `<div class="wl-g2">${heat}<div style="display:flex;flex-direction:column;gap:14px">${dim((x) => x.lang, 'By language', 'Language', 'From the ad name')}${dim((x) => x.adset, 'By ad set', 'Ad set', 'From the ad name')}</div></div>` + note;
+  }
+
+  function pWon(r){
+    const c = ctx(r), a = c.a, b = c.b;
+    const wonRows = c.R.filter((x) => x.won);
+    const d1 = dl(a.won, b?.won), d2 = dl(a.revenue, b?.revenue);
+    const kp = kpis([
+      { l: 'Closed won', v: nf(a.won), d: d1.d, tone: d1.tone, s: `${pct(a.won, a.leads)} of leads`, b: 'u' },
+      { l: 'FO revenue', v: inr(a.revenue), d: d2.d, tone: d2.tone, s: 'DevX phone match', b: 's' },
+      { l: 'Average order value', v: a.won ? inr(a.revenue / a.won) : '—', d: '— per sale', tone: 'flat', s: 'FO revenue ÷ won', b: 's' },
+      { l: 'Cost per sale', v: a.won ? inr(c.spend / a.won) : '—', d: `ROAS ${c.spend ? (a.revenue / c.spend).toFixed(2) + '×' : '—'}`, tone: 'flat', s: 'Spend ÷ won', b: 's' },
+      { await: true, l: 'Sales without a visit stage', need: HIST },
+    ]);
+    const byStore = groupBy(wonRows, (x) => x.store || 'Unmapped').sort((x, y) => y.a.revenue - x.a.revenue); const mx = Math.max(1, ...byStore.map((g) => g.a.revenue));
+    const storeRank = mcard('Revenue by store', 'Closed-won revenue from Meta leads', byStore.length ? `<div class="wl-rank" style="grid-template-columns:minmax(120px,170px) minmax(0,1fr) 80px 44px"><span class="wl-colhead">STORE</span><span class="wl-colhead">FO REVENUE</span><span class="wl-colhead" style="text-align:right">VALUE</span><span class="wl-colhead" style="text-align:right">WON</span>` + byStore.map((g) => `<div><span class="wl-sn">${esc(shortStore(g.k))}</span><span class="wl-sm">${esc(g.rows[0].city)}</span></div><div class="wl-track" style="background:transparent;display:flex">${['leadgen', 'ctwa'].map((t) => { const v = g.rows.filter((x) => x.type === t).reduce((s, x) => s + (x.orderValue || 0), 0); return v ? `<div class="wl-fill" style="width:${100 * v / mx}%;background:${TYPE_COLOR[t]}"></div>` : ''; }).join('')}</div><span style="text-align:right;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums">${inr(g.a.revenue)}</span><span style="text-align:right;font-size:13px">${g.a.won}</span>`).join('') + `</div><div class="wl-legend"><span><i class="wl-sw" style="background:${C.teal}"></i>Lead Gen</span><span><i class="wl-sw" style="background:${C.rust}"></i>CTWA</span></div>` : '<p class="sub" style="margin-top:14px">No closed-won leads in this view.</p>', 's');
+    const ctPaths = groupBy(wonRows.filter((x) => x.type === 'ctwa'), (x) => x.flow === 'A1' ? 'CTWA · A1 · assessment → report → visit' : 'CTWA · A2 · follow-up → visit').sort((x, y) => y.a.won - x.a.won);
+    const showLg = F.mtype !== 'ctwa', showCt = F.mtype !== 'leadgen';
+    const pathCard = mcard('How the sale happened', 'Last step before the sale', (showCt ? (ctPaths.length ? `<div class="wl-list">${ctPaths.map((p) => `<div class="row"><span>${esc(p.k)} ${VB.s}</span><b class="ok">${p.a.won}</b></div>`).join('')}</div>` : '<p class="sub" style="margin-top:14px">No CTWA sales in this view.</p>') : '') + (showLg ? awaitBox('Lead Gen paths · ' + HIST) : ''));
+    const rowsW = wonRows.map((x) => ({ ...x, cityArea: `${x.city} · ${areaOf(x.store)}`, value: x.orderValue || 0, storeName: x.store || 'Unmapped' }));
+    const cols = [{ h: 'Lead', k: 'id' }, { h: 'Type', k: 'type' }, { h: 'Created', k: 'created' }, { h: 'City · Area', k: 'cityArea' }, { h: 'Store', k: 'storeName' }, { h: 'Ad', k: 'ad' }, { h: 'Order ID', k: 'orderId' }, { h: 'Order value', k: 'value', r: 1 }];
+    const tbl = mcard('Every closed-won lead', 'Lead IDs only · no names or phones', rowsW.length ? `<div class="wl-tw">${stable('won', cols, rowsW, 'created', (x) => `<tr><td class="idc">${esc(x.id)}${x.sample ? ' ' + VB.s : ''}</td><td>${typePill(x.type)}</td><td>${dLbl(x.created)}</td><td>${esc(x.cityArea)}</td><td class="b">${esc(x.storeName)}</td><td title="${esc(x.ad)}">${esc(shortAd(x.ad))}</td><td>${x.orderId ? `<span class="idc">${esc(x.orderId)}</span>` : '<span class="wl-tag">Pending DevX match</span>'}</td><td class="r b smpc">${inr(x.value)}</td></tr>`)}</div><p class="wl-note" style="margin-top:10px">Order values are sample until DevX orders are matched by phone. The Bigin order ID is only for reconciling.</p>` : '<p class="sub" style="margin-top:14px">No closed-won leads in this view.</p>');
+    return kp + `<div class="wl-g21">${storeRank}${pathCard}</div>` + tbl;
+  }
+
+  function pLoss(r){
+    const c = ctx(r), a = c.a;
+    const lost = c.R.filter((x) => x.lost), lostP = c.P ? c.P.filter((x) => x.lost) : null;
+    const d1 = dl(lost.length, lostP?.length, { invert: true });
+    const kp = kpis([
+      { l: 'Closed-lost leads', v: nf(lost.length), d: d1.d, tone: d1.tone, s: `${pct(lost.length, a.leads, 0)} of leads · ${nf(a.open)} open`, b: 'u' },
+      { await: true, l: 'Unreachable', need: HIST },
+      { await: true, l: 'Reached, then lost', need: HIST },
+      { await: true, l: 'Closed on first call', need: HIST },
+      { l: 'Lost with no reason', v: nf(a.lostNoReason), d: a.lostNoReason ? '▼ CRM hygiene' : '— none', tone: a.lostNoReason ? 'bad' : 'flat', s: 'Fill Close Lost Reason', b: 'u' },
+    ]);
+    const rs = groupBy(lost, (x) => x.lostReason || 'No reason recorded').sort((x, y) => y.a.leads - x.a.leads); let cum = 0;
+    const par = mcard('Loss reasons', 'Bigin Close Lost Reason · LimeChat label (CTWA, sample) · cumulative share', rs.length ? `<div class="wl-rank" style="grid-template-columns:minmax(140px,210px) minmax(0,1fr) 50px 80px">` + rs.map((g) => { cum += g.a.leads; return `<span class="wl-sn">${esc(g.k)}</span><div class="wl-track" style="background:transparent;display:flex">${['leadgen', 'ctwa'].map((t) => { const n = g.rows.filter((x) => x.type === t).length; return n ? `<div class="wl-fill" style="width:${100 * n / rs[0].a.leads}%;background:${TYPE_COLOR[t]}"></div>` : ''; }).join('')}</div><span style="text-align:right;font-size:13px;font-weight:600">${nf(g.a.leads)}</span><span class="hide-sm" style="text-align:right;font-size:12px;color:#5B6068">${pct(cum, lost.length, 0)} cum.</span>`; }).join('') + `</div><div class="wl-legend"><span><i class="wl-sw" style="background:${C.teal}"></i>Lead Gen</span><span><i class="wl-sw" style="background:${C.rust}"></i>CTWA (sample)</span></div>` : '<p class="sub" style="margin-top:14px">No lost leads in this view.</p>');
+    const stage = mcard('Stage when lost', 'Stage before "Not Interested"', awaitBox(HIST));
+    const rnr = mcard('RNR attempts before losing', 'Lead Gen · RNR stages passed through', awaitBox(HIST));
+    const top = rs.slice(0, 6).map((g) => g.k); const LT = 'ABCDEF';
+    const cityG = CITY_LIST.map((cn) => [cn, lost.filter((x) => x.city === cn)]).filter(([, v]) => v.length);
+    const matrix = top.length ? `<p class="wl-note" style="margin-top:8px">${top.map((x, i) => `<b>${LT[i]}</b> ${esc(x)}`).join(' · ')}</p><div class="wl-heat" style="grid-template-columns:minmax(100px,150px) repeat(${top.length},minmax(0,1fr))"><span></span>${top.map((_, i) => `<span class="wl-hh">${LT[i]}</span>`).join('')}` + cityG.map(([cn, arr]) => `<span class="wl-hn">${cn} <span class="wl-sm" style="display:inline">${arr.length}</span></span>` + top.map((x) => { const v = pctv(arr.filter((y) => (y.lostReason || 'No reason recorded') === x).length, arr.length) || 0; return `<div class="wl-cell" style="${heatBg(v, 60)}">${pctTxt(v, 0)}</div>`; }).join('')).join('') + `</div>` : '';
+    const heat = mcard('Loss reason by city', 'Share of each city\'s lost leads', matrix || '<p class="sub" style="margin-top:14px">No lost leads in this view.</p>');
+    const rr = lost.map((x) => ({ ...x, reason: x.lostReason || '', storeName: x.store || 'Unmapped' }));
+    const cols = [{ h: 'Lead', k: 'id' }, { h: 'Type', k: 'type' }, { h: 'Created', k: 'created' }, { h: 'City', k: 'city' }, { h: 'Store', k: 'storeName' }, { h: 'Ad', k: 'ad' }, { h: 'Stage when lost', k: 'lastStage' }, { h: 'Lost reason', k: 'reason' }];
+    const tbl = mcard('Every closed-lost lead', 'Lead IDs only · click a column to sort', rr.length ? `<div class="wl-tw tall">${stable('lost', cols, rr, 'created', (x) => `<tr><td class="idc">${esc(x.id)}</td><td>${typePill(x.type)}</td><td>${dLbl(x.created)}</td><td>${esc(x.city)}</td><td>${esc(shortStore(x.store))}</td><td title="${esc(x.ad)}">${esc(shortAd(x.ad))}</td><td>${x.lastStage ? esc(x.lastStage) : '<span class="wl-tag">Awaiting history</span>'}</td><td>${x.lostReason ? esc(x.lostReason) : '<span class="wl-tag">Not recorded</span>'}${x.junk ? ' <span class="wl-tag">Excluded from net</span>' : ''}</td></tr>`)}</div>` : '<p class="sub" style="margin-top:14px">No lost leads in this view.</p>');
+    return kp + `<div class="wl-g2">${par}${heat}</div><div class="wl-g2">${stage}${rnr}</div>` + tbl;
+  }
+
+  function pDefs(){
+    const box = (t, s, cl = '') => `<div class="fbox ${cl}"><b>${t}</b><span>${s}</span></div>`;
+    const ar = '<span class="wl-arrow" aria-hidden="true">→</span>', or = '<span class="wl-note">or</span>';
+    const flow = mcard('Funnel flow', 'How a Meta ad lead becomes revenue, per journey', `
+      <p class="wl-colhead" style="margin:18px 0 0">1 · CTWA / WHATSAPP ADS — LIMECHAT (NO CRM)</p>
+      <div class="flow">
+        <div class="flow-row"><span class="flow-tag">Entry</span>${box('Meta ad → WhatsApp', 'CTWA referral carries the ad', 'lead')}${ar}${box('LimeChat inbox', 'Not in Bigin or any CRM', 'lead')}${ar}${box('Agent follow-up', 'On WhatsApp')}</div>
+        <div class="flow-row"><span class="flow-tag">Flow A1</span>${box('Assessment done', 'Ergo Assessment completed')}${ar}${box('Report shared', 'Agent sends the report')}${ar}${box('Visit scheduled', 'Store visit booked')}</div>
+        <div class="flow-row"><span class="flow-tag">Flow A2</span>${box('Assessment skipped', 'Agent keeps following up', 'leak')}${ar}${box('Completes later', 'Joins A1')}${or}${box('Visits store directly', 'Skips the report')}${or}${box('Does not visit', 'Lost', 'leak')}</div>
+        <div class="flow-row"><span class="flow-tag">Outcome</span>${box('Store conversion attempt', 'At the preferred store')}${ar}${box('Purchase', 'DevX order, phone match', 'rev')}${or}${box('Lost', 'LimeChat label + reason', 'leak')}</div>
+      </div>
+      <p class="wl-colhead" style="margin:22px 0 0">2 · LEAD GEN WEBSITE ADS — BIGIN CRM</p>
+      <div class="flow">
+        <div class="flow-row"><span class="flow-tag">Entry</span>${box('Meta ad → landing page', 'Ergo Assessment page, UTMs', 'lead')}${ar}${box('Bigin · Yet to Call', 'Meta Ergo Workspace Assessment', 'lead')}</div>
+        <div class="flow-row"><span class="flow-tag">Contact</span>${box('RNR 1 → 2 → 3', 'Lost after 4 attempts', 'leak')}${or}${box('Contacted', 'Whatsapp connected / Follow-up Scheduled')}</div>
+        <div class="flow-row"><span class="flow-tag">Assessment</span>${box('Walkthrough + report', 'Not a Bigin stage today', 'gap')}${ar}${box('Visit scheduled', 'Visit Scheduled / Store Visit Scheduled', 'gap')}</div>
+        <div class="flow-row"><span class="flow-tag">Outcome</span>${box('Store visit', 'Cx Visited Store → Store Visit Follow-up')}${ar}${box('Closed Won', 'Service Completed & Sold', 'rev')}${or}${box('Closed Lost', 'Not Interested + reason', 'leak')}</div>
+      </div>`);
+    const D = [
+      ['Leads', 'Every record created from a Meta ad, by created date', 'Net view excludes Duplicate Lead, Test Lead and test UTMs.'],
+      ['Consumed / Unconsumed', 'Consumed = stage moved out of "Yet to Call" (CTWA: agent replied)', 'Unconsumed = leads − consumed.'],
+      ['Connected', 'Reached "Whatsapp connected", "Follow-up Scheduled" or later, or lost with a conversation reason', 'RNR-only and duplicate closures are not connected. Lost leads count from their reason until stage history is synced.'],
+      ['Visit scheduled (strict)', '"Visit Scheduled" / "Store Visit Scheduled" or a later visit stage', 'Never inferred from a sale (decided 29 Sep).'],
+      ['Store visit (strict)', '"Cx Visited Store", "Store Visit Follow-up" or "Physio Visited Home"', 'A sale without a visit stage is a sale, not a visit.'],
+      ['Closed won / lost', 'Won = "Service Completed & Sold" · Lost = "Not Interested" + reason', 'CTWA: LimeChat "Purchased" / "Lost".'],
+      ['FO revenue', 'DevX orders on/after the capture date whose phone matches the lead', 'Any channel. Bigin order ID only to reconcile.'],
+      ['Spend, CPL, ROAS', 'Spend = Ads Manager ad-level spend · CPL = spend ÷ leads · ROAS = revenue ÷ spend', 'Join: ad name = UTM content; ad ID = CTWA referral. City/store spend split by lead share.'],
+      ['Time to first touch', 'Hours from creation to the first Bigin stage change', 'From Bigin stage history, de-noised.'],
+    ];
+    const defs = mcard('Definitions', '', D.map((f) => `<div class="def"><strong>${f[0]}</strong><div class="formula">${f[1]}</div><p class="sub">${f[2]}</p></div>`).join(''));
+    const s = MDATA?.sources || {};
+    const pill = (st) => st === 'sample' ? '<span class="wl-pill p-peach">Sample</span>' : st === 'not_connected' ? '<span class="wl-pill p-grey">Not connected</span>' : st === 'ok' ? '<span class="wl-pill p-teal">Live</span>' : `<span class="wl-pill p-peach">${esc(st || '—')}</span>`;
+    const src = mcard('Sources', 'Same refresh as the walk-in dashboard', `<div class="wl-tw"><table><thead><tr><th>Data</th><th>Source</th><th>Refresh</th><th>Status</th></tr></thead><tbody>
+      <tr><td class="b">Lead Gen leads</td><td class="wrap">Bigin · pipeline 1371203000000558349</td><td>Daily 6:00 AM IST (T-1)</td><td>${pill(s.leadgen?.status)}</td></tr>
+      <tr><td class="b">Stage history</td><td class="wrap">Bigin DealHistory</td><td>Daily with leads</td><td>${pill(s.stageHistory?.status)}</td></tr>
+      <tr><td class="b">CTWA leads</td><td class="wrap">LimeChat conversation export</td><td>Daily</td><td>${pill(s.ctwa?.status)}</td></tr>
+      <tr><td class="b">Meta spend</td><td class="wrap">Ads Manager export, ad level</td><td>Daily</td><td>${pill(s.spend?.status)}</td></tr>
+      <tr><td class="b">Revenue</td><td class="wrap">DevX orders (BigQuery), phone match</td><td>Daily 8:00 AM IST</td><td>${pill(s.revenue?.status)}</td></tr></tbody></table></div>`);
+    const cnt = MDATA?.counts?.stages || {};
+    const map = [['Yet to Call', 'Yet to Call', ['Yet to Call']], ['Contacted', 'No such stage — RNR 1 → 2 → 3, then Whatsapp connected / Follow-up Scheduled', ['RNR 1', 'RNR 2', 'RNR 3', 'Whatsapp connected', 'Follow-up Scheduled']], ['Assessment', 'No such stage. Physio Visited Home is the only assessment-like stage', ['Physio Visited Home']], ['Visit Scheduled', 'Visit Scheduled / Store Visit Scheduled', ['Visit Scheduled', 'Store Visit Scheduled']], ['Store Visit', 'Cx Visited Store → Store Visit Follow-up', ['Cx Visited Store', 'Store Visit Follow-up']], ['Closed Won', 'Service Completed & Sold (no Amount field)', ['Service Completed & Sold']], ['Closed Lost', 'Not Interested + Close Lost Reason', ['Not Interested']]];
+    const mapping = mcard('Defined pipeline vs Bigin', 'Stage mapping used here', `<div class="wl-tw"><table><thead><tr><th>Defined stage</th><th>Bigin stages in use</th><th class="r">Leads today</th></tr></thead><tbody>${map.map((m) => `<tr><td class="b">${m[0]}</td><td class="wrap">${m[1]}</td><td class="r">${MDATA ? nf(m[2].reduce((t, k) => t + (cnt[k] || 0), 0)) : '—'}</td></tr>`).join('')}</tbody></table></div>`);
+    return flow + `<div class="wl-g2">${defs}<div style="display:flex;flex-direction:column;gap:14px">${src}${mapping}</div></div>`;
+  }
+
+  const PAGES = { overview: pOverview, funnel: pFunnel, cities: pCities, ads: pAds, won: pWon, loss: pLoss };
+  function page(tab){
+    if (!MTABS.find((t) => t.id === tab)) tab = 'overview';
+    const i = MTABS.findIndex((t) => t.id === tab);
+    const crumb = crumbs([['Founders Office', '#/'], ['Retail Revenue', '#/retail'], ['Meta ads', href('overview')], [MTABS[i].name, '#']]);
+    let body;
+    if (tab === 'definitions') body = pDefs();
+    else if (!MDATA || !DATA) body = MDATA_ERR || DATA_ERR ? wcard('Live data could not be loaded', esc(MDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="mRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin Meta leads (T-1).', '');
+    else { const r = mRange(); body = filters(r) + (r ? PAGES[tab](r) : wcard('No data in this range', `Meta ads went live on ${dpShort(MDATA.startDate)}. Pick a range from that date.`, '')); }
+    const prev = i > 0 ? `<a href="${href(MTABS[i - 1].id)}"><span class="p-dir">← Previous</span><span class="p-name">${MTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
+    const next = i < MTABS.length - 1 ? `<a class="next" href="${href(MTABS[i + 1].id)}"><span class="p-dir">Next →</span><span class="p-name">${MTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
+    return crumb + `<div class="wl mt">${header(tab)}${body}</div><nav class="pager" aria-label="Previous and next page">${prev}${next}</nav>`;
+  }
+  // Month-to-date line for Home and the Retail Revenue scoreboard (revenue stays out: it is sample)
+  function statsLine(){
+    if (!MDATA) return MDATA_ERR ? 'Data unavailable' : 'Loading…';
+    const c = MDATA.cutoff; const r = [c.slice(0, 8) + '01' < MDATA.startDate ? MDATA.startDate : c.slice(0, 8) + '01', c];
+    const R = MDATA.leads.filter((x) => x.type === 'leadgen' && !x.junk && x.created >= r[0] && x.created <= r[1]); const a = agg(R);
+    return `Lead Gen leads <b>${nf(a.leads)}</b> · Visits <b>${nf(a.visited)}</b> · Won <b>${nf(a.won)}</b> (MTD)`;
+  }
+  function bindPage(){
+    document.querySelectorAll('[data-mtype]').forEach((el) => el.addEventListener('click', () => { F.mtype = el.dataset.mtype; rerender(); }));
+    document.querySelectorAll('[data-mcity]').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); F.mcity = el.dataset.mcity; F.mstore = 'all'; rerender(); }));
+    document.querySelectorAll('table[data-msort] th[data-k]').forEach((th) => { const go = () => { sortBy(th.closest('table').dataset.msort, th.dataset.k); rerender(); }; th.addEventListener('click', go); th.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }); });
+    const rl = document.getElementById('mReloadBtn'); if (rl) rl.addEventListener('click', () => { MDATA = null; loadMeta(true); rerender(); });
+    const rt = document.getElementById('mRetryBtn'); if (rt) rt.addEventListener('click', () => { MDATA_ERR = null; DATA_ERR = null; loadMeta(true); if (!DATA) loadData(true); rerender(); });
+  }
+  return { page, statsLine, bindPage };
+})();
+
+/* ---------- Retail retention module (offer broadcasts → retail store orders · sample until the LimeChat broadcast report is connected) ---------- */
+const RTABS = [{ id: 'overview', name: 'Overview' }, { id: 'campaigns', name: 'Campaigns' }, { id: 'stores', name: 'Stores & products' }, { id: 'definitions', name: 'Flow & definitions' }];
+let RDATA = null, RDATA_ERR = null, RLOADING = false;
+async function loadRet(force){
+  if (RLOADING || (RDATA && !force)) return;
+  RLOADING = true; RDATA_ERR = null;
+  try { const r = await fetch('/api/retention', { cache: 'no-store' }); const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status)); RDATA = j; }
+  catch (e) { RDATA_ERR = String(e.message || e); }
+  RLOADING = false; rerender();
+}
+const RET = (() => {
+  const RTIP = {
+    'Total messages': ['Every message in the broadcast.', 'LimeChat broadcast export'],
+    'Delivered': ['Delivered on WhatsApp.', 'LimeChat broadcast export'],
+    'Read': ['Read Status = Read. Only read leads get orders.', 'LimeChat broadcast export'],
+    'Orders': ['Store orders from read leads, day 0–60.', 'DevX × broadcast, phone match'],
+    'Revenue': ['Credited orders, gross − discount.', 'DevX (BigQuery)'],
+    'Conversion rate': ['Orders ÷ delivered.', 'DevX × broadcast'],
+    'Spend': ['₹0.85 per delivered message.', 'LimeChat broadcast export'],
+    'ROAS': ['Revenue ÷ spend.', 'DevX × broadcast'],
+  };
+  const tip = (l) => { const t = RTIP[l]; return t ? `<span class="k-i" role="button" tabindex="0" aria-label="What is this?">i</span><span class="k-tip" role="tooltip"><b>${esc(l)}</b>${esc(t[0])}<em>Source: ${esc(t[1])}</em></span>` : ''; };
+  const kpis = (items) => `<div class="wl-kpis">` + items.map((k) => `<div class="wl-kpi ${k.b === 's' ? 'smp' : ''}" tabindex="0">${tip(k.l)}<div class="k-l">${k.l}</div><div class="k-v ${String(k.v).length > 9 ? 'txt' : ''}">${k.v}</div><div class="k-d ${k.tone || 'flat'}">${k.d}</div><div class="k-s">${k.s}</div>${k.b ? `<div>${VB[k.b]}</div>` : ''}</div>`).join('') + `</div>`;
+  const card = (title, sub, body, badge = '', right = '') => `<section class="wl-card ${badge === 's' ? 'smp' : ''}"><div class="wl-ch"><div><h2>${title} ${badge ? VB[badge] : ''}</h2>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${right}</div>${body}</section>`;
+  const href = (t) => '#/retail/retention/' + t;
+  const smp = () => RDATA?.sample ? 's' : 'v';
+  const SRC = { walkin: 'Walk-in lead', pdp_call: 'PDP call lead', pdp_text: 'PDP WhatsApp lead', meta: 'Meta lead' };
+  const EX = {}; // expanded city rows (click-to-expand)
+  const store = (id) => (RDATA.stores.find((s) => s.id === id) || { name: id || 'No earlier store order', city: '—' });
+  const start = () => RDATA.campaigns[0]?.first || RDATA.cutoff;
+
+  /* ---------- range & filters: campaigns whose run date falls in the range ---------- */
+  function rRange(){ const r = rangeOf(F.range); return [r[0], r[1] > RDATA.cutoff ? RDATA.cutoff : r[1]]; }
+  const cityOk = (id) => F.rcity === 'all' || store(id).city === F.rcity;
+  const inR = (x, r) => x.run >= r[0] && x.run <= r[1] && (F.rcamp === 'all' || String(x.c) === F.rcamp);
+  const recs = (r) => RDATA.recipients.filter((x) => inR(x, r) && cityOk(x.hs));
+  const cred = (r) => RDATA.credited.filter((x) => inR(x, r) && cityOk(x.s));
+  const lost = (r) => RDATA.lostTo.filter((x) => inR(x, r) && cityOk(x.s));
+  function agg(R, O){
+    const a = { n: 0, sent: 0, failed: 0, del: 0, read: 0, rep: 0, clk: 0, buy: 0, repBuy: 0 };
+    R.forEach((x) => { for (const k in a) a[k] += x[k] || 0; });
+    a.orders = O.length; a.net = O.reduce((s, x) => s + x.net, 0); a.qty = O.reduce((s, x) => s + (x.qty || 0), 0); a.buyers = O.filter((x) => x.first).length;
+    return a;
+  }
+  const ctx = (r) => { const R = recs(r), O = cred(r); return { r, R, O, L: lost(r), a: agg(R, O) }; };
+
+  function header(){
+    const s = RDATA?.sources || {};
+    const asof = RDATA ? `Data as of ${dpShort(RDATA.cutoff)} (T-1) · ${s.broadcasts?.status === 'sample' ? 'LimeChat broadcast report not connected — every figure is sample' : 'LimeChat broadcast report ' + esc(s.broadcasts?.status || '—') + ' · DevX ' + esc(s.sales?.status || '—')}` : 'Connecting to sources…';
+    return `<div class="wl-head"><div><div class="wl-eyebrow">FRIDO · FOUNDERS OFFICE · RETAIL REVENUE</div><h1>Retail retention</h1></div>
+      <div class="wl-meta"><div class="wl-asof">${asof}</div><div class="wl-pills">${RDATA?.sample ? '<span class="wl-pill p-peach">Sample data</span>' : '<span class="wl-pill p-teal">Broadcasts live</span>'}<span class="wl-pill p-grey">${RDATA ? RDATA.windowDays : 60}-day window · most recent touch wins</span><button type="button" class="wl-btn" id="rReloadBtn" style="min-height:28px;padding:4px 12px;font-size:12px">Reload data</button></div></div></div>
+      <nav class="wl-tabs" aria-label="Dashboard pages">${RTABS.map((t) => `<a class="wl-tab ${t.id === CUR ? 'on' : ''} ${t.id === 'definitions' ? 'aux' : ''}" href="${href(t.id)}" ${t.id === CUR ? 'aria-current="page"' : ''}>${t.name}</a>`).join('')}</nav>`;
+  }
+  let CUR = 'overview';
+  function filters(r){
+    const opt = (v, l, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`;
+    const camps = RDATA.campaigns.filter((c) => c.last >= r[0] && c.first <= r[1]);
+    const cities = [...new Set(RDATA.stores.map((s) => s.city))].sort();
+    return `<div class="wl-filters">
+      <div class="wl-fl">CAMPAIGN RUN DATE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
+      <label class="wl-fl">CAMPAIGN<select data-f="rcamp">${opt('all', `All campaigns (${camps.length})`, F.rcamp)}${camps.map((c) => opt(String(c.i), c.name, F.rcamp)).join('')}</select></label>
+      <label class="wl-fl">CITY<select data-f="rcity">${opt('all', 'All cities', F.rcity)}${cities.map((c) => opt(c, c, F.rcity)).join('')}</select></label>
+      <span class="wl-note" style="align-self:center">Campaigns run ${dpShort(r[0])} → ${dpShort(r[1])} · orders counted to ${dpShort(RDATA.cutoff)}</span>
+    </div>`;
+  }
+
+  /* ---------- shared pieces ---------- */
+  const spendOf = (a) => a.del * RDATA.costPerDelivered;
+  function flowCard(a){
+    const box = (t, s, cl = '') => `<div class="fbox ${cl}"><b>${t}</b><span>${s}</span></div>`;
+    const ar = '<span class="wl-arrow" aria-hidden="true">→</span>';
+    return card('Campaign flow', 'From offer to retention revenue · counts for this view', `<div class="flow">
+      <div class="flow-row"><span class="flow-tag">Set-up</span>${box('Exclusive offer', 'e.g. Diwali', 'lead')}${ar}${box('Creatives', 'From the retention team', 'lead')}${ar}${box('Campaign flow', 'Built on LimeChat', 'lead')}${ar}${box('Broadcast', 'Existing retail customers', 'lead')}</div>
+      <div class="flow-row"><span class="flow-tag">Reach</span>${box(nf(a.n) + ' messages', `${nf(a.failed)} failed`)}${ar}${box(nf(a.sent) + ' sent', pct(a.sent, a.n, 0) + ' of messages')}${ar}${box(nf(a.del) + ' delivered', pct(a.del, a.n, 0) + ' of messages')}${ar}${box(nf(a.read) + ' read', pct(a.read, a.del, 0) + ' of delivered')}</div>
+      <div class="flow-row"><span class="flow-tag">Revenue</span>${box('Store order', `Read leads only · day 0–${RDATA.windowDays}`)}${ar}${box('Most recent touch?', 'Broadcast vs walk-in / PDP / Meta lead', 'gap')}${ar}${box(nf(a.orders) + ' orders · ' + inr(a.net), `ROAS ${spendOf(a) ? (a.net / spendOf(a)).toFixed(1) + '×' : '—'} on ${inr(spendOf(a))} spend`, 'rev')}</div>
+    </div>`, smp());
+  }
+  function funnel(a){
+    const steps = [['Total messages', a.n, 'In the broadcast'], ['Sent', a.sent, 'Not failed'], ['Delivered', a.del, 'On WhatsApp'], ['Read', a.read, 'Eligible for credit'], ['Bought', a.buyers, 'Read lead with a store order']];
+    return `<div class="wl-rank" style="grid-template-columns:minmax(110px,150px) minmax(0,1fr) 70px"><span class="wl-colhead">STAGE</span><span class="wl-colhead">CUSTOMERS</span><span class="wl-colhead" style="text-align:right">OF PREV.</span>` +
+      steps.map(([l, v, s], i) => `<div><span class="wl-sn">${l}</span><span class="wl-sm">${s}</span></div><div style="display:flex;align-items:center;gap:8px"><div class="wl-track"><div class="wl-fill" style="width:${100 * v / (a.n || 1)}%;background:${i === 4 ? C.rust : C.teal}"></div></div><span class="wl-val">${nf(v)}</span></div><span style="font-size:13px;text-align:right;font-variant-numeric:tabular-nums">${i ? pct(v, steps[i - 1][1], i === 4 ? 1 : 0) : '100%'}</span>`).join('') + `</div>`;
+  }
+  const BUCKETS = [['Day 0', 0, 0], ['1–3', 1, 3], ['4–7', 4, 7], ['8–14', 8, 14], ['15–30', 15, 30], ['31–60', 31, 60]];
+  function lagCard(O){
+    const F1 = O.filter((x) => x.first); const n = F1.length; let cum = 0;
+    const v = BUCKETS.map(([l, lo, hi]) => { const k = F1.filter((x) => x.lag >= lo && x.lag <= hi).length; cum += k; return { l, k, cum }; }); const mx = Math.max(1, ...v.map((x) => x.k));
+    return card('Days from run to first order', 'When buyers act · cumulative share', n ? `<div class="wl-rank" style="grid-template-columns:70px minmax(0,1fr) 54px 64px">` + v.map((x) => `<span class="wl-sn">${x.l}</span><div class="wl-track"><div class="wl-fill" style="width:${100 * x.k / mx}%;background:${C.teal}"></div></div><span class="wl-val">${nf(x.k)}</span><span style="text-align:right;font-size:12px;color:#5B6068">${pct(x.cum, n, 0)} cum.</span>`).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No buyers in this view yet.</p>', smp());
+  }
+  function creditCard(c){
+    const prior = c.O.filter((x) => x.prior); const by = {}; c.L.forEach((x) => { by[x.to] = (by[x.to] || 0) + 1; });
+    const total = c.O.length + c.L.length;
+    const rows = [[`Credited to retention`, c.O.length, 'Broadcast was the most recent touch', true, total], ...Object.entries(by).sort((x, y) => y[1] - x[1]).map(([k, n]) => [`To a newer ${SRC[k] || k}`, n, 'Lead came after the broadcast', false, total]), ['Credited, with an older lead', prior.length, 'Share of credited orders · credit stays with retention', true, c.O.length]];
+    return card('Who gets the order', `${nf(total)} store orders from read leads inside the window`, `<div class="wl-list">${rows.map(([t, n, s, ok, of]) => `<div class="row"><span>${t}<small>${s}</small></span><b class="${ok ? 'ok' : ''}">${nf(n)} · ${pct(n, of, 0)}</b></div>`).join('')}</div>`, smp());
+  }
+  function failCard(r){
+    const by = {}; RDATA.fails.filter((x) => x.run >= r[0] && x.run <= r[1] && (F.rcamp === 'all' || String(x.c) === F.rcamp)).forEach((x) => { by[x.why] = (by[x.why] || 0) + x.n; });
+    const rows = Object.entries(by).sort((x, y) => y[1] - x[1]); const tot = rows.reduce((s, x) => s + x[1], 0); const mx = Math.max(1, ...rows.map((x) => x[1]));
+    return card('Why messages failed', `${nf(tot)} failed messages · WhatsApp error reason${F.rcity !== 'all' ? ' · all cities' : ''}`, rows.length ? `<div class="wl-rank" style="grid-template-columns:minmax(150px,240px) minmax(0,1fr) 60px 44px">` + rows.map(([k, n]) => `<span class="wl-sn" style="white-space:normal">${esc(k)}</span><div class="wl-track"><div class="wl-fill" style="width:${100 * n / mx}%;background:${C.rust}"></div></div><span class="wl-val">${nf(n)}</span><span style="text-align:right;font-size:12px;color:#5B6068">${pct(n, tot, 0)}</span>`).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No failed messages in this view.</p>', smp());
+  }
+  function campaignRows(r){
+    return RDATA.campaigns.filter((cp) => (F.rcamp === 'all' || String(cp.i) === F.rcamp)).map((cp) => {
+      const R = RDATA.recipients.filter((x) => x.c === cp.i && x.run >= r[0] && x.run <= r[1] && cityOk(x.hs)); if (!R.length) return null;
+      const O = RDATA.credited.filter((x) => x.c === cp.i && x.run >= r[0] && x.run <= r[1] && cityOk(x.s)); const a = agg(R, O);
+      const age = dDiff(cp.last, RDATA.cutoff); const left = dDiff(RDATA.cutoff, cp.closes);
+      const by = (k) => age < k ? null : pctv(O.filter((x) => x.first && x.lag <= k).length, a.del);
+      return { cp, name: cp.name, a, d7: by(7), d14: by(14), d30: by(30), d60: by(60), left, R };
+    }).filter(Boolean);
+  }
+  const status = (x) => x.cp.open ? `<span class="pill-t pt-lg">Open · ${x.left} day${x.left === 1 ? '' : 's'} left</span>` : '<span class="pill-t" style="background:#EFECE4;color:#5B6068">Closed</span>';
+  // Broadcast performance — same layout as the retention team's sheet. Conversion = orders ÷ delivered; Spend = ₹0.85 × delivered.
+  const roas = (a) => { const sp = spendOf(a); return sp ? (a.net / sp).toFixed(1) + '×' : '—'; };
+  const perf = (a) => `<td class="r">${nf(a.n)}</td><td class="r">${nf(a.sent)}</td><td class="r">${nf(a.del)}</td><td class="r">${nf(a.failed)}</td><td class="r">${nf(a.read)}</td><td class="r b">${nf(a.orders)}</td><td class="r">${nf(a.qty)}</td><td class="r b">${inr(a.net)}</td><td class="r">${pct(a.orders, a.del)}</td><td class="r">${inr(spendOf(a))}</td><td class="r b">${roas(a)}</td><td class="r">${a.orders ? inr(a.net / a.orders) : '—'}</td><td class="r">${a.orders ? (a.qty / a.orders).toFixed(1) : '—'}</td>`;
+  function campaignTable(r, full){
+    const data = campaignRows(r);
+    if (!data.length) return card('Broadcast performance', '', '<p class="sub" style="margin-top:14px">No broadcast ran in this range.</p>');
+    const head = `<tr><th>Broadcast</th><th>Sent at</th><th class="r">Total messages</th><th class="r">Sent</th><th class="r">Delivered</th><th class="r">Failed</th><th class="r">Read</th><th class="r">Orders</th><th class="r">Qty</th><th class="r">Revenue</th><th class="r">Conversion</th><th class="r">Spend</th><th class="r">ROAS</th><th class="r">AOV</th><th class="r">UPT</th><th>Window</th></tr>`;
+    const row = (x) => { const many = x.cp.waves.length > 1; return `<tr ${full && many ? `data-rex="c${x.cp.i}" tabindex="0" style="cursor:pointer"` : ''}><td class="b">${full && many ? (EX['c' + x.cp.i] ? '▾ ' : '▸ ') : ''}${esc(x.name)}</td><td>${dpShort(x.cp.first)}${many ? ` · ${x.cp.waves.length} waves` : ''}</td>${perf(x.a)}<td>${status(x)}</td></tr>` +
+      (full && EX['c' + x.cp.i] ? x.cp.waves.filter((w) => w.d >= r[0] && w.d <= r[1]).map((w) => { const R = x.R.filter((y) => y.run === w.d), O = RDATA.credited.filter((y) => y.c === x.cp.i && y.run === w.d && cityOk(y.s)); return `<tr style="background:#FAF9F5"><td style="padding-left:28px">Wave</td><td>${dpShort(w.d)}</td>${perf(agg(R, O))}<td>Closes ${dpShort(dAdd(w.d, RDATA.windowDays)).replace(/ \d{4}$/, '')}</td></tr>`; }).join('') : ''); };
+    const tot = agg(data.flatMap((x) => x.R), data.flatMap((x) => RDATA.credited.filter((y) => y.c === x.cp.i && y.run >= r[0] && y.run <= r[1] && cityOk(y.s))));
+    const total = data.length > 1 ? `<tr style="background:#FFF6CC;font-weight:600"><td class="b">Total</td><td></td>${perf(tot)}<td></td></tr>` : '';
+    return card('Broadcast performance', `Orders from delivered + read leads only · conversion = orders ÷ delivered · spend = ₹${RDATA.costPerDelivered} × delivered${full ? ' · click a multi-wave broadcast for its waves' : ''}`, `<div class="wl-tw"><table><thead>${head}</thead><tbody>${data.map(row).join('')}${total}</tbody></table></div>`, smp());
+  }
+  function roasChart(r){
+    const data = campaignRows(r).map((x) => ({ name: x.name, rev: x.a.net, sp: spendOf(x.a), a: x.a }));
+    if (!data.length) return card('Revenue vs spend', '', '<p class="sub" style="margin-top:14px">No broadcast ran in this range.</p>');
+    const mx = Math.max(1, ...data.map((x) => Math.max(x.rev, x.sp)));
+    return card('Revenue vs spend', 'Per broadcast · label = ROAS', `<div class="wl-legend"><span><i class="wl-sw" style="background:${C.teal}"></i>Revenue</span><span><i class="wl-sw" style="background:${C.sandDk}"></i>Spend</span></div><div class="wl-rank" style="grid-template-columns:minmax(120px,200px) minmax(0,1fr) 54px">` +
+      data.map((x) => `<div><span class="wl-sn" style="white-space:normal">${esc(x.name)}</span><span class="wl-sm">${inr(x.rev)} · ${inr(x.sp)}</span></div><div style="display:flex;flex-direction:column;gap:3px"><div class="wl-track"><div class="wl-fill" style="width:${100 * x.rev / mx}%;background:${C.teal}"></div></div><div class="wl-track"><div class="wl-fill" style="width:${Math.max(0.5, 100 * x.sp / mx)}%;background:${C.sandDk}"></div></div></div><span class="wl-val">${roas(x.a)}</span>`).join('') + `</div>`, smp());
+  }
+
+  /* ---------- pages ---------- */
+  function pOverview(r){
+    const c = ctx(r), a = c.a, sp = spendOf(a);
+    const kp = kpis([
+      { l: 'Total messages', v: nf(a.n), d: `${nf(a.sent)} sent`, s: `${nf(a.failed)} failed · ${pct(a.failed, a.n, 0)}`, b: smp() },
+      { l: 'Delivered', v: nf(a.del), d: pct(a.del, a.n, 0) + ' of messages', s: 'On WhatsApp', b: smp() },
+      { l: 'Read', v: nf(a.read), d: pct(a.read, a.del, 0) + ' of delivered', s: 'Only these get credit', b: smp() },
+      { l: 'Orders', v: nf(a.orders), d: `${nf(a.qty)} units`, s: `${nf(a.buyers)} buyers`, b: smp() },
+      { l: 'Revenue', v: inr(a.net), d: `AOV ${a.orders ? inr(a.net / a.orders) : '—'}`, s: `UPT ${a.orders ? (a.qty / a.orders).toFixed(1) : '—'}`, b: smp() },
+      { l: 'Conversion rate', v: pct(a.orders, a.del), d: 'orders ÷ delivered', s: `${pct(a.orders, a.read)} of read`, b: smp() },
+      { l: 'Spend', v: inr(sp), d: `₹${RDATA.costPerDelivered} × delivered`, s: `${nf(a.del)} delivered`, b: smp() },
+      { l: 'ROAS', v: roas(a), d: 'revenue ÷ spend', s: a.orders ? `${inr(sp / a.orders)} per order` : '—', tone: sp && a.net >= sp ? 'good' : 'flat', b: smp() },
+    ]);
+    return kp + campaignTable(r, false) + `<div class="wl-g2">${roasChart(r)}${card('Message funnel', 'Customers at each step', funnel(a), smp())}</div>` + flowCard(a) + `<div class="wl-g2">${creditCard(c)}${failCard(r)}</div>`;
+  }
+  function pCampaigns(r){
+    const data = campaignRows(r);
+    const cols = [['Day 7', 'd7'], ['Day 14', 'd14'], ['Day 30', 'd30'], ['Day 60', 'd60']];
+    const mx = Math.max(1, ...data.flatMap((x) => cols.map(([, k]) => x[k] || 0)));
+    const cohort = card('Conversion by days since run', 'Buyers ÷ delivered by day N · blank = not reached yet', data.length ? `<div class="wl-heat" style="grid-template-columns:minmax(140px,220px) repeat(4,minmax(0,1fr))"><span></span>${cols.map(([l]) => `<span class="wl-hh">${l}</span>`).join('')}` + data.map((x) => `<span class="wl-hn">${esc(x.name)}</span>` + cols.map(([, k]) => x[k] == null ? '<div class="wl-cell wl-na">—</div>' : `<div class="wl-cell" style="${heatBg(x[k], mx)}">${pctTxt(x[k])}</div>`).join('')).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No broadcast ran in this range.</p>', smp());
+    const conv = (x) => pctv(x.a.orders, x.a.del) || 0, ro = (x) => spendOf(x.a) ? x.a.net / spendOf(x.a) : 0;
+    const best = data.slice().sort((x, y) => conv(y) - conv(x))[0], top = data.slice().sort((x, y) => ro(y) - ro(x))[0];
+    const kp = kpis([
+      { l: 'Broadcasts', v: nf(data.length), d: `${data.filter((x) => x.cp.open).length} window open`, s: `${RDATA.windowDays}-day window`, b: smp() },
+      { l: 'Best conversion', v: best ? best.name : '—', d: best ? pctTxt(conv(best)) : '', s: 'Orders ÷ delivered', b: smp() },
+      { l: 'Best ROAS', v: top ? top.name : '—', d: top ? roas(top.a) : '', s: top ? `${inr(top.a.net)} revenue` : '', b: smp() },
+    ]);
+    const c = ctx(r);
+    return kp + campaignTable(r, true) + `<div class="wl-g2">${roasChart(r)}${lagCard(c.O)}</div>` + cohort + failCard(r);
+  }
+  function pStores(r){
+    const c = ctx(r);
+    const bill = {}, home = {};
+    c.O.forEach((x) => { const b = bill[x.s] || (bill[x.s] = { orders: 0, net: 0, same: 0 }); b.orders++; b.net += x.net; if (x.s === x.hs) b.same++; });
+    c.R.forEach((x) => { const h = home[x.hs] || (home[x.hs] = { n: 0, del: 0, buy: 0 }); h.n += x.n; h.del += x.del; h.buy += x.buy; });
+    const ids = [...new Set([...Object.keys(bill), ...Object.keys(home)])].filter(Boolean);
+    const byCity = {}; ids.forEach((id) => { const s = store(id); (byCity[s.city] = byCity[s.city] || []).push(id); });
+    const sum = (list) => list.reduce((t, id) => { const b = bill[id] || {}, h = home[id] || {}; t.n += h.n || 0; t.del += h.del || 0; t.buy += h.buy || 0; t.orders += b.orders || 0; t.net += b.net || 0; t.same += b.same || 0; return t; }, { n: 0, del: 0, buy: 0, orders: 0, net: 0, same: 0 });
+    const line = (t) => `<td class="r">${nf(t.n)}</td><td class="r">${nf(t.buy)}</td><td class="r">${pct(t.buy, t.del)}</td><td class="r">${nf(t.orders)}</td><td class="r b">${inr(t.net)}</td><td class="r">${pct(t.same, t.orders, 0)}</td>`;
+    const cities = Object.entries(byCity).map(([city, list]) => ({ city, list, t: sum(list) })).sort((x, y) => y.t.net - x.t.net);
+    const noHome = home[''] ? home[''].n : 0;
+    const tbl = card('Retention by city and store', 'Click a city to see its stores · messaged & buyers by home store, orders & revenue by billing store', `<div class="wl-tw"><table><thead><tr><th>City / store</th><th class="r">Messaged</th><th class="r">Buyers</th><th class="r">Conversion</th><th class="r">Orders billed</th><th class="r">Revenue billed</th><th class="r">Same store</th></tr></thead><tbody>` +
+      cities.map((g) => `<tr data-rex="${esc(g.city)}" tabindex="0" style="cursor:pointer"><td class="b">${EX[g.city] ? '▾' : '▸'} ${esc(g.city)} <span class="wl-sm" style="display:inline">${g.list.length} store${g.list.length === 1 ? '' : 's'}</span></td>${line(g.t)}</tr>` + (EX[g.city] ? g.list.map((id) => ({ id, t: sum([id]) })).sort((x, y) => y.t.net - x.t.net).map((s) => `<tr style="background:#FAF9F5"><td style="padding-left:28px">${esc(store(s.id).name)}</td>${line(s.t)}</tr>`).join('') : '')).join('') +
+      `</tbody></table></div>${noHome ? `<p class="wl-note" style="margin-top:10px">${nf(noHome)} messaged customers have no earlier store order, so no home store. They stay in totals.</p>` : ''}`, smp());
+    const keep = new Set(c.O.map((x) => x.o)); const L = RDATA.lines.filter((x) => keep.has(x.o));
+    const cat = {}; L.forEach((x) => { const k = x.cat || 'Other'; const v = cat[k] || (cat[k] = { net: 0, qty: 0 }); v.net += x.net; v.qty += x.qty; });
+    const cats = Object.entries(cat).sort((x, y) => y[1].net - x[1].net); const mx = Math.max(1, ...cats.map((x) => x[1].net)); const tot = cats.reduce((s, x) => s + x[1].net, 0);
+    const catCard = card('Revenue by category', 'Credited orders', cats.length ? `<div class="wl-rank" style="grid-template-columns:minmax(100px,140px) minmax(0,1fr) 80px 50px">` + cats.map(([k, v]) => `<span class="wl-sn">${esc(k)}</span><div class="wl-track"><div class="wl-fill" style="width:${100 * v.net / mx}%;background:${C.teal}"></div></div><span style="text-align:right;font-size:13px;font-weight:600">${inr(v.net)}</span><span style="text-align:right;font-size:12px;color:#5B6068">${pct(v.net, tot, 0)}</span>`).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No credited orders in this view.</p>', smp());
+    const prod = {}; L.forEach((x) => { const v = prod[x.p] || (prod[x.p] = { net: 0, qty: 0 }); v.net += x.net; v.qty += x.qty; });
+    const tp = Object.entries(prod).sort((x, y) => y[1].net - x[1].net).slice(0, 10);
+    const prodCard = card('Top products', 'Credited orders · top 10 by revenue', tp.length ? `<div class="wl-tw"><table><thead><tr><th>Product</th><th class="r">Units</th><th class="r">Revenue</th></tr></thead><tbody>${tp.map(([p, v]) => `<tr><td class="wrap">${esc(RDATA.pnames[p])}</td><td class="r">${nf(v.qty)}</td><td class="r b">${inr(v.net)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="sub" style="margin-top:14px">No credited orders in this view.</p>', smp());
+    return tbl + `<div class="wl-g2">${catCard}${prodCard}</div>`;
+  }
+  function pDefs(){
+    const box = (t, s, cl = '') => `<div class="fbox ${cl}"><b>${t}</b><span>${s}</span></div>`;
+    const ar = '<span class="wl-arrow" aria-hidden="true">→</span>', or = '<span class="wl-note">or</span>';
+    const W = RDATA ? RDATA.windowDays : 60;
+    const flow = card('Retention flow', 'How an exclusive offer becomes retail revenue', `<div class="flow">
+      <div class="flow-row"><span class="flow-tag">1 · Offer</span>${box('Exclusive offer', 'e.g. Diwali offer', 'lead')}${ar}${box('Creatives', 'Retention team sends them', 'lead')}</div>
+      <div class="flow-row"><span class="flow-tag">2 · LimeChat</span>${box('Campaign flow', 'Built on LimeChat')}${ar}${box('Broadcast', 'All existing retail customers · run date per customer')}</div>
+      <div class="flow-row"><span class="flow-tag">3 · Reach</span>${box('Sent', 'Unique phone per campaign')}${ar}${box('Delivered', 'On WhatsApp')}${ar}${box('Read', 'Read Status = Read', 'gap')}${or}${box('Failed', 'WhatsApp error reason', 'leak')}</div>
+      <div class="flow-row"><span class="flow-tag">4 · Order</span>${box('DevX order', 'Read lead only · same phone · Frido store')}${ar}${box(`Day 0 – ${W}`, 'On/after this customer’s run date', 'gap')}${or}${box('Outside window', 'Before the run or after day ' + W, 'leak')}</div>
+      <div class="flow-row"><span class="flow-tag">5 · Credit</span>${box('Most recent touch?', 'Broadcast vs walk-in / PDP / Meta lead', 'gap')}${ar}${box('Retention revenue', 'Broadcast was the last touch', 'rev')}${or}${box('Other dashboard', 'A newer lead gets the order', 'leak')}</div>
+    </div>`);
+    const D = [
+      ['Total · sent · delivered · failed · read', 'Message Status (Sent / Delivered / Failed) and Read Status from the LimeChat export', 'Sent = total − failed. One broadcast per send date; names in BROADCAST_NAMES.'],
+      ['Eligible leads', 'Only Delivered + Read leads can be credited with an order', 'Delivered but not read, sent-only and failed leads never get an order.'],
+      ['Spend · ROAS', `Spend = ₹${RDATA ? RDATA.costPerDelivered : 0.85} × delivered · ROAS = revenue ÷ spend`, 'Conversion = orders ÷ delivered · AOV = revenue ÷ orders · UPT = units ÷ orders.'],
+      ['Unique recipient', 'Unique phones per campaign in the LimeChat broadcast', 'A resend to the same phone is a duplicate; it only upgrades delivered / read / replied.'],
+      ['Run date', 'The date this customer was sent this campaign', 'Campaigns sent in waves have one run date per wave.'],
+      ['Credited order', `DevX order at a Frido retail store, same phone, on/after the run date and within ${W} days`, 'Any order type billed at a store (ONLINE punch-ins too). Website orders with no store and the test store do not count. Cancelled and refunded orders are kept.'],
+      ['Most recent touch wins', 'If a walk-in, PDP or Meta lead came after the broadcast and before the order, that lead gets the order', 'Two campaigns in window → the later run date. Same-day tie with a lead → the lead. A walk-in lead logged on the order day does not count (captured after the purchase).'],
+      ['Buyers', 'Customers with a credited order', 'A buyer counts once per campaign; later orders add revenue.'],
+      ['Retention revenue', 'Total Revenue (gross − discount) of credited orders', 'Same revenue rule as walk-in and PDP.'],
+      ['Home store', "Store of the customer's last order before the run date", 'Used for messaged and buyers by store; revenue goes to the billing store.'],
+    ];
+    const defs = card('Definitions', 'Pending owner sign-off', D.map((f) => `<div class="def"><strong>${f[0]}</strong><div class="formula">${f[1]}</div><p class="sub">${f[2]}</p></div>`).join(''));
+    const s = RDATA?.sources || {};
+    const pill = (st) => st === 'sample' ? '<span class="wl-pill p-peach">Sample</span>' : st === 'live' ? '<span class="wl-pill p-teal">Live</span>' : `<span class="wl-pill p-peach">${esc(st || '—')}</span>`;
+    const src = card('Sources', '', `<div class="wl-tw"><table><thead><tr><th>Data</th><th>Source</th><th>Refresh</th><th>Status</th></tr></thead><tbody>
+      <tr><td class="b">Broadcast recipients</td><td class="wrap">LimeChat broadcast export (published Google Sheet, Cloudflare secret)</td><td>Live (15-min cache)</td><td>${pill(s.broadcasts?.status)}</td></tr>
+      <tr><td class="b">Store orders</td><td class="wrap">DevX orders (BigQuery), phone match</td><td>Daily 8:00 AM IST</td><td>${pill(s.sales?.status)}</td></tr>
+      <tr><td class="b">Other touches</td><td class="wrap">Walk-in (Bigin), PDP call (Bigin), PDP WhatsApp (LimeChat), Meta Lead Gen (Bigin)</td><td>Daily 6:00 AM IST</td><td>${pill(s.touches?.status)}</td></tr></tbody></table></div>`);
+    return flow + `<div class="wl-g2">${defs}${src}</div>`;
+  }
+
+  const PAGES = { overview: pOverview, campaigns: pCampaigns, stores: pStores };
+  function page(tab){
+    if (!RTABS.find((t) => t.id === tab)) tab = 'overview'; CUR = tab;
+    const i = RTABS.findIndex((t) => t.id === tab);
+    const crumb = crumbs([['Founders Office', '#/'], ['Retail Revenue', '#/retail'], ['Retail retention', href('overview')], [RTABS[i].name, '#']]);
+    let body;
+    if (tab === 'definitions') body = pDefs();
+    else if (!RDATA || !DATA) body = RDATA_ERR || DATA_ERR ? wcard('Data could not be loaded', esc(RDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="rRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading…', 'Reading broadcasts and store orders.', '');
+    else { const r = rRange(); const any = RDATA.campaigns.some((c) => c.last >= r[0] && c.first <= r[1]); const lastRun = RDATA.campaigns.reduce((m, c) => (c.last > m ? c.last : m), '');
+    body = filters(r) + (any ? PAGES[tab](r) : wcard('No broadcast in this range', RDATA.campaigns.length ? `Latest broadcast: ${dpShort(lastRun)}. Pick a range that includes it (Quick select → All data).` : 'No broadcasts in the source yet.', '')); }
+    const prev = i > 0 ? `<a href="${href(RTABS[i - 1].id)}"><span class="p-dir">← Previous</span><span class="p-name">${RTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
+    const next = i < RTABS.length - 1 ? `<a class="next" href="${href(RTABS[i + 1].id)}"><span class="p-dir">Next →</span><span class="p-name">${RTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
+    return crumb + `<div class="wl mt">${header()}${body}</div><nav class="pager" aria-label="Previous and next page">${prev}${next}</nav>`;
+  }
+  // Month-to-date line for Home and the Retail Revenue scoreboard
+  function statsLine(){
+    if (!RDATA) return RDATA_ERR ? 'Data unavailable' : 'Loading…';
+    const c = RDATA.cutoff; const r = [c.slice(0, 8) + '01', c];
+    const a = agg(RDATA.recipients.filter((x) => x.run >= r[0] && x.run <= r[1]), RDATA.credited.filter((x) => x.run >= r[0] && x.run <= r[1]));
+    const sp = a.del * RDATA.costPerDelivered;
+    return `Delivered <b>${nf(a.del)}</b> · Orders <b>${nf(a.orders)}</b> · Revenue <b>${inr(a.net)}</b> · ROAS <b>${sp ? (a.net / sp).toFixed(1) + '×' : '—'}</b> (MTD${RDATA.sample ? ', sample' : ''})`;
+  }
+  function bindPage(){
+    document.querySelectorAll('[data-rex]').forEach((el) => { const go = () => { const k = el.dataset.rex; EX[k] = !EX[k]; rerender(); }; el.addEventListener('click', go); el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }); });
+    const rl = document.getElementById('rReloadBtn'); if (rl) rl.addEventListener('click', () => { RDATA = null; loadRet(true); rerender(); });
+    const rt = document.getElementById('rRetryBtn'); if (rt) rt.addEventListener('click', () => { RDATA_ERR = null; DATA_ERR = null; loadRet(true); if (!DATA) loadData(true); rerender(); });
+  }
+  return { page, statsLine, bindPage };
+})();
+
 function bind(){
-  document.querySelectorAll('select[data-f]').forEach((el) => el.addEventListener('change', () => { F[el.dataset.f] = el.value; if (el.dataset.f === 'city' || el.dataset.f === 'format') F.store = 'all'; rerender(); }));
+  document.querySelectorAll('select[data-f]').forEach((el) => el.addEventListener('change', () => { F[el.dataset.f] = el.value; if (el.dataset.f === 'city' || el.dataset.f === 'format') F.store = 'all'; if (el.dataset.f === 'mcity') F.mstore = 'all'; rerender(); }));
   document.querySelectorAll('[data-cx]').forEach((el) => { const go = () => { const c = el.dataset.cx; F.cx[c] = !F.cx[c]; const y = window.scrollY; rerender(); window.scrollTo(0, y); }; el.addEventListener('click', go); el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }); });
   document.querySelectorAll('[data-ex]').forEach((el) => { const go = () => { const k = el.dataset.ex; F.ex[k] = !F.ex[k]; const y = window.scrollY; rerender(); window.scrollTo(0, y); }; el.addEventListener('click', go); el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }); });
   document.querySelectorAll('[data-cta]').forEach((el) => el.addEventListener('click', () => { F.cta = el.dataset.cta; rerender(); }));
@@ -2157,6 +2809,8 @@ function bind(){
   const rl = document.getElementById('reloadBtn'); if (rl) rl.addEventListener('click', () => { DATA = null; loadData(true); rerender(); });
   document.querySelectorAll('[data-jump]').forEach((el) => { const go2 = (e) => { e.preventDefault(); const t = document.getElementById(el.dataset.jump); const dt = t && t.closest('details'); if (dt) dt.open = true; if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; el.addEventListener('click', go2); el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') go2(e); }); });
   const prl = document.getElementById('pReloadBtn'); if (prl) prl.addEventListener('click', () => { PDATA = null; loadPdp(true); rerender(); });
+  META.bindPage();
+  RET.bindPage();
   const prt = document.getElementById('pRetryBtn'); if (prt) prt.addEventListener('click', () => { PDATA_ERR = null; DATA_ERR = null; loadPdp(true); if (!DATA) loadData(true); rerender(); });
   const rt = document.getElementById('retryBtn'); if (rt) rt.addEventListener('click', () => { DATA_ERR = null; loadData(true); rerender(); });
 }
