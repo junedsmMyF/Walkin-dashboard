@@ -6,6 +6,7 @@ const KV_TOKENS = 'bigin:oauth';
 const KV_LEADS = 'bigin:leads';
 const KV_META = 'bigin:meta';
 const KV_CALLBACK = 'bigin:callback'; // website "Call Store" pop-up leads (Callback Requests pipeline) — PDP inventories
+const KV_METAADS = 'bigin:metaads'; // Meta Lead Gen leads (Meta Ergo Workspace Assessment pipeline) — Meta ads
 const PROTOCOL = '2025-06-18';
 
 const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -135,7 +136,7 @@ class McpSession {
 }
 
 // ---------- Daily refresh: all walk-in leads → KV ----------
-const FIELDS = 'id, Deal_Name, Stage, Pipeline, Walk_in_Date_Time, Created_Time, Modified_Time, Store_Location, Store_Name1, Owner, Amount, Call_Date, Close_Lost_Reason, Phone_Number, Email_ID, Product, Quantity, Product_Category, UTM_Source, UTM_Medium, UTM_Campaign, UTM_Content';
+const FIELDS = 'id, Deal_Name, Stage, Pipeline, Walk_in_Date_Time, Created_Time, Modified_Time, Store_Location, Store_Name1, Owner, Amount, Call_Date, Close_Lost_Reason, Phone_Number, Email_ID, Product, Quantity, Product_Category, UTM_Source, UTM_Medium, UTM_Campaign, UTM_Content, City, Preferred_Store, Close_Won_Reason';
 
 export async function refreshBigin(env) {
   const started = new Date().toISOString();
@@ -149,13 +150,17 @@ export async function refreshBigin(env) {
     }
     // Zoho's MCP server caps each COQL query at 200 rows, so page by record ID (keyset paging):
     // "id > last id seen, order by id, 200 at a time" — no offset limits, stable while records are added.
-    const leads = []; const callbacks = []; let lastId = '0'; let pages = 0;
+    const leads = []; const callbacks = []; const metaads = []; let lastId = '0'; let pages = 0;
     for (;;) {
       const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${FIELDS} from Pipelines where id > ${lastId} order by id asc limit 0, 200` } });
       const rows = r.data || []; pages++;
       for (const x of rows) {
         if (env.CALLBACK_PIPELINE_ID && String(x.Pipeline) === String(env.CALLBACK_PIPELINE_ID)) {
           callbacks.push({ i: x.id, nm: x.Deal_Name || '', st: x.Stage, ct: x.Created_Time, mt: x.Modified_Time, web: x.Store_Name1 || '', loc: x.Store_Location || '', own: owners.get(x.Owner?.id) || '', p: x.Phone_Number, lr: x.Close_Lost_Reason || '', prod: Array.isArray(x.Product) ? x.Product.join(' || ') : (x.Product?.name || x.Product || ''), cat: x.Product_Category || '', us: x.UTM_Source || '', um: x.UTM_Medium || '', uc: x.UTM_Campaign || '', ux: x.UTM_Content || '' });
+          continue;
+        }
+        if (env.META_PIPELINE_ID && String(x.Pipeline) === String(env.META_PIPELINE_ID)) {
+          metaads.push({ i: x.id, st: x.Stage, ct: x.Created_Time, mt: x.Modified_Time, ps: x.Preferred_Store || '', city: x.City || '', p: x.Phone_Number, lr: x.Close_Lost_Reason || '', cw: x.Close_Won_Reason || '', us: x.UTM_Source || '', uc: x.UTM_Campaign || '', ux: x.UTM_Content || '' });
           continue;
         }
         if (String(x.Pipeline) !== String(env.WALKIN_PIPELINE_ID)) continue;
@@ -166,7 +171,8 @@ export async function refreshBigin(env) {
     }
     await env.DASH_KV.put(KV_LEADS, JSON.stringify(leads));
     if (env.CALLBACK_PIPELINE_ID) await env.DASH_KV.put(KV_CALLBACK, JSON.stringify(callbacks));
-    await env.DASH_KV.put(KV_META, JSON.stringify({ status: 'ok', refreshedAt: new Date().toISOString(), started, count: leads.length, callbacks: callbacks.length, pages }));
+    if (env.META_PIPELINE_ID) await env.DASH_KV.put(KV_METAADS, JSON.stringify(metaads));
+    await env.DASH_KV.put(KV_META, JSON.stringify({ status: 'ok', refreshedAt: new Date().toISOString(), started, count: leads.length, callbacks: callbacks.length, metaads: metaads.length, pages }));
     return { ok: true, count: leads.length };
   } catch (e) {
     const prev = (await env.DASH_KV.get(KV_META, 'json')) || {};
@@ -176,5 +182,6 @@ export async function refreshBigin(env) {
 }
 export const biginLeads = (env) => env.DASH_KV.get(KV_LEADS, 'json');
 export const biginCallbacks = (env) => env.DASH_KV.get(KV_CALLBACK, 'json');
+export const biginMetaAds = (env) => env.DASH_KV.get(KV_METAADS, 'json');
 export const biginMeta = (env) => env.DASH_KV.get(KV_META, 'json');
 export const biginConnected = async (env) => !!(await env.DASH_KV.get(KV_TOKENS));

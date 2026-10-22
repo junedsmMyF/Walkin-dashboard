@@ -29,6 +29,8 @@ START_DATE = "2026-09-01"
 WALKIN_PIPELINE_ID = "1371203000000480122"
 CALLBACK_PIPELINE_ID = "1371203000000629516"   # Bigin "Callback Requests" — website Call Store pop-up (PDP inventories)
 PDP_START_DATE = "2026-10-08"                   # Callback Requests pipeline went live
+META_PIPELINE_ID = "1371203000000558349"       # Bigin "Meta Ergo Workspace Assessment" — Meta Lead Gen leads (Meta ads)
+META_START_DATE = "2026-09-09"                  # Meta Lead Gen ads went live
 # LIMECHAT_CSV_URL is a SECRET (Worker → Settings → Variables and secrets): the LimeChat export holds customer phones and names, and this repo is public.
 # ROUTING_CSV_URL is a SECRET too: the published "Lead routing backend" sheet (WhatsApp DSR groups → Sheet) holds customer names and phones.
 BACKEND_AGENTS = ""                             # optional extra backend-agent names (comma-separated) as they appear on DevX orders; Bigin lead owners are included automatically

@@ -10,8 +10,9 @@ import { syncBotTables } from './bot/sync.js';
 import { ask, checkSql, MODELS, MODEL_CHAIN, runModel } from './bot/ask.js';
 import { identify, can, canBot, canWalkin, filterMetrics, PAGES, ROLES, makeSession, sessionCookie, startOtp, checkOtp, OTP_MINUTES } from './auth.js';
 import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, normStoreName, suggestStore } from './stores.js';
-import { refreshBigin, biginLeads, biginCallbacks, biginMeta, biginConnected, startConnect, finishConnect } from './bigin.js';
+import { refreshBigin, biginLeads, biginCallbacks, biginMetaAds, biginMeta, biginConnected, startConnect, finishConnect } from './bigin.js';
 import { computePdp } from './pdp.js';
+import { computeMeta } from './meta.js';
 
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra } });
 const html = (body, status = 200) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Dashboard admin</title><style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 16px;color:#101820}button,a.btn{display:inline-block;padding:10px 16px;border-radius:999px;border:0;background:#FFD100;color:#101820;font-weight:600;text-decoration:none;cursor:pointer;margin:4px 8px 4px 0}pre{background:#F4F6F9;padding:12px;border-radius:8px;overflow:auto}</style></head><body>${body}</body></html>`, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' } });
@@ -215,6 +216,23 @@ async function pdpMetrics(env, ctx) {
   };
   ctx.waitUntil(env.DASH_KV.put('pdp:cache', JSON.stringify({ k: ver, at: Date.now(), body: m })));
   return json(m, 200, { 'cache-control': 'private, max-age=60', 'x-pdp-cache': 'miss' });
+}
+
+// ---- Meta ads: Lead Gen leads (Bigin Meta pipeline, T-1); CTWA, spend and revenue are sample until connected ----
+async function metaMetrics(env, ctx) {
+  const meta = (await biginMeta(env)) || {};
+  const cutoff = addDays(istDate(), -1);
+  const ver = ['meta1', meta.refreshedAt || 'none', cutoff].join('|');
+  const cached = await env.DASH_KV.get('meta:cache', 'json');
+  if (cached && cached.k === ver) return json(cached.body, 200, { 'cache-control': 'private, max-age=60', 'x-meta-cache': 'hit' });
+  const leads = await biginMetaAds(env);
+  const m = computeMeta({ leads: leads || [], startDate: env.META_START_DATE || '2026-09-09', cutoff });
+  m.sources = {
+    leadgen: { status: leads ? meta.status || 'ok' : (env.META_PIPELINE_ID ? 'waiting_first_refresh' : 'not_configured'), refreshedAt: meta.refreshedAt || null, records: leads ? leads.length : 0 },
+    stageHistory: { status: 'not_connected' }, ctwa: { status: 'sample' }, spend: { status: 'sample' }, revenue: { status: 'sample' },
+  };
+  ctx.waitUntil(env.DASH_KV.put('meta:cache', JSON.stringify({ k: ver, at: Date.now(), body: m })));
+  return json(m, 200, { 'cache-control': 'private, max-age=60', 'x-meta-cache': 'miss' });
 }
 
 function isAdmin(env, url) {
@@ -477,6 +495,11 @@ export default {
         if (!id.approved) return json({ error: id.reason, auth: false }, 401);
         if (!can(id, 'pdp')) return json({ error: 'You do not have access to the PDP inventories dashboard.' }, 403);
         return await pdpMetrics(env, ctx);
+      }
+      if (url.pathname === '/api/meta') {
+        if (!id.approved) return json({ error: id.reason, auth: false }, 401);
+        if (!can(id, 'meta')) return json({ error: 'You do not have access to the Meta ads dashboard.' }, 403);
+        return await metaMetrics(env, ctx);
       }
       if (url.pathname === '/api/ask' && request.method === 'POST') return await botAsk(request, env, ctx, id);
       if (url.pathname === '/api/log' && request.method === 'POST') {
