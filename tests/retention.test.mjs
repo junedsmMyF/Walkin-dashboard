@@ -1,7 +1,7 @@
 // Retail retention: 60-day window, store orders only, most recent touch wins, no PII. Synthetic records only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeRetention, parseBroadcastRows, storeOrders, sampleInputs, failReason } from '../src/retention.js';
+import { computeRetention, parseBroadcastRows, storeOrders, sampleInputs, failReason, stamp } from '../src/retention.js';
 
 const P = '9000000001', Q = '9000000002';
 const b = (o) => ({ campaign: 'Diwali', run: '2026-10-01', phone: P, failed: false, delivered: true, read: true, replied: false, clicked: false, ...o });
@@ -22,6 +22,31 @@ test('only delivered and read leads get orders', () => {
   const m = run([b({ campaign: 'Navratri', run: '2026-09-20' }), b({ campaign: 'Diwali', run: '2026-10-01', read: false })], [o('A', '2026-10-05')]);
   assert.equal(m.campaigns[m.credited[0].c].name, 'Navratri');
   assert.equal(m.costPerDelivered, 0.85);
+});
+
+test('with Read At in the export, only leads read before the order are credited', () => {
+  const ord = (id, ts) => o(id, ts.slice(0, 10), { ts });
+  const B = [b({ readAt: '2026-10-03 18:00' }), b({ phone: Q, readAt: '2026-10-05' })];
+  const m = run(B, [ord('A', '2026-10-03 12:00'), ord('B', '2026-10-04 10:00'), ord('C', '2026-10-05 15:00', ), { ...ord('D', '2026-10-05 09:00'), phone: Q }, { ...ord('E', '2026-10-04 09:00'), phone: Q }]);
+  assert.equal(m.readTimes, true);
+  assert.deepEqual(m.credited.map((x) => x.o).sort(), ['B', 'C', 'D'], 'A was bought before the read; E was bought the day before a date-only read');
+  assert.deepEqual(m.late.map((x) => x.o).sort(), ['A', 'E']);
+  // a read row without a time cannot be verified once the export carries read times
+  const m2 = run([b({ readAt: '2026-10-02 09:00' }), b({ phone: Q })], [o('A', '2026-10-03'), { ...o('B', '2026-10-03'), phone: Q }]);
+  assert.deepEqual(m2.credited.map((x) => x.o), ['A']); assert.equal(m2.quality.readNoTime, 1);
+  // no Read At column at all → read status alone (flagged)
+  const m3 = run([b()], [o('A', '2026-10-03')]); assert.equal(m3.readTimes, false); assert.equal(m3.credited.length, 1);
+});
+
+test('Read At timestamps and the order time are parsed', () => {
+  assert.equal(stamp('2026-09-16 08:46:12'), '2026-09-16 08:46');
+  assert.equal(stamp('16/09/2026 8:05 PM'), '2026-09-16 20:05');
+  assert.equal(stamp('16/09/2026'), '2026-09-16');
+  assert.equal(stamp('-'), null);
+  const rows = parseBroadcastRows([{ 'Created At': '16/09/2026', 'Phone Number': '91' + P, 'Message Status': 'Delivered', 'Read Status': 'Read', 'Read At': '2026-09-17 10:30:00' }]);
+  assert.equal(rows[0].readAt, '2026-09-17 10:30'); assert.equal(rows[0].read, true);
+  const os = storeOrders([{ 'POS Order ID': 'X', 'Store ID': 'FRIDO_0002', 'POS Created At': '17/09/2026 09:15', 'Customer Phone': P, __gross: 100, __net: 90 }]);
+  assert.equal(os[0].ts, '2026-09-17 09:15');
 });
 
 test('only Frido retail store orders count', () => {
@@ -89,7 +114,7 @@ test('LimeChat broadcast report columns are read loosely', () => {
     { 'Campaign Name': 'Diwali', 'Sent At': '2026-10-16 10:00:00', 'Phone Number': '91' + P, 'Message Status': 'Read', Replied: 'True', 'Button Clicked': 'False' },
     { 'Campaign Name': 'Diwali', 'Sent At': '16/10/2026', 'Phone Number': Q, 'Message Status': 'Failed', Replied: '', 'Button Clicked': '' },
   ]);
-  assert.deepEqual(rows[0], { campaign: 'Diwali', run: '2026-10-16', phone: P, failed: false, sent: true, delivered: true, read: true, replied: true, clicked: false, reason: '' });
+  assert.deepEqual(rows[0], { campaign: 'Diwali', run: '2026-10-16', phone: P, failed: false, sent: true, delivered: true, read: true, readAt: null, replied: true, clicked: false, reason: '' });
   assert.equal(rows[1].failed, true); assert.equal(rows[1].run, '2026-10-16');
 });
 

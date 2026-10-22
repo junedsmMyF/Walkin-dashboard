@@ -2611,7 +2611,7 @@ const RET = (() => {
     const s = RDATA?.sources || {};
     const asof = RDATA ? `Data as of ${dpShort(RDATA.cutoff)} (T-1) · ${s.broadcasts?.status === 'sample' ? 'LimeChat broadcast report not connected — every figure is sample' : 'LimeChat broadcast report ' + esc(s.broadcasts?.status || '—') + ' · DevX ' + esc(s.sales?.status || '—')}` : 'Connecting to sources…';
     return `<div class="wl-head"><div><div class="wl-eyebrow">FRIDO · FOUNDERS OFFICE · RETAIL REVENUE</div><h1>Retail retention</h1></div>
-      <div class="wl-meta"><div class="wl-asof">${asof}</div><div class="wl-pills">${RDATA?.sample ? '<span class="wl-pill p-peach">Sample data</span>' : '<span class="wl-pill p-teal">Broadcasts live</span>'}<span class="wl-pill p-grey">${RDATA ? RDATA.windowDays : 60}-day window · read leads only</span><button type="button" class="wl-btn" id="rReloadBtn" style="min-height:28px;padding:4px 12px;font-size:12px">Reload data</button></div></div></div>
+      <div class="wl-meta"><div class="wl-asof">${asof}</div><div class="wl-pills">${RDATA?.sample ? '<span class="wl-pill p-peach">Sample data</span>' : '<span class="wl-pill p-teal">Broadcasts live</span>'}<span class="wl-pill p-grey">${RDATA ? RDATA.windowDays : 60}-day window</span>${RDATA ? (RDATA.readTimes ? '<span class="wl-pill p-teal">Read before order only</span>' : '<span class="wl-pill p-peach" title="The LimeChat export has no Read At column, so a read after the order still counts">No read time in export</span>') : ''}<button type="button" class="wl-btn" id="rReloadBtn" style="min-height:28px;padding:4px 12px;font-size:12px">Reload data</button></div></div></div>
       <nav class="wl-tabs" aria-label="Dashboard pages">${RTABS.map((t) => `<a class="wl-tab ${t.id === CUR ? 'on' : ''} ${t.id === 'definitions' ? 'aux' : ''}" href="${href(t.id)}" ${t.id === CUR ? 'aria-current="page"' : ''}>${t.name}</a>`).join('')}</nav>`;
   }
   let CUR = 'overview';
@@ -2662,7 +2662,9 @@ const RET = (() => {
       (full && EX['c' + x.cp.i] ? x.cp.waves.filter((w) => w.d >= r[0] && w.d <= r[1]).map((w) => { const R = x.R.filter((y) => y.run === w.d), O = RDATA.credited.filter((y) => y.c === x.cp.i && y.run === w.d && storeOk(y.s) && oOk(y)); return `<tr style="background:#FAF9F5"><td style="padding-left:28px">Wave</td><td>${dpShort(w.d)}</td>${perf(agg(R, O))}<td>Closes ${dpShort(dAdd(w.d, RDATA.windowDays)).replace(/ \d{4}$/, '')}</td></tr>`; }).join('') : ''); };
     const tot = agg(data.flatMap((x) => x.R), data.flatMap((x) => RDATA.credited.filter((y) => y.c === x.cp.i && y.run >= r[0] && y.run <= r[1] && storeOk(y.s) && oOk(y))));
     const total = data.length > 1 ? `<tr style="background:#FFF6CC;font-weight:600"><td class="b">Total</td><td></td>${perf(tot)}<td></td></tr>` : '';
-    return card('Broadcast performance', `Orders from delivered + read leads only · conversion = orders ÷ delivered · spend = ₹${RDATA.costPerDelivered} × delivered${full ? ' · click a multi-wave broadcast for its waves' : ''}`, `<div class="wl-tw"><table><thead>${head}</thead><tbody>${data.map(row).join('')}${total}</tbody></table></div>`, smp());
+    const lt = RDATA.late.filter((x) => inR(x, r) && storeOk(x.s) && oOk(x)); const ltNet = lt.reduce((t, x) => t + x.net, 0);
+    const why = RDATA.readTimes ? `Orders from leads read before ordering${lt.length ? ` · ${nf(lt.length)} order${lt.length === 1 ? '' : 's'} (${inr(ltNet)}) left out: read after ordering` : ''}` : 'Orders from delivered + read leads · no read time in the export yet, so a read after the order still counts';
+    return card('Broadcast performance', `${why} · conversion = orders ÷ delivered · spend = ₹${RDATA.costPerDelivered} × delivered${full ? ' · click a multi-wave broadcast for its waves' : ''}`, `<div class="wl-tw"><table><thead>${head}</thead><tbody>${data.map(row).join('')}${total}</tbody></table></div>`, smp());
   }
   function roasChart(r){
     const data = campaignRows(r).map((x) => ({ name: x.name, rev: x.a.net, sp: spendOf(x.a), a: x.a }));
@@ -2771,7 +2773,7 @@ const RET = (() => {
     </div>`);
     const D = [
       ['Total · sent · delivered · failed · read', 'Message Status (Sent / Delivered / Failed) and Read Status from the LimeChat export', 'Sent = total − failed. One broadcast per send date; names in BROADCAST_NAMES.'],
-      ['Eligible leads', 'Only Delivered + Read leads can be credited with an order', 'Delivered but not read, sent-only and failed leads never get an order.'],
+      ['Eligible leads', 'Delivered + Read, and read before the order (Read At ≤ order time)', 'Delivered but not read, sent-only and failed leads never get an order. Read on the order day without a time: counted. If the export has no Read At column, read status alone is used and the header says so.'],
       ['Spend · ROAS', `Spend = ₹${RDATA ? RDATA.costPerDelivered : 0.85} × delivered · ROAS = revenue ÷ spend`, 'Conversion = orders ÷ delivered · AOV = revenue ÷ orders · UPT = units ÷ orders.'],
       ['Unique recipient', 'Unique phones per campaign in the LimeChat broadcast', 'A resend to the same phone is a duplicate; it only upgrades delivered / read / replied.'],
       ['Run date', 'The date this customer was sent this campaign', 'Campaigns sent in waves have one run date per wave.'],
@@ -2791,7 +2793,7 @@ const RET = (() => {
   const PAGES = { overview: pOverview, revenue: pRevenue };
   function page(tab){
     if (!RTABS.find((t) => t.id === tab)) tab = 'overview'; CUR = tab;
-    if (RDATA) applyRev([RDATA.credited, RDATA.lostTo, RDATA.lines]);
+    if (RDATA) applyRev([RDATA.credited, RDATA.lostTo, RDATA.late, RDATA.lines]);
     const i = RTABS.findIndex((t) => t.id === tab);
     const crumb = crumbs([['Founders Office', '#/'], ['Retail Revenue', '#/retail'], ['Retail retention', href('overview')], [RTABS[i].name, '#']]);
     let body;

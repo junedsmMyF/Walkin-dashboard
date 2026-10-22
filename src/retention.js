@@ -8,7 +8,9 @@
 //   Other touches (for last-touch): walk-in leads (Bigin), PDP call leads (Callback Requests), PDP WhatsApp (LimeChat), Meta Lead Gen.
 //
 // Rules (agreed with Saiyed 22 Oct 2026, pending owner sign-off):
-//   Eligible    = only recipients whose message was Delivered AND Read can be credited with an order.
+//   Eligible    = only recipients whose message was Delivered AND Read can be credited with an order,
+//                 and only if it was read BEFORE the order (Read At ≤ order time, Saiyed 22 Oct). If the export has no
+//                 Read At column, read status alone is used and the dashboard says so (readTimes = false).
 //   Spend       = ₹0.85 × delivered messages. ROAS = revenue ÷ spend. Conversion = orders ÷ delivered.
 //   Window      = order on/after the customer's run date and within 60 days of it (day 0 … day 60).
 //   Orders      = billed at a Frido retail store (store master id; test store excluded), any order type incl. ONLINE punch-ins.
@@ -27,6 +29,16 @@ export const COST_PER_DELIVERED = 0.85; // ₹ per delivered WhatsApp message
 export const BROADCAST_NAMES = { '2026-09-16': 'Retail_Retention_Ganpati', '2026-09-18': 'Retail_Retention_Ganpati_2', '2026-09-26': 'Retail_Retention_Ganpati_3' };
 const STORE_IDS = new Set(STORE_MASTER.map((s) => s.id));
 const num = (v) => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isFinite(n) ? n : 0; };
+// "2026-09-16 08:46:12" · "2026-09-16T08:46" · "16/09/2026 8:46 PM" · "16/09/2026" → "YYYY-MM-DD HH:MM" (or "YYYY-MM-DD" with no time). IST as given.
+export function stamp(v) {
+  const t = String(v ?? '').trim(); if (!t || t === '-') return null;
+  const d = salesDate(t) || biginDate(t); if (!d) return null;
+  const m = t.match(/[ T](\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?/); if (!m) return d;
+  let h = +m[1]; if (m[3]) { const pm = /p/i.test(m[3]); if (h === 12) h = pm ? 12 : 0; else if (pm) h += 12; }
+  return `${d} ${String(h).padStart(2, '0')}:${m[2]}`;
+}
+// read before (or at) the order: compare times when both have one, else compare dates
+export const readBefore = (readAt, orderTs) => (readAt.length > 10 && orderTs.length > 10 ? readAt <= orderTs : readAt.slice(0, 10) <= orderTs.slice(0, 10));
 
 // ---------- Orders: one per POS Order ID, Frido retail stores only (same build as PDP) ----------
 export function storeOrders(salesRows) {
@@ -37,7 +49,7 @@ export function storeOrders(salesRows) {
     const date = salesDate(r['POS Created At']) || salesDate(r['Shopify Created At']); if (!date) continue;
     const id = r['POS Order ID'] || r['Shopify Order ID']; if (!id) continue;
     let o = orders.get(id);
-    if (!o) { o = { id, date, store, phone: phone10(r['Customer Phone']), type: (r['Order Type'] || '').toUpperCase() || 'RETAIL', net: 0, gross: 0, lines: [] }; orders.set(id, o); }
+    if (!o) { o = { id, date, ts: stamp(r['POS Created At']) || stamp(r['Shopify Created At']) || date, store, phone: phone10(r['Customer Phone']), type: (r['Order Type'] || '').toUpperCase() || 'RETAIL', net: 0, gross: 0, lines: [] }; orders.set(id, o); }
     const g = r.__gross != null ? num(r.__gross) : num(r['Amount Paid']);
     const n = r.__net != null ? num(r.__net) : g - num(r['Return Amount']);
     o.gross += g; o.net += n; o.lines.push({ p: String(r['Product Name'] || '(no product name)').trim(), net: n, gross: g, qty: num(r['Quantity']) || 1 });
@@ -51,7 +63,7 @@ const H = {
   run: ['run date', 'sent at', 'sent time', 'scheduled at', 'created at', 'date'],
   phone: ['phone number', 'phone', 'mobile', 'customer phone', 'to', 'recipient'],
   status: ['message status', 'status', 'delivery status'],
-  delivered: ['delivered at', 'delivered'], read: ['read status', 'read at', 'read', 'seen at'],
+  delivered: ['delivered at', 'delivered'], read: ['read status', 'read', 'seen'], readAt: ['read at', 'read time', 'read timestamp', 'seen at', 'read on'],
   replied: ['form input replies', 'replied', 'replied at', 'reply', 'responded'], clicked: ['button clicks', 'button clicked', 'clicked', 'cta clicked', 'message link clicks', 'link clicked'],
   error: ['error', 'failure reason', 'error message'],
 };
@@ -66,13 +78,14 @@ export function parseBroadcastRows(rows) {
   return rows.map((r) => {
     const st = String(r[c.status] || '').trim().toLowerCase();
     const rs = String(r[c.read] ?? '').trim().toLowerCase();
-    const read = /^read\b/.test(st) || (!/^(not|un|no)\b/.test(rs) && yes(rs));
+    const readAt = c.readAt ? stamp(r[c.readAt]) : null;
+    const read = /^read\b/.test(st) || (!/^(not|un|no)\b/.test(rs) && yes(rs)) || !!readAt;
     const delivered = read || /deliver/.test(st) || yes(r[c.delivered]);
     const failed = /fail|error|undeliver|reject/.test(st) && !delivered;
     const run = salesDate(r[c.run]) || biginDate(r[c.run]);
     const named = String(r[c.campaign] || '').trim();
     return { campaign: named || BROADCAST_NAMES[run] || (run ? 'Broadcast · ' + run : '(no date)'), run, phone: phone10(r[c.phone]),
-      failed, sent: !failed, delivered, read, replied: yes(r[c.replied]), clicked: yes(r[c.clicked]), reason: failed ? failReason(r[c.error]) || 'No reason given' : '' };
+      failed, sent: !failed, delivered, read, readAt, replied: yes(r[c.replied]), clicked: yes(r[c.clicked]), reason: failed ? failReason(r[c.error]) || 'No reason given' : '' };
   });
 }
 
@@ -80,7 +93,8 @@ export function parseBroadcastRows(rows) {
 // broadcasts: [{campaign, run, phone, failed, delivered, read, replied, clicked}]
 // touches   : [{phone, d, src: 'walkin'|'pdp_call'|'pdp_text'|'meta'}]
 export function computeRetention({ broadcasts = [], orders = [], touches = [], cutoff, windowDays = WINDOW_DAYS }) {
-  const quality = { noPhone: 0, badPhone: 0, noRunDate: 0, duplicates: 0, futureRun: 0 };
+  const quality = { noPhone: 0, badPhone: 0, noRunDate: 0, duplicates: 0, futureRun: 0, readNoTime: 0 };
+  const readTimes = broadcasts.some((b) => b.readAt); // export carries Read At → enforce read before order
   // Recipients: first row per (campaign, phone); a later row upgrades the delivery flags (resends).
   const rec = new Map();
   for (const b of broadcasts) {
@@ -93,9 +107,11 @@ export function computeRetention({ broadcasts = [], orders = [], touches = [], c
     quality.duplicates++;
     if (b.run < x.run) x.run = b.run;
     for (const f of ['sent', 'delivered', 'read', 'replied', 'clicked']) x[f] = x[f] || b[f];
+    if (b.readAt && (!x.readAt || b.readAt < x.readAt)) x.readAt = b.readAt;
     x.failed = x.failed && b.failed; if (!x.failed) x.reason = '';
   }
   const recipients = [...rec.values()];
+  if (readTimes) quality.readNoTime = recipients.filter((r) => r.read && !r.readAt).length;
 
   const byPhone = new Map();
   for (const o of orders) if (o.phone) (byPhone.get(o.phone) || byPhone.set(o.phone, []).get(o.phone)).push(o);
@@ -115,14 +131,15 @@ export function computeRetention({ broadcasts = [], orders = [], touches = [], c
   // Every in-window store order of a recipient → candidate (campaign, run). Pick the most recent touch.
   const recByPhone = new Map();
   for (const r of recipients) (recByPhone.get(r.phone) || recByPhone.set(r.phone, []).get(r.phone)).push(r);
-  const credited = []; const lostTo = []; const lines = [];
+  const credited = []; const lostTo = []; const lines = []; const late = [];
   const pIdx = new Map(); const pNames = []; const pid = (n) => { if (!pIdx.has(n)) { pIdx.set(n, pNames.length); pNames.push(n); } return pIdx.get(n); };
   const buyer = new Set(); // campaign|phone with a credited order
   for (const [p, rs] of recByPhone) {
     for (const o of byPhone.get(p) || []) {
       if (o.date > cutoff) continue;
-      const live = rs.filter((r) => r.delivered && r.read && o.date >= r.run && daysBetween(r.run, o.date) <= windowDays); // read leads only
-      if (!live.length) continue;
+      const inWin = rs.filter((r) => r.delivered && r.read && o.date >= r.run && daysBetween(r.run, o.date) <= windowDays); // read leads only
+      const live = readTimes ? inWin.filter((r) => r.readAt && readBefore(r.readAt, o.ts || o.date)) : inWin; // …read before the order
+      if (!live.length) { if (inWin.length) { const r0 = inWin.reduce((a, b) => (b.run > a.run ? b : a)); late.push({ o: o.id, d: o.date, run: r0.run, c: cid.get(r0.campaign), s: o.store, net: Math.round(o.net), gross: Math.round(o.gross), noTime: r0.readAt ? 0 : 1 }); } continue; }
       const camp = live.reduce((a, b) => (b.run > a.run ? b : a));
       const rival = (touchBy.get(p) || []).filter((t) => (t.src === 'walkin' ? t.d < o.date : t.d <= o.date)).reduce((a, b) => (!a || b.d > a.d ? b : a), null);
       const row = { o: o.id, d: o.date, run: camp.run, c: cid.get(camp.campaign), s: o.store, hs: homeOf(p, camp.run) || '', t: o.type, net: Math.round(o.net), gross: Math.round(o.gross), lag: daysBetween(camp.run, o.date), rep: camp.replied ? 1 : 0, qty: o.lines.reduce((t, l) => t + l.qty, 0) };
@@ -152,9 +169,9 @@ export function computeRetention({ broadcasts = [], orders = [], touches = [], c
   return {
     cutoff, windowDays, costPerDelivered: COST_PER_DELIVERED, fails: [...fails.values()], generatedAt: new Date().toISOString(),
     campaigns: campList.map((c, i) => ({ i, name: c.name, first: c.first, last: c.last, waves: [...c.waves.entries()].sort().map(([d, n]) => ({ d, n })), closes: addDays(c.last, windowDays), open: addDays(c.last, windowDays) > cutoff ? 1 : 0 })),
-    recipients: [...agg.values()], credited, lostTo, lines, pnames: pNames, stores,
+    recipients: [...agg.values()], credited, lostTo, late, readTimes, lines, pnames: pNames, stores,
     quality: { ...quality, recipients: recipients.length, rows: broadcasts.length },
-    rules: { eligible: 'Delivered and read only', spend: `₹${COST_PER_DELIVERED} × delivered`, window: `Order on/after run date, within ${windowDays} days`, orders: 'Billed at a Frido retail store, same phone', credit: 'Most recent touch wins (broadcast, walk-in, PDP, Meta)', revenue: 'Total Revenue = gross − discount' },
+    rules: { eligible: readTimes ? 'Delivered and read before the order' : 'Delivered and read (no read time in export)', spend: `₹${COST_PER_DELIVERED} × delivered`, window: `Order on/after run date, within ${windowDays} days`, orders: 'Billed at a Frido retail store, same phone', credit: 'Most recent touch wins (broadcast, walk-in, PDP, Meta)', revenue: 'Total Revenue = gross − discount' },
   };
 }
 
@@ -189,10 +206,10 @@ export function sampleInputs(cutoff) {
     pool.forEach((c, j) => {
       let w = 0, cum = waves[0][1]; while (w < waves.length - 1 && j >= cum * pool.length) cum += waves[++w][1];
       const run = waves[w][0]; if (run > cutoff) return;
-      const failed = rc() < 0.06, delivered = !failed && rc() < 0.97, read = delivered && rc() < 0.62, replied = read && rc() < repRate / 0.62 * 1.1, clicked = read && rc() < 0.18;
+      const failed = rc() < 0.06, delivered = !failed && rc() < 0.97, read = delivered && rc() < 0.62, readAt = read ? `${addDays(run, Math.floor(-Math.log(1 - rc() * 0.95) * 1.5))} ${String(8 + Math.floor(rc() * 14)).padStart(2, '0')}:${String(Math.floor(rc() * 60)).padStart(2, '0')}` : null, replied = read && rc() < repRate / 0.62 * 1.1, clicked = read && rc() < 0.18;
       const reason = failed ? pick(rc, ['Per-user messaging rate limit', 'Per-user messaging rate limit', 'Per-user messaging rate limit', 'Invalid Recipient', 'Message type not permitted or Invalid Receipient']) : '';
-      broadcasts.push({ campaign: name, run, phone: c.phone, failed, sent: !failed, delivered, read, replied, clicked, reason });
-      if (rc() < 0.02) broadcasts.push({ campaign: name, run, phone: c.phone, failed, sent: !failed, delivered, read, replied: false, clicked: false, reason }); // resend → duplicate
+      broadcasts.push({ campaign: name, run, phone: c.phone, failed, sent: !failed, delivered, read, readAt, replied, clicked, reason });
+      if (rc() < 0.02) broadcasts.push({ campaign: name, run, phone: c.phone, failed, sent: !failed, delivered, read, readAt, replied: false, clicked: false, reason }); // resend → duplicate
       if (!delivered) return;
       const pBuy = buyRate * (replied ? 4 : read ? 1.4 : 0.4);
       if (rc() < pBuy) {
@@ -200,7 +217,7 @@ export function sampleInputs(cutoff) {
         const store = rc() < 0.82 ? c.home : pick(rc, storeIds);
         const n = rc() < 0.2 ? 2 : 1; const lines = []; for (let q = 0; q < n; q++) { const [p, price] = pick(rc, PRODUCTS); const net = Math.round(price * (0.8 + rc() * 0.12)); lines.push({ p, net, gross: price, qty: 1 }); }
         const net = lines.reduce((s, x) => s + x.net, 0);
-        orders.push({ id: 'S-R' + (++k), date: d, store, phone: c.phone, type: rc() < 0.08 ? 'ONLINE' : 'RETAIL', net, gross: lines.reduce((t, l) => t + l.gross, 0), lines });
+        orders.push({ id: 'S-R' + (++k), date: d, ts: `${d} ${String(10 + Math.floor(rc() * 11)).padStart(2, '0')}:00`, store, phone: c.phone, type: rc() < 0.08 ? 'ONLINE' : 'RETAIL', net, gross: lines.reduce((t, l) => t + l.gross, 0), lines });
         if (rc() < 0.07) touches.push({ phone: c.phone, d: addDays(run, Math.floor(rc() * Math.max(1, lag))), src: pick(rc, ['pdp_call', 'pdp_text', 'walkin', 'meta']) });
       }
       if (rc() < 0.004) { const d = addDays(run, WINDOW_DAYS + 3 + Math.floor(rc() * 20)); const [p, price] = pick(rc, PRODUCTS); orders.push({ id: 'S-L' + (++k), date: d, store: c.home, phone: c.phone, type: 'RETAIL', net: price, gross: price, lines: [{ p, net: price, qty: 1 }] }); }
