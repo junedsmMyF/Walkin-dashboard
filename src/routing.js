@@ -50,7 +50,7 @@ export function standardiseRouting(rows, { storeOf, cutoff } = {}) {
       id: String(r['Lead ID'] || '').trim(), d: sub.d, ts: sub.t, phone, validPhone: !!phone && /^[6-9]/.test(phone) && raw.length <= 12,
       storeRaw, s: (storeOf && storeOf(storeRaw)) || '', prods, cat: cleanCategory(catRaw), catRaw, vd: vd ? vd.d : '', vdRaw: String(r['Expected visit date'] || '').trim(),
       vtKind: vt.kind, vtFrom: vt.from, disc: /^(na|n\/a|nil|no|none|-|0)$/i.test(disc) ? '' : disc, discRaw: disc,
-      remarks: !!String(r['Remarks'] || '').trim(), by: String(r['Submitted by'] || '').trim(),
+      remarks: !!String(r['Remarks'] || '').trim(), video: /video/i.test(String(r['Remarks'] || '')) ? 1 : 0, // remark asks for a video consultation (owner, 23 Oct 2026) by: String(r['Submitted by'] || '').trim(),
       testName: TEST_NAME.test(String(r['Customer name'] || '').trim()),
     });
   }

@@ -2181,7 +2181,7 @@ function pDefs(){
     ['Routing (not a funnel stage)', 'After "Qualified?", the agent routes the lead to a store on the WhatsApp DSR group (auto-logged in the routing sheet), sets up a video consult with the store team, or punches the order.'],
     ['Routed lead', 'Routing sheet row, one per phone. Test rows (name "test", or a phone used on a test row) are left out.'],
     ['Routed → billed', 'DevX order on/after the routing date, same phone, any store. "At the routed store" and "by the expected visit date" are shown separately.'],
-    ['Conversion route', 'Store visit = in the routing sheet and bought on the expected visit date. Video call = not in the routing sheet, video call arranged, bought on/after the lead date. Else other.'],
+    ['Conversion route', 'Store visit = in the routing sheet (remark not about video) and bought on the expected visit date. Video call = routing remark mentions video (bought on/after the visit date), or Bigin video call stage (bought on/after the lead date). Else other.'],
     ['Orders', 'Unique DevX order IDs; products and quantity do not add orders.'],
     ['Consumed', 'Call: Bigin stage moved past Yet to Call (connected or not). WhatsApp: a backend agent replied (First Agent Message Time or Agent Message Blocks > 0).'],
     ['Purchased', 'Any DevX order, any store, on/after the lead date, same phone (last 10 digits).'],

@@ -39,3 +39,14 @@ test('routed lead → source lead → order; store visit conversion only on the 
   assert.deepEqual(m.call.attributed.map((x) => [x.path, x.pb, x.rtd]), [['store', 'visit_day', 1], ['other', 'routed_other_day', 1], ['other', 'routed_other_day', 1]]);
   const s = JSON.stringify(m); assert.ok(!s.includes('9000000002') && !s.includes('Real Customer'));
 });
+
+test('routing remark mentioning video = video call conversion (order on/after the visit date); other routed rows = store visit on the visit date', () => {
+  const sale = (id, p, d) => ({ 'POS Order ID': id, 'Customer Phone': p, 'POS Created At': d, 'Store ID': 'FRIDO_0010', __gross: '1000', __net: '1000', 'Order Type': 'RETAIL', 'Ret/Exc': '-', 'Product Name': 'Frido Test Chair' });
+  const cbk = (i, p) => ({ i, nm: 'Real Customer', p, ct: '2026-10-09T11:00:00+05:30', mt: '2026-10-09T11:00:00+05:30', web: 'SkyCity Mall, Mumbai', st: 'Connected', own: 'Raj B' });
+  const m = computePdp({ startDate: '2026-10-08', cutoff: '2026-10-14', sample: false,
+    callbacks: [cbk('1000000000000000001', '9000000002'), cbk('1000000000000000002', '9000000003')],
+    routingRows: [row('L1', '10/11/2026 11:00:00', 'Sky City Mall, Borivali', 'Real Customer', '9000000002', { Remarks: 'Cx has requested a video consultation' }), row('L2', '10/11/2026 11:00:00', 'Sky City Mall, Borivali', 'Real Customer', '9000000003', { Remarks: 'Size UK8' })],
+    salesRows: [sale('A', '9000000002', '13/10/2026'), sale('B', '9000000003', '12/10/2026')] });
+  assert.deepEqual(m.call.attributed.map((x) => [x.o, x.path, x.pb]).sort(), [['A', 'video', 'vc_routed'], ['B', 'store', 'visit_day']]);
+  assert.deepEqual(m.call.leads.map((x) => [x.rt, x.vc]), [[0, 1], [1, 0]]);
+});
