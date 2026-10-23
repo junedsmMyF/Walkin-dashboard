@@ -61,13 +61,37 @@ test('sample block is flagged and deterministic', () => {
   assert.deepEqual(a.pdpDaily, b.pdpDaily);
 });
 
-test('purchase path: ONLINE punch-in = video consult; cash & carry = store visit (agent branch removed from the flow)', () => {
+test('conversion route: not routed + video call arranged = video call conversion, whatever the order type; otherwise other', () => {
   const s2 = (id, d, store, emp, type) => ({ ...sale(id, '9000000001', d, store, 1000), 'Employee Name': emp, 'Order Type': type });
   const m = run({
-    callbacks: [cb('1000000000000000001', '9000000001', '2026-10-08T11:00:00+05:30', 'SkyCity Mall, Mumbai', 'Connected', { own: 'Raj B' })],
-    salesRows: [s2('A', '09/10/2026', 'FRIDO_0010', 'Raj Bhardwaj', 'ONLINE'), s2('B', '10/10/2026', 'FRIDO_0010', 'Store Staff', 'RETAIL'), s2('C', '11/10/2026', 'FRIDO_0010', '', 'ONLINE')],
+    callbacks: [cb('1000000000000000001', '9000000001', '2026-10-08T11:00:00+05:30', 'SkyCity Mall, Mumbai', 'Video call arrange', { own: 'Raj B' }), cb('1000000000000000003', '9000000003', '2026-10-08T12:00:00+05:30', 'SkyCity Mall, Mumbai', 'Connected')],
+    salesRows: [{ ...s2('D', '09/10/2026', 'FRIDO_0010', '', 'ONLINE'), 'Customer Phone': '9000000003' }, s2('A', '09/10/2026', 'FRIDO_0010', 'Raj Bhardwaj', 'ONLINE'), s2('B', '10/10/2026', 'FRIDO_0010', 'Store Staff', 'RETAIL'), s2('C', '11/10/2026', 'FRIDO_0010', '', 'ONLINE')],
   });
-  assert.deepEqual(m.call.attributed.map((x) => [x.path, x.pb, x.ag]), [['video', 'online', 'Raj B'], ['store', 'retail', 'Raj B'], ['video', 'online', 'Raj B']]);
+  assert.deepEqual(m.call.attributed.filter((x) => x.ag === 'Raj B').map((x) => [x.path, x.pb]), [['video', 'vc_arranged'], ['video', 'vc_arranged'], ['video', 'vc_arranged']]);
+  assert.deepEqual(m.call.attributed.filter((x) => x.ag !== 'Raj B').map((x) => [x.path, x.pb]), [['other', 'none']]);
   assert.equal(m.call.leads[0].ag, 'Raj B');
   assert.deepEqual(m.agents, ['Raj B']);
+});
+
+test('qualified split: routed (routing sheet) and VC arranged (Bigin stage) are marked per lead', () => {
+  const row = (id, at, p) => ({ 'Lead ID': id, 'Submitted at': at, Store: 'Sky City Mall, Borivali', 'Customer name': 'Real Customer', 'Customer number': p, 'Product name': 'NM - Chair', 'Expected visit date': '10/12/2026', 'Expected visit time': '5 PM' });
+  const m = run({
+    callbacks: [cb('1000000000000000001', '9000000001', '2026-10-08T11:00:00+05:30', 'SkyCity Mall, Mumbai', 'Connected'), cb('1000000000000000002', '9000000002', '2026-10-09T11:00:00+05:30', 'SkyCity Mall, Mumbai', 'Video call arrange')],
+    routingRows: [row('L1', '10/10/2026 10:00:00', '9000000001')],
+  });
+  assert.deepEqual(m.call.leads.map((x) => [x.g, x.rt, x.vc]), [['engaged', 1, 0], ['vcPlan', 0, 1]]);
+  assert.ok(!JSON.stringify(m).includes('9000000002'));
+});
+
+test('routed lead counts as qualified whatever its stage; raw stage kept and mismatch flagged', () => {
+  const row = (id, at, p) => ({ 'Lead ID': id, 'Submitted at': at, Store: 'Sky City Mall, Borivali', 'Customer name': 'Real Customer', 'Customer number': p, 'Product name': 'NM - Chair', 'Expected visit date': '10/12/2026', 'Expected visit time': '5 PM' });
+  const T = { 'Ticket ID': '5', 'Created At': '2026-10-09 10:00:00', 'Ticket Status': 'closed', 'is_handoff?': 'FALSE', 'is_resolved?': 'TRUE', 'is_outside_working_hours?': 'FALSE', 'First Assignee Name': '', 'Current Agent': '', 'First Assigned Time': '', 'First Agent Message Time': '', 'Agent Message Blocks': '0', 'Private Notes': '', 'Level 1 Tags (Main)': 'storewidget', 'System Tags': 'bot', 'Last Message Sent By': 'Bot', 'Phone Number': '919000000007', 'Customer Name': 'Test' };
+  const m = run({
+    callbacks: [cb('1000000000000000001', '9000000001', '2026-10-08T11:00:00+05:30', 'SkyCity Mall, Mumbai', 'RNR 1'), cb('1000000000000000002', '9000000002', '2026-10-08T12:00:00+05:30', 'SkyCity Mall, Mumbai', 'RNR 1')],
+    limechatRows: [T],
+    routingRows: [row('L1', '10/10/2026 10:00:00', '9000000001'), row('L2', '10/10/2026 11:00:00', '9000000007'), row('L3', '10/20/2026 11:00:00', '9000000002')], // L3 is after the cutoff
+  });
+  assert.deepEqual(m.call.leads.map((x) => [x.st, x.g, x.rsm, x.cons, x.rt]), [['RNR 1', 'visitPlan', 1, 1, 1], ['RNR 1', 'ringing', 0, 1, 0]]);
+  const t = m.text.tickets[0];
+  assert.deepEqual([t.st, t.sr, t.am, t.oc, t.rt, t.fl.includes('routed_stage_mismatch')], ['qualified', 'bot_only', 1, 'routed_store', 1, true]);
 });

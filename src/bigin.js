@@ -185,3 +185,70 @@ export const biginCallbacks = (env) => env.DASH_KV.get(KV_CALLBACK, 'json');
 export const biginMetaAds = (env) => env.DASH_KV.get(KV_METAADS, 'json');
 export const biginMeta = (env) => env.DASH_KV.get(KV_META, 'json');
 export const biginConnected = async (env) => !!(await env.DASH_KV.get(KV_TOKENS));
+
+// ---------- PDP Inventories pipeline (LimeChat → Bigin, live since 21 Oct 2026) — read-only ----------
+// Own query (Limechat_Conversation_ID is only filled on this pipeline), so it never competes with the 9,000-record cap of
+// the full refresh. Bigin's stage history is not exposed over MCP, so each read keeps the first time a stage was seen.
+// Phones, names and remarks stay in KV (server side) — never sent to the browser.
+const KV_PDPINV = 'bigin:pdpinv';
+const KV_PDPHIST = 'bigin:pdpinv:hist'; // id → [[stage, firstSeenIso, approx?], …]
+const KV_PDPMETA = 'bigin:pdpinv:meta';
+// Field sets, widest first: a COQL query fails as a whole if one field does not exist, so fall back to narrower sets.
+const PDP_FIELD_SETS = [
+  'id, Deal_Name, Stage, Pipeline, Owner, Created_Time, Modified_Time, Last_Activity_Time, Ticket_Created, Limechat_Conversation_ID, Phone_Number, Store_Location, Conversation_Tag, Tag, Amount, Remarks, Close_Lost_Reason, Product_Category',
+  'id, Deal_Name, Stage, Pipeline, Owner, Created_Time, Modified_Time, Last_Activity_Time, Ticket_Created, Limechat_Conversation_ID, Phone_Number, Store_Location, Conversation_Tag, Tag, Amount, Remarks',
+  'id, Stage, Pipeline, Owner, Created_Time, Modified_Time, Limechat_Conversation_ID, Phone_Number',
+];
+
+export async function refreshPdpInventories(env) {
+  const pid = String(env.PDP_INV_PIPELINE_ID || '1371203000000675914');
+  const now = new Date().toISOString();
+  try {
+    const mcp = new McpSession(env); await mcp.open();
+    const owners = new Map();
+    for (let page = 1; page <= 5; page++) {
+      const r = await mcp.bigin('Bigin_getNewUsers', { query_params: { type: 'AllUsers', per_page: 200, page } });
+      for (const u of r.users || []) owners.set(u.id, u.full_name);
+      if (!r.info?.more_records) break;
+    }
+    let fieldSet = -1, lastErr = null;
+    const read = async (fields) => {
+      const out = []; let lastId = '0';
+      for (let page = 0; page < 40; page++) { // 40 × 200 = 8,000 tickets per read
+        const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${fields} from Pipelines where Limechat_Conversation_ID is not null and id > ${lastId} order by id asc limit 0, 200` } });
+        if (!r.data && (r.code || r.status === 'error')) throw new Error(`COQL ${r.code || 'error'}: ${String(r.message || '').slice(0, 200)}`); // e.g. unknown field
+        const rows = r.data || [];
+        out.push(...rows);
+        if (!rows.length || !r.info?.more_records) break;
+        lastId = rows[rows.length - 1].id;
+      }
+      return out;
+    };
+    let rows = null;
+    for (let k = 0; k < PDP_FIELD_SETS.length && !rows; k++) { try { rows = await read(PDP_FIELD_SETS[k]); fieldSet = k; } catch (e) { lastErr = e; } }
+    if (!rows) throw lastErr || new Error('PDP Inventories query failed');
+    const pipeOf = (x) => String(x.Pipeline?.id ?? x.Pipeline ?? '');
+    const recs = rows.filter((x) => pipeOf(x) === pid).map((x) => ({
+      i: x.id, st: String(x.Stage || '').trim(), ct: x.Created_Time, mt: x.Modified_Time, la: x.Last_Activity_Time || null, tc: x.Ticket_Created || x.Created_Time,
+      cid: String(x.Limechat_Conversation_ID || '').trim(), p: x.Phone_Number || '', nm: x.Deal_Name || '', own: owners.get(x.Owner?.id) || '',
+      loc: x.Store_Location || '', ctag: x.Conversation_Tag || '', tags: (Array.isArray(x.Tag) ? x.Tag : []).map((t) => t.name || t).filter(Boolean),
+      amt: Number(x.Amount) || 0, rem: x.Remarks || '', lr: x.Close_Lost_Reason || '', cat: x.Product_Category || '',
+    }));
+    const otherPipelines = rows.length - recs.length;
+    const hist = (await env.DASH_KV.get(KV_PDPHIST, 'json')) || {};
+    for (const x of recs) {
+      const h = hist[x.i];
+      if (!h) hist[x.i] = /^new enquiry$/i.test(x.st) ? [[x.st, x.ct]] : [['New Enquiry', x.ct], [x.st, x.mt || now, 'approx']]; // moved before the first read
+      else if (h[h.length - 1][0] !== x.st) h.push([x.st, x.mt && x.mt > h[h.length - 1][1] ? x.mt : now]);
+    }
+    await env.DASH_KV.put(KV_PDPINV, JSON.stringify(recs));
+    await env.DASH_KV.put(KV_PDPHIST, JSON.stringify(hist));
+    await env.DASH_KV.put(KV_PDPMETA, JSON.stringify({ status: 'ok', refreshedAt: now, count: recs.length, otherPipelines, fieldSet }));
+    return { ok: true, count: recs.length, fieldSet };
+  } catch (e) {
+    const prev = (await env.DASH_KV.get(KV_PDPMETA, 'json')) || {};
+    await env.DASH_KV.put(KV_PDPMETA, JSON.stringify({ ...prev, status: 'error', error: String(e.message || e), failedAt: now }));
+    return { ok: false, error: String(e.message || e) };
+  }
+}
+export const pdpInventories = async (env) => ({ recs: (await env.DASH_KV.get(KV_PDPINV, 'json')) || null, hist: (await env.DASH_KV.get(KV_PDPHIST, 'json')) || {}, meta: (await env.DASH_KV.get(KV_PDPMETA, 'json')) || null });

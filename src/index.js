@@ -10,7 +10,7 @@ import { syncBotTables } from './bot/sync.js';
 import { ask, checkSql, MODELS, MODEL_CHAIN, runModel } from './bot/ask.js';
 import { identify, can, canBot, canWalkin, filterMetrics, PAGES, ROLES, makeSession, sessionCookie, startOtp, checkOtp, OTP_MINUTES } from './auth.js';
 import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, normStoreName, suggestStore } from './stores.js';
-import { refreshBigin, biginLeads, biginCallbacks, biginMetaAds, biginMeta, biginConnected, startConnect, finishConnect } from './bigin.js';
+import { refreshBigin, biginLeads, biginCallbacks, biginMetaAds, biginMeta, biginConnected, startConnect, finishConnect, refreshPdpInventories, pdpInventories } from './bigin.js';
 import { computePdp } from './pdp.js';
 import { computeMeta } from './meta.js';
 import { computeRetention, parseBroadcastCsv, storeOrders, sampleInputs } from './retention.js';
@@ -200,7 +200,8 @@ async function pdpMetrics(env, ctx) {
   const meta = (await biginMeta(env)) || {};
   const cutoff = addDays(istDate(), -1);
   const idx = await env.DASH_KV.get('sales:index', 'json');
-  const ver = ['pdp4', Math.floor(Date.now() / 900e3), idx?.uploadedAt || 'none', meta.refreshedAt || 'none', cutoff].join('|');
+  const pinv = await pdpInventories(env);
+  const ver = ['pdp5', pinv.meta?.refreshedAt || 'none', Math.floor(Date.now() / 900e3), idx?.uploadedAt || 'none', meta.refreshedAt || 'none', cutoff].join('|');
   const cached = await env.DASH_KV.get('pdp:cache', 'json');
   if (cached && cached.k === ver && Date.now() - cached.at < 15 * 60e3) return json(cached.body, 200, { 'cache-control': 'private, max-age=60', 'x-pdp-cache': 'hit' });
   const [callbacks, walkin] = await Promise.all([biginCallbacks(env), biginLeads(env)]);
@@ -210,8 +211,9 @@ async function pdpMetrics(env, ctx) {
   if (env.ROUTING_CSV_URL) { try { routingRows = await sheet(env.ROUTING_CSV_URL, env); } catch (e) { rtErr = String(e.message || e); } }
   let sales = { rows: [], meta: {}, late: false };
   try { sales = await salesCombined(env); } catch (e) { sales.error = String(e.message || e); }
-  const m = computePdp({ callbacks: callbacks || [], walkinLeads: walkin || [], salesRows: sales.rows, limechatRows, routingRows, startDate: env.PDP_START_DATE || '2026-10-08', cutoff, backendAgents: String(env.BACKEND_AGENTS || '').split(',').map((x) => x.trim()).filter(Boolean) });
+  const m = computePdp({ callbacks: callbacks || [], walkinLeads: walkin || [], salesRows: sales.rows, limechatRows, routingRows, pdpInv: pinv.recs ? pinv : null, pdpInvFrom: env.PDP_INV_FROM || null, startDate: env.PDP_START_DATE || '2026-10-08', cutoff, backendAgents: String(env.BACKEND_AGENTS || '').split(',').map((x) => x.trim()).filter(Boolean) });
   m.sources = {
+    pdpinv: { status: pinv.recs ? pinv.meta?.status || 'ok' : (pinv.meta?.status === 'error' ? 'error' : 'waiting_first_refresh'), refreshedAt: pinv.meta?.refreshedAt || null, records: pinv.recs ? pinv.recs.length : 0, error: pinv.meta?.status === 'error' ? pinv.meta.error || null : null },
     callback: { status: callbacks ? meta.status || 'ok' : (env.CALLBACK_PIPELINE_ID ? 'waiting_first_refresh' : 'not_configured'), refreshedAt: meta.refreshedAt || null, records: callbacks ? callbacks.length : 0 },
     sales: { status: sales.error ? 'error' : sales.late ? 'stale' : 'live', uploadedAt: sales.meta?.uploadedAt || null, error: sales.error || null },
     limechat: { status: limechatRows ? ((SHEET_STATUS.get(env.LIMECHAT_CSV_URL) || { ok: true }).ok ? 'live' : 'stale') : (env.LIMECHAT_CSV_URL ? 'error' : 'not_configured'), rows: limechatRows ? limechatRows.length : 0, error: lcErr, link: env.LIMECHAT_CSV_URL ? SHEET_STATUS.get(env.LIMECHAT_CSV_URL) || null : null }, routing: { status: routingRows ? ((SHEET_STATUS.get(env.ROUTING_CSV_URL) || { ok: true }).ok ? 'live' : 'stale') : (env.ROUTING_CSV_URL ? 'error' : 'not_configured'), rows: routingRows ? routingRows.length : 0, error: rtErr }, pdp: { status: 'sample' },
@@ -652,6 +654,7 @@ export default {
           const rows = await botTest(env); const esc2 = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
           return html(`<h1>Bot test — ${rows.filter((r) => r.pass).length} of ${rows.length} correct</h1><table border="1" cellpadding="6" style="border-collapse:collapse;font-size:13px"><tr><th>Question</th><th>Expected (exact SQL)</th><th>Bot</th><th></th><th>Bot answer</th><th>Bot SQL</th></tr>${rows.map((r) => `<tr><td>${esc2(r.q)}</td><td>${esc2(r.expected)}</td><td>${esc2(r.got)}</td><td>${r.pass ? '✅' : '❌'}</td><td>${esc2(r.answer)}</td><td><code style="font-size:11px">${esc2(r.sql)}</code></td></tr>`).join('')}</table>`);
         }
+        if (url.pathname === '/admin/pdp-refresh' && request.method === 'POST') return json(await refreshPdpInventories(env)); // read-only
         if (url.pathname === '/admin/refresh' && request.method === 'POST') {
           const r = await refreshBigin(env);
           return html(`<h1>${r.ok ? 'Refreshed' : 'Refresh failed'}</h1><p>${r.ok ? `${r.count} walk-in leads loaded.` : String(r.error).replace(/</g, '&lt;')}</p><a class="btn" href="/admin?key=${encodeURIComponent(url.searchParams.get('key'))}">Back</a>`);
@@ -664,6 +667,7 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(refreshBigin(env).then(() => rebuildBot(env)).catch(() => {}));
+    if (event.cron === '10 * * * *') { ctx.waitUntil(refreshPdpInventories(env).catch(() => {})); return; } // hourly: PDP Inventories stages
+    ctx.waitUntil(refreshBigin(env).then(() => refreshPdpInventories(env)).then(() => rebuildBot(env)).catch(() => {}));
   },
 };

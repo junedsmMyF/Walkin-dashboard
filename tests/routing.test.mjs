@@ -28,7 +28,7 @@ test('test rows (and rows sharing a test phone) are flagged; repeats and unmappe
   assert.equal(firstByPhone.size, 1);
 });
 
-test('routed lead → source lead → order; two purchase paths; payload has no phones or names', () => {
+test('routed lead → source lead → order; store visit conversion only on the expected visit date; payload has no phones or names', () => {
   const sale = (id, d, store, emp, type) => ({ 'POS Order ID': id, 'Customer Phone': '9000000002', 'POS Created At': d, 'Store ID': store, __gross: '1000', __net: '1000', 'Order Type': type, 'Ret/Exc': '-', 'Product Name': 'Frido Test Chair', 'Employee Name': emp });
   const m = computePdp({ startDate: '2026-10-08', cutoff: '2026-10-14', sample: false,
     callbacks: [{ i: '1000000000000000001', nm: 'Real Customer', p: '9000000002', ct: '2026-10-09T11:00:00+05:30', mt: '2026-10-09T11:00:00+05:30', web: 'SkyCity Mall, Mumbai', st: 'Connected', own: 'Raj B' }],
@@ -36,6 +36,6 @@ test('routed lead → source lead → order; two purchase paths; payload has no 
     salesRows: [sale('A', '12/10/2026', 'FRIDO_0010', 'Store Staff', 'RETAIL'), sale('B', '13/10/2026', 'FRIDO_0010', 'Raj Bhardwaj', 'RETAIL'), sale('C', '14/10/2026', 'FRIDO_0010', 'Store Staff', 'ONLINE')] });
   const r = m.routing.routes[0];
   assert.deepEqual([r.src, r.ld, r.lag, r.od, r.same, r.onTime, r.net, r.n, r.path], ['call', '2026-10-09', 2, '2026-10-12', 1, 1, 3000, 3, 'store']);
-  assert.deepEqual(m.call.attributed.map((x) => [x.path, x.pb, x.rtd]), [['store', 'retail', 1], ['store', 'retail', 1], ['video', 'online', 1]]);
+  assert.deepEqual(m.call.attributed.map((x) => [x.path, x.pb, x.rtd]), [['store', 'visit_day', 1], ['other', 'routed_other_day', 1], ['other', 'routed_other_day', 1]]);
   const s = JSON.stringify(m); assert.ok(!s.includes('9000000002') && !s.includes('Real Customer'));
 });
