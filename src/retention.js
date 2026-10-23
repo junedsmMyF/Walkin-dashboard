@@ -70,23 +70,51 @@ const H = {
 // "{'data': {... 'reason': 'Per-user messaging rate limit', ...}}" → "Per-user messaging rate limit"
 export const failReason = (e) => { const s = String(e || '').trim(); if (!s || s === '-') return ''; const m = s.match(/'reason':\s*'([^']+)'/) || s.match(/"error":"([^"]+)"/); return (m ? m[1] : s).slice(0, 80); };
 const yes = (v) => { const s = String(v ?? '').trim().toLowerCase(); return !!s && !['0', 'false', 'no', 'n', '-', 'null', 'none'].includes(s); };
+// Column index per field from the header row (null when the export has no such column).
+function columnsOf(headers) {
+  const lower = new Map(headers.map((k, i) => [String(k).trim().toLowerCase(), i]));
+  return Object.fromEntries(Object.entries(H).map(([k, names]) => [k, names.map((n) => lower.get(n)).find((i) => i != null) ?? null]));
+}
+// One broadcast row from a field getter (get(key) → raw string).
+function toBroadcast(get) {
+  const st = String(get('status') || '').trim().toLowerCase();
+  const rs = String(get('read') ?? '').trim().toLowerCase();
+  const readAt = stamp(get('readAt'));
+  const read = /^read\b/.test(st) || (!/^(not|un|no)\b/.test(rs) && yes(rs)) || !!readAt;
+  const delivered = read || /deliver/.test(st) || yes(get('delivered'));
+  const failed = /fail|error|undeliver|reject/.test(st) && !delivered;
+  const run = salesDate(get('run')) || biginDate(get('run'));
+  const named = String(get('campaign') || '').trim();
+  return { campaign: named || BROADCAST_NAMES[run] || (run ? 'Broadcast · ' + run : '(no date)'), run, phone: phone10(get('phone')),
+    failed, sent: !failed, delivered, read, readAt, replied: yes(get('replied')), clicked: yes(get('clicked')), reason: failed ? failReason(get('error')) || 'No reason given' : '' };
+}
 export function parseBroadcastRows(rows) {
   if (!rows.length) return [];
-  const keys = Object.keys(rows[0]); const lower = new Map(keys.map((k) => [k.trim().toLowerCase(), k]));
-  const col = (names) => { for (const n of names) if (lower.has(n)) return lower.get(n); return null; };
-  const c = Object.fromEntries(Object.entries(H).map(([k, v]) => [k, col(v)]));
-  return rows.map((r) => {
-    const st = String(r[c.status] || '').trim().toLowerCase();
-    const rs = String(r[c.read] ?? '').trim().toLowerCase();
-    const readAt = c.readAt ? stamp(r[c.readAt]) : null;
-    const read = /^read\b/.test(st) || (!/^(not|un|no)\b/.test(rs) && yes(rs)) || !!readAt;
-    const delivered = read || /deliver/.test(st) || yes(r[c.delivered]);
-    const failed = /fail|error|undeliver|reject/.test(st) && !delivered;
-    const run = salesDate(r[c.run]) || biginDate(r[c.run]);
-    const named = String(r[c.campaign] || '').trim();
-    return { campaign: named || BROADCAST_NAMES[run] || (run ? 'Broadcast · ' + run : '(no date)'), run, phone: phone10(r[c.phone]),
-      failed, sent: !failed, delivered, read, readAt, replied: yes(r[c.replied]), clicked: yes(r[c.clicked]), reason: failed ? failReason(r[c.error]) || 'No reason given' : '' };
-  });
+  const keys = Object.keys(rows[0]); const c = columnsOf(keys);
+  return rows.map((r) => toBroadcast((k) => (c[k] == null ? '' : r[keys[c[k]]])));
+}
+// Straight from the CSV text, keeping only the columns above. The full export (54k rows, long error JSON per row)
+// parsed into row objects needs ~160 MB, over the Worker's 128 MB limit; this reads it field by field instead.
+export function parseBroadcastCsv(text) {
+  const out = []; let c = null, want = null, vals = [], col = 0, field = '', q = false, data = false;
+  const keep = () => !c || want.has(col);
+  const endField = () => { if (keep()) vals[col] = field; if (field.trim() !== '') data = true; field = ''; col++; };
+  const endRow = () => {
+    endField();
+    if (!c) { c = columnsOf(vals); want = new Set(Object.values(c).filter((i) => i != null)); }
+    else if (data) { const v = vals; out.push(toBroadcast((k) => (c[k] == null ? '' : (v[c[k]] ?? '').trim()))); }
+    vals = []; col = 0; data = false;
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { if (keep()) field += '"'; i++; } else q = false; } else if (keep()) field += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') endField();
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; endRow(); }
+    else if (keep()) field += ch;
+  }
+  if (field !== '' || col) endRow();
+  return out;
 }
 
 // ---------- Engine ----------

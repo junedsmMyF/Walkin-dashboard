@@ -13,7 +13,7 @@ import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, normStoreName, suggestS
 import { refreshBigin, biginLeads, biginCallbacks, biginMetaAds, biginMeta, biginConnected, startConnect, finishConnect } from './bigin.js';
 import { computePdp } from './pdp.js';
 import { computeMeta } from './meta.js';
-import { computeRetention, parseBroadcastRows, storeOrders, sampleInputs } from './retention.js';
+import { computeRetention, parseBroadcastCsv, storeOrders, sampleInputs } from './retention.js';
 import { standardiseLimechat } from './limechat.js';
 
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra } });
@@ -247,14 +247,15 @@ async function retentionMetrics(env, ctx) {
   if (cached && cached.k === ver) return json(cached.body, 200, { 'cache-control': 'private, max-age=60', 'x-retention-cache': 'hit' });
   let m, bErr = null, sales = { meta: {} };
   if (live) {
-    let rows = null; try { rows = await sheet(env.RETENTION_CSV_URL, env); } catch (e) { bErr = String(e.message || e); }
-    try { sales = await salesCombined(env); } catch (e) { sales.error = String(e.message || e); }
+    // Broadcast export is ~7 MB / 54k rows: read it field by field (parseBroadcastCsv) — full row objects exceed the 128 MB Worker limit.
+    let broadcasts = []; try { broadcasts = parseBroadcastCsv(await sheetText(env.RETENTION_CSV_URL, env)); } catch (e) { bErr = String(e.message || e); }
+    let orders = []; try { sales = await salesCombined(env); orders = storeOrders(sales.rows || []); sales.rows = null; } catch (e) { sales.error = String(e.message || e); }
     const [walkin, callbacks, metaLeads] = await Promise.all([biginLeads(env), biginCallbacks(env), biginMetaAds(env)]);
     const touches = [];
     const add = (arr, src, dOf) => (arr || []).forEach((l) => { const p = phone10(l.p); const d = dOf(l); if (p && d) touches.push({ phone: p, d, src }); });
     add(walkin, 'walkin', (l) => biginDate(l.d) || biginDate(l.ct)); add(callbacks, 'pdp_call', (l) => biginDate(l.ct)); add(metaLeads, 'meta', (l) => biginDate(l.ct));
     if (env.LIMECHAT_CSV_URL) { try { for (const t of standardiseLimechat(await sheet(env.LIMECHAT_CSV_URL, env), { cutoff }).firstByPhone.values()) if (t.phone && t.d) touches.push({ phone: t.phone, d: t.d, src: 'pdp_text' }); } catch {} }
-    m = computeRetention({ broadcasts: parseBroadcastRows(rows || []), orders: storeOrders(sales.rows || []), touches, cutoff });
+    m = computeRetention({ broadcasts, orders, touches, cutoff });
   } else {
     m = computeRetention({ ...sampleInputs(cutoff), cutoff }); m.sample = true;
   }

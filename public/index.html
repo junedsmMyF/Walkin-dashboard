@@ -2562,7 +2562,7 @@ let RDATA = null, RDATA_ERR = null, RLOADING = false;
 async function loadRet(force){
   if (RLOADING || (RDATA && !force)) return;
   RLOADING = true; RDATA_ERR = null;
-  try { const r = await fetch('/api/retention', { cache: 'no-store' }); const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status)); RDATA = j; }
+  try { const r = await fetch('/api/retention', { cache: 'no-store' }); const txt = await r.text(); let j; try { j = JSON.parse(txt); } catch { throw new Error(`The server could not build the retention data (HTTP ${r.status}). Try again in a minute; if it keeps failing, tell the Founders Office.`); } if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status)); RDATA = j; }
   catch (e) { RDATA_ERR = String(e.message || e); }
   RLOADING = false; rerender();
 }

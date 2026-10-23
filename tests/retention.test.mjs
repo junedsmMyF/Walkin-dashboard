@@ -1,7 +1,8 @@
 // Retail retention: 60-day window, store orders only, most recent touch wins, no PII. Synthetic records only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeRetention, parseBroadcastRows, storeOrders, sampleInputs, failReason, stamp } from '../src/retention.js';
+import { computeRetention, parseBroadcastRows, parseBroadcastCsv, storeOrders, sampleInputs, failReason, stamp } from '../src/retention.js';
+import { parseCsv } from '../src/csv.js';
 
 const P = '9000000001', Q = '9000000002';
 const b = (o) => ({ campaign: 'Diwali', run: '2026-10-01', phone: P, failed: false, delivered: true, read: true, replied: false, clicked: false, ...o });
@@ -47,6 +48,21 @@ test('Read At timestamps and the order time are parsed', () => {
   assert.equal(rows[0].readAt, '2026-09-17 10:30'); assert.equal(rows[0].read, true);
   const os = storeOrders([{ 'POS Order ID': 'X', 'Store ID': 'FRIDO_0002', 'POS Created At': '17/09/2026 09:15', 'Customer Phone': P, __gross: 100, __net: 90 }]);
   assert.equal(os[0].ts, '2026-09-17 09:15');
+});
+
+test('lean CSV reader gives the same rows as the full parser', () => {
+  const csv = [
+    'Created At,Phone Number,Message Status,Read Status,Button Clicks,Form Input Replies,Message Link Clicks,Orders,Order IDs,Revenue,AOV,Error',
+    '16/09/2026,91' + P + ',Delivered,Read,Locate by city,-,-,-,-,-,-,-',
+    '18/09/2026,91' + Q + `,Failed,-,-,-,-,-,-,-,-,"{'data': {'channelErrorCode': '131049', 'reason': 'Per-user messaging rate limit', 'status': 'failed'}}"`,
+    ',,,,,,,,,,,',
+    '26/09/2026,"91' + P + '",Sent,-,-,"a, ""quoted""\nnote",-,-,-,-,-,-',
+  ].join('\r\n') + '\n';
+  const lean = parseBroadcastCsv(csv);
+  assert.deepEqual(lean, parseBroadcastRows(parseCsv(csv)));
+  assert.equal(lean.length, 3, 'blank rows are skipped');
+  assert.equal(lean[1].reason, 'Per-user messaging rate limit');
+  assert.deepEqual(lean.map((x) => x.campaign), ['Retail_Retention_Ganpati', 'Retail_Retention_Ganpati_2', 'Retail_Retention_Ganpati_3']);
 });
 
 test('only Frido retail store orders count', () => {
