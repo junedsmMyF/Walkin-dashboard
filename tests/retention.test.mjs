@@ -170,3 +170,12 @@ test('sample is stable and respects the cutoff', () => {
   assert.ok(a.credited.every((x) => x.d <= '2026-10-21' && x.lag >= 0 && x.lag <= 60));
   assert.ok(a.campaigns.length >= 3);
 });
+
+test('PDP and retention viewer roles: their own dashboard only, no walk-in data, no bot', async () => {
+  const { ROLES, can, canWalkin, canBot } = await import('../src/auth.js');
+  for (const [role, perm] of [['pdp_viewer', 'pdp'], ['retention_viewer', 'retention']]) {
+    const id = { approved: true, perms: ROLES[role].perms, stores: [] };
+    assert.equal(can(id, perm), true); assert.equal(canWalkin(id), false); assert.equal(canBot(id), false);
+    assert.deepEqual(ROLES[role].perms, [perm]);
+  }
+});

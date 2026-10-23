@@ -578,7 +578,11 @@ function routePerm(p) {
 function firstAllowed() {
   if (canP('home')) return '#/';
   if (canP('retail')) return '#/retail';
-  const t = WTABS.find((x) => canP(WTAB_PERM[x.id])); return t ? '#/retail/walk-in/' + t.id : null;
+  const t = WTABS.find((x) => canP(WTAB_PERM[x.id])); if (t) return '#/retail/walk-in/' + t.id;
+  if (canP('pdp')) return '#/retail/pdp/journey';
+  if (canP('meta')) return '#/retail/meta-ads/overview';
+  if (canP('retention')) return '#/retail/retention/overview';
+  return null;
 }
 function pageBlocked(msg) {
   return `<div class="card" style="max-width:560px;margin:60px auto;text-align:center"><h2 style="margin-bottom:8px">No access</h2><p class="sub" style="margin-bottom:14px">${esc(msg)}</p>${ME?.email ? `<p class="sub">Signed in as <b>${esc(ME.email)}</b></p>` : ''}<p style="margin-top:16px">${ME?.email && ME?.logout ? `<a class="btn" href="${ME.logout}">Sign out</a>` : `<a class="btn" href="/" onclick="location.reload();return false;">Try again</a>`}</p></div>`;
@@ -650,7 +654,7 @@ function renderSide(p){
   <nav class="nav-group" aria-label="Projects"><div class="nav-label">Projects</div>
   ${canP('home') ? `<a class="nav-link ${p.length===0?'active':''}" href="#/" ${p.length===0?'aria-current="page"':''}>Home: top highlights</a>` : ''}`;
   PROJECTS.forEach(pr => {
-    if (pr.id === 'retail' ? !(canP('retail') || canWalkinAny()) : !canP('home')) return;
+    if (pr.id === 'retail' ? !(canP('retail') || canWalkinAny() || canP('pdp') || canP('meta') || canP('retention')) : !canP('home')) return;
     const href = pr.id === 'retail' && !canP('retail') ? (firstAllowed() || '#/retail') : '#/' + pr.id;
     const active = cur === href;
     html += `<a class="nav-link ${active?'active':''}" href="${href}" ${active?'aria-current="page"':''}>${pr.name}${pr.live ? '' : '<span class="soon">Soon</span>'}</a>`;

@@ -26,6 +26,8 @@ export const ROLES = {
   retail_vp: { label: 'Retail VP — Retail Revenue section only', perms: ['retail', ...WALKIN, 'meta', 'pdp', 'retention', 'bot'] },
   walkin_viewer: { label: 'Walk-in viewer — walk-in dashboard only', perms: [...WALKIN, 'bot'] },
   store_manager: { label: 'Store manager — own store(s), no revenue tabs', perms: ['walkin.overview', 'walkin.capture', 'walkin.followup', 'walkin.definitions'] },
+  pdp_viewer: { label: 'PDP viewer — PDP inventories only', perms: ['pdp'] },
+  retention_viewer: { label: 'Retention viewer — Retail retention only', perms: ['retention'] },
 };
 
 const b64u = (s) => { s = s.replace(/-/g, '+').replace(/_/g, '/'); s += '='.repeat((4 - (s.length % 4)) % 4); return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); };

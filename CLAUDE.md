@@ -47,6 +47,8 @@ Frido Founders Office dashboard. Owner: Abdal (AVP Founders Office). Deployed fr
 
 - **Shared filters** (owner, Oct 2026): PDP and Retail retention use the walk-in filter set via `sharedFilters()` in `public/index.html` — store format, city, store, compare to, day type, revenue (Total Revenue / Gross; `applyRev()` swaps `net` for `gross` in place, original kept in `n0`). Capture rate stays walk-in only. `F.city/store/format/day/rev/cmp` are shared across all three dashboards. Retention: store filters apply to the home store for messages and the billing store for orders; day type applies to the order date.
 
+- **Roles** (Oct 2026): `pdp_viewer` (PDP inventories only) and `retention_viewer` (Retail retention only) in `src/auth.js`, no Ask-data bot. For PDP/Meta/retention-only users `/api/metrics` returns dates only (`cutoff`, `startDate`, `stores`, `datesOnly: true`), never walk-in figures; `firstAllowed()` lands them on their dashboard.
+
 ## Standing rules (owner, Oct 2026 handoff)
 - **Metric rules pending sign-off** (built, not agreed): PDP conversion = order on/after lead date, same phone, any store; dedupe call + WhatsApp → earlier lead; WhatsApp "call note, no reply" not counted as consumed (switch offered, not chosen); monthly targets for report KPIs. Do not change any of these without the owner.
 - **Secrets** go in Cloudflare as type **Secret** (a Text variable is wiped on deploy). Never commit the LimeChat CSV link or the routing sheet link.

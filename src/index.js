@@ -540,7 +540,12 @@ export default {
       }
       if (url.pathname === '/api/metrics') {
         if (!id.approved) return json({ error: id.reason, auth: false }, 401);
-        if (!canWalkin(id)) return json({ error: 'You do not have access to the walk-in dashboard.' }, 403);
+        if (!canWalkin(id)) {
+          // PDP / Meta / retention-only roles: those pages need just the data dates and the store list — no walk-in figures
+          if (!['pdp', 'meta', 'retention'].some((p) => can(id, p))) return json({ error: 'You do not have access to the walk-in dashboard.' }, 403);
+          const r0 = await metrics(env, ctx); if (r0.status !== 200) return r0; const m0 = await r0.json();
+          return json({ cutoff: m0.cutoff, startDate: m0.startDate, stores: m0.stores, datesOnly: true }, 200, { 'cache-control': 'private, no-store' });
+        }
         const r = await metrics(env, ctx);
         if (!id.enforced || id.role === 'admin' || r.status !== 200) return r;
         const scoped = filterMetrics(await r.json(), id);
