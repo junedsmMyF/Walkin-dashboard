@@ -23,6 +23,7 @@ import { salesDate, biginDate, daysBetween, phone10, addDays } from './dates.js'
 import { standardiseLimechat, coverageGaps } from './limechat.js';
 import { standardiseRouting } from './routing.js';
 import { computePdpInv, pinvAsTextTickets, mergeTextSources, reconcile } from './pdpinv.js';
+import { buildLeadList, summariseLeads, REPEAT_DAYS } from './leads.js';
 
 // Website store labels (Store_Name1, set by the Call Store pop-up) that the store master does not already know.
 export const WEB_STORE_ALIASES = {
@@ -221,6 +222,18 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
   if (pdpInv) out.pinv = computePdpInv({ ...pdpInv, cutoff, ordersByPhone, storeOf: (l) => storeFromWeb(l),
     routedOn: (p) => (RT && RT.firstByPhone.has(p) ? RT.firstByPhone.get(p).d : null), lcFirst: (p) => (LC0 && LC0.firstByPhone.has(p) ? LC0.firstByPhone.get(p).d : null) });
   if (out.pinv && cut && LC0) out.pinv.recon = reconcile(LC0.tickets, pdpInv.recs, { from: cut });
+  // Step 3 of the PDP rebuild: one lead list across Call Store + WhatsApp (LimeChat before the cutover, Bigin from it). Summary only.
+  {
+    const ok = (ph) => !!(ph && /^[6-9]/.test(ph));
+    const contacts = [
+      ...raw.map((x) => ({ src: 'call', id: x.id, ts: x.ts, d: x.d, phone: x.p || null, valid: ok(x.p), entry: 'call_popup', store: x.s })),
+      ...(LC0 ? LC0.tickets.filter((x) => !x.svc && (!cut || x.d < cut)).map((x) => ({ src: 'limechat', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store })) : []),
+      ...(cut ? pinvAsTextTickets(pdpInv.recs.filter((r) => !(r.tags || []).some((t) => /limechat history/i.test(t))), { from: cut, storeOf: (l) => storeFromWeb(l) }).map((x) => ({ src: 'bigin', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store })) : []),
+    ];
+    const LL = buildLeadList({ contacts, routes: RT ? RT.routes.filter((r) => r.d <= cutoff) : [], ordersByPhone });
+    out.leadList = { rules: { repeatDays: REPEAT_DAYS, cutover: cut, sources: 'Call Store (Bigin Callback Requests) · LimeChat export before the cutover · Bigin PDP Inventories from it' },
+      mtd: summariseLeads(LL, { from: cutoff.slice(0, 8) + '01', to: cutoff }), all: summariseLeads(LL, { from: startDate, to: cutoff }) };
+  }
   if (sample) out.sample = buildSample({ startDate, cutoff, stores: STORE_MASTER });
   return out;
 }
