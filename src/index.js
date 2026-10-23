@@ -13,7 +13,7 @@ import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, normStoreName, suggestS
 import { refreshBigin, biginLeads, biginCallbacks, biginMetaAds, biginMeta, biginConnected, startConnect, finishConnect, refreshPdpInventories, pdpInventories } from './bigin.js';
 import { computePdp } from './pdp.js';
 import { computeMeta } from './meta.js';
-import { computeRetention, parseBroadcastCsv, storeOrders, sampleInputs } from './retention.js';
+import { computeRetention, parseBroadcastCsv, storeOrders, sampleInputs, packBroadcasts, unpackBroadcasts } from './retention.js';
 import { standardiseLimechat } from './limechat.js';
 
 const json = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra } });
@@ -239,6 +239,23 @@ async function metaMetrics(env, ctx) {
   return json(m, 200, { 'cache-control': 'private, max-age=60', 'x-meta-cache': 'miss' });
 }
 
+// ---- Retail retention inputs, cached in KV so a page load never parses the big exports twice (Worker: 128 MB) ----
+// Broadcasts: the LimeChat export (10 MB, 87k rows) parsed into a compact list, rebuilt at most every 15 minutes.
+// WhatsApp touches: first LimeChat ticket date per phone (for "most recent touch"), rebuilt at most hourly.
+async function retentionBroadcasts(env, force) {
+  const c = await env.DASH_KV.get('retention:bc', 'json');
+  if (!force && c && Date.now() - c.at < 15 * 60e3) return { rows: unpackBroadcasts(c.p), at: c.at, built: false };
+  const rows = parseBroadcastCsv(await sheetText(env.RETENTION_CSV_URL, env));
+  const at = Date.now(); await env.DASH_KV.put('retention:bc', JSON.stringify({ at, p: packBroadcasts(rows) }));
+  return { rows, at, built: true };
+}
+async function retentionLimechatTouches(env, cutoff, allowBuild) {
+  const c = await env.DASH_KV.get('retention:lct', 'json');
+  if (c && (!allowBuild || Date.now() - c.at < 60 * 60e3)) return c.t;
+  if (!allowBuild || !env.LIMECHAT_CSV_URL) return c ? c.t : [];
+  const t = []; for (const x of standardiseLimechat(await sheet(env.LIMECHAT_CSV_URL, env), { cutoff }).firstByPhone.values()) if (x.phone && x.d) t.push([x.phone, x.d]);
+  await env.DASH_KV.put('retention:lct', JSON.stringify({ at: Date.now(), t })); return t;
+}
 // ---- Retail retention: offer broadcasts (LimeChat) × retail store orders; sample until the broadcast report is connected ----
 async function retentionMetrics(env, ctx) {
   const cutoff = addDays(istDate(), -1);
@@ -250,13 +267,16 @@ async function retentionMetrics(env, ctx) {
   let m, bErr = null, sales = { meta: {} };
   if (live) {
     // Broadcast export is ~7 MB / 54k rows: read it field by field (parseBroadcastCsv) — full row objects exceed the 128 MB Worker limit.
-    let broadcasts = []; try { broadcasts = parseBroadcastCsv(await sheetText(env.RETENTION_CSV_URL, env)); } catch (e) { bErr = String(e.message || e); }
-    let orders = []; try { sales = await salesCombined(env); orders = storeOrders(sales.rows || []); sales.rows = null; } catch (e) { sales.error = String(e.message || e); }
+    let broadcasts = [], bcBuilt = false; try { const bc = await retentionBroadcasts(env); broadcasts = bc.rows; bcBuilt = bc.built; } catch (e) { bErr = String(e.message || e); }
+    const sent = new Set(broadcasts.map((b) => b.phone).filter(Boolean));
+    // only orders from phones that were messaged; the rest of the sales rows are dropped straight away
+    let orders = []; try { sales = await salesCombined(env); orders = storeOrders((sales.rows || []).filter((r) => sent.has(phone10(r['Customer Phone'])))); sales.rows = null; } catch (e) { sales.error = String(e.message || e); }
     const [walkin, callbacks, metaLeads] = await Promise.all([biginLeads(env), biginCallbacks(env), biginMetaAds(env)]);
     const touches = [];
     const add = (arr, src, dOf) => (arr || []).forEach((l) => { const p = phone10(l.p); const d = dOf(l); if (p && d) touches.push({ phone: p, d, src }); });
     add(walkin, 'walkin', (l) => biginDate(l.d) || biginDate(l.ct)); add(callbacks, 'pdp_call', (l) => biginDate(l.ct)); add(metaLeads, 'meta', (l) => biginDate(l.ct));
-    if (env.LIMECHAT_CSV_URL) { try { for (const t of standardiseLimechat(await sheet(env.LIMECHAT_CSV_URL, env), { cutoff }).firstByPhone.values()) if (t.phone && t.d) touches.push({ phone: t.phone, d: t.d, src: 'pdp_text' }); } catch {} }
+    // one heavy rebuild per request: if the broadcast cache was rebuilt now, use the last WhatsApp-touch cache as it is
+    try { for (const [p, d] of await retentionLimechatTouches(env, cutoff, !bcBuilt)) if (sent.has(p)) touches.push({ phone: p, d, src: 'pdp_text' }); } catch {}
     m = computeRetention({ broadcasts, orders, touches, cutoff });
   } else {
     m = computeRetention({ ...sampleInputs(cutoff), cutoff }); m.sample = true;
@@ -667,7 +687,7 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    if (event.cron === '10 * * * *') { ctx.waitUntil(refreshPdpInventories(env).catch(() => {})); return; } // hourly: PDP Inventories stages
+    if (event.cron === '10 * * * *') { ctx.waitUntil(refreshPdpInventories(env).catch(() => {}).then(() => (env.RETENTION_CSV_URL ? retentionBroadcasts(env, true) : null)).catch(() => {})); return; } // hourly: PDP Inventories stages · retention broadcast cache
     ctx.waitUntil(refreshBigin(env).then(() => refreshPdpInventories(env)).then(() => rebuildBot(env)).catch(() => {}));
   },
 };

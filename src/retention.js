@@ -126,6 +126,17 @@ export function parseBroadcastCsv(text) {
   return out;
 }
 
+// Compact form of parsed broadcasts for the KV cache (87k rows ≈ 4 MB instead of re-parsing the 10 MB export each request).
+// Row: [campaign idx, run, phone, flags, readAt, reason idx] · flags: 1 failed, 2 sent, 4 delivered, 8 read, 16 replied, 32 clicked.
+export function packBroadcasts(rows) {
+  const C = [], R = [''], ci = new Map(), ri = new Map([['', 0]]);
+  const idx = (m, a, v) => { if (!m.has(v)) { m.set(v, a.length); a.push(v); } return m.get(v); };
+  return { c: C, r: R, rows: rows.map((b) => [idx(ci, C, b.campaign), b.run || '', b.phone || '', (b.failed ? 1 : 0) | (b.sent ? 2 : 0) | (b.delivered ? 4 : 0) | (b.read ? 8 : 0) | (b.replied ? 16 : 0) | (b.clicked ? 32 : 0), b.readAt || '', idx(ri, R, b.reason || '')]) };
+}
+export function unpackBroadcasts(p) {
+  return (p?.rows || []).map(([c, run, phone, f, readAt, ri]) => ({ campaign: p.c[c], run: run || null, phone: phone || null, failed: !!(f & 1), sent: !!(f & 2), delivered: !!(f & 4), read: !!(f & 8), readAt: readAt || null, replied: !!(f & 16), clicked: !!(f & 32), reason: p.r[ri] || '' }));
+}
+
 // ---------- Engine ----------
 // broadcasts: [{campaign, run, phone, failed, delivered, read, replied, clicked}]
 // touches   : [{phone, d, src: 'walkin'|'pdp_call'|'pdp_text'|'meta'}]

@@ -1,7 +1,7 @@
 // Retail retention: 60-day window, store orders only, most recent touch wins, no PII. Synthetic records only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeRetention, parseBroadcastRows, parseBroadcastCsv, storeOrders, sampleInputs, failReason, stamp } from '../src/retention.js';
+import { computeRetention, parseBroadcastRows, parseBroadcastCsv, storeOrders, sampleInputs, failReason, stamp, packBroadcasts, unpackBroadcasts } from '../src/retention.js';
 import { parseCsv } from '../src/csv.js';
 
 const P = '9000000001', Q = '9000000002';
@@ -80,6 +80,12 @@ test('lean CSV reader gives the same rows as the full parser', () => {
   assert.equal(lean.length, 3, 'blank rows are skipped');
   assert.equal(lean[1].reason, 'Per-user messaging rate limit');
   assert.deepEqual(lean.map((x) => x.campaign), ['Retail_Retention_Ganpati', 'Retail_Retention_Ganpati_2', 'Retail_Retention_Ganpati_3']);
+});
+
+test('cached broadcast list unpacks to exactly the parsed rows', () => {
+  const rows = [b(), b({ phone: Q, delivered: false, read: false, failed: true, sent: false, reason: 'Invalid Recipient' }), b({ campaign: 'Oct', run: '2026-10-22', readAt: '2026-10-22 18:05', replied: true, clicked: true })]
+    .map((x) => ({ sent: !x.failed, reason: '', readAt: null, replied: false, clicked: false, ...x }));
+  assert.deepEqual(unpackBroadcasts(JSON.parse(JSON.stringify(packBroadcasts(rows)))), rows);
 });
 
 test('only Frido retail store orders count', () => {
