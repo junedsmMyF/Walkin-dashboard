@@ -9,11 +9,28 @@ const b = (o) => ({ campaign: 'Diwali', run: '2026-10-01', phone: P, failed: fal
 const o = (id, date, extra = {}) => ({ id, date, store: 'FRIDO_0002', phone: P, type: 'RETAIL', net: 1000, gross: 1200, lines: [{ p: 'Frido Dual Gel Pro Insoles', net: 1000, qty: 1 }], ...extra });
 const run = (broadcasts, orders, touches = []) => computeRetention({ broadcasts, orders, touches, cutoff: '2026-12-31' });
 
-test('window is run date to day 60, inclusive', () => {
-  const m = run([b()], [o('A', '2026-09-30'), o('B', '2026-10-01'), o('C', '2026-11-30'), o('D', '2026-12-01')]);
+test('window is the day after the send to day 60; send-day orders never count', () => {
+  const m = run([b()], [o('A', '2026-09-30'), o('S', '2026-10-01'), o('B', '2026-10-02'), o('C', '2026-11-30'), o('D', '2026-12-01')]);
   assert.deepEqual(m.credited.map((x) => x.o), ['B', 'C']);
-  assert.deepEqual(m.credited.map((x) => x.lag), [0, 60]);
+  assert.deepEqual(m.credited.map((x) => x.lag), [1, 60]);
   assert.equal(m.credited[0].first, 1); assert.equal(m.credited[1].first, 0);
+  assert.equal(m.quality.sameDay, 1, 'the send-day order is counted as left out');
+  // a send-day order does not move to that day's broadcast; it stays with an earlier one read before
+  const m2 = run([b({ campaign: 'Ganpati', run: '2026-09-16' }), b({ campaign: 'Oct', run: '2026-10-22' })], [o('X', '2026-10-22')]);
+  assert.equal(m2.campaigns[m2.credited[0].c].name, 'Ganpati');
+});
+
+test('return slips are not orders; bulk orders are flagged and kept', () => {
+  const rows = [
+    { 'POS Order ID': 'R1', 'Store ID': 'FRIDO_0002', 'POS Created At': '05/10/2026 12:00', 'Customer Phone': P, 'Ret/Exc': 'RETURNED', __gross: -1200, __net: -1200, Quantity: '-1', 'Product Name': 'Frido Dual Gel Pro Insoles' },
+    { 'POS Order ID': 'K1', 'Store ID': 'FRIDO_0002', 'POS Created At': '06/10/2026 12:00', 'Customer Phone': P, __gross: 70000, __net: 64000, Quantity: '2', 'Product Name': 'Frido Ergoluxe Electric Standing Desk' },
+    { 'POS Order ID': 'K2', 'Store ID': 'FRIDO_0002', 'POS Created At': '07/10/2026 12:00', 'Customer Phone': P, __gross: 3000, __net: 2500, Quantity: '5', 'Product Name': 'Frido Travel Neck Pillow' },
+    { 'POS Order ID': 'K3', 'Store ID': 'FRIDO_0002', 'POS Created At': '08/10/2026 12:00', 'Customer Phone': P, __gross: 1200, __net: 1000, Quantity: '1', 'Product Name': 'Frido Dual Gel Pro Insoles' },
+  ];
+  const os = storeOrders(rows); assert.equal(os.find((x) => x.id === 'R1').slip, true);
+  const m = run([b()], os);
+  assert.deepEqual(m.credited.map((x) => [x.o, x.bulk]), [['K1', 1], ['K2', 1], ['K3', 0]]);
+  assert.equal(m.quality.returnSlips, 1);
 });
 
 test('only delivered and read leads get orders', () => {

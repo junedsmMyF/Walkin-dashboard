@@ -2582,7 +2582,7 @@ const RET = (() => {
     'Total messages': ['Every message in the broadcast.', 'LimeChat broadcast export'],
     'Delivered': ['Delivered on WhatsApp.', 'LimeChat broadcast export'],
     'Read': ['Read Status = Read. Only read leads get orders.', 'LimeChat broadcast export'],
-    'Orders': ['Store orders from read leads, day 0–60.', 'DevX × broadcast, phone match'],
+    'Orders': ['Store orders from read leads, day 1–60 after the send.', 'DevX × broadcast, phone match'],
     'Revenue': ['Credited orders, gross − discount.', 'DevX (BigQuery)'],
     'Units': ['Units on credited orders.', 'DevX (BigQuery)'],
     'AOV': ['Revenue ÷ orders.', 'DevX (BigQuery)'],
@@ -2643,7 +2643,7 @@ const RET = (() => {
 
   /* ---------- shared pieces ---------- */
   const spendOf = (a) => a.del * RDATA.costPerDelivered;
-  const BUCKETS = [['Day 0', 0, 0], ['1–3', 1, 3], ['4–7', 4, 7], ['8–14', 8, 14], ['15–30', 15, 30], ['31–60', 31, 60]];
+  const BUCKETS = [['Day 1', 1, 1], ['2–3', 2, 3], ['4–7', 4, 7], ['8–14', 8, 14], ['15–30', 15, 30], ['31–60', 31, 60]];
   function lagCard(O){
     const F1 = O.filter((x) => x.first); const n = F1.length; let cum = 0;
     const v = BUCKETS.map(([l, lo, hi]) => { const k = F1.filter((x) => x.lag >= lo && x.lag <= hi).length; cum += k; return { l, k, cum }; }); const mx = Math.max(1, ...v.map((x) => x.k));
@@ -2699,6 +2699,7 @@ const RET = (() => {
   function pOverview(r){
     const c = ctx(r), a = c.a, sp = spendOf(a);
     const pr = prevOf(r); const b = pr ? ctx(pr).a : null; const spB = b ? spendOf(b) : null;
+    const bulk = c.O.filter((x) => x.bulk), bulkN = bulk.length, bulkNet = bulk.reduce((t, x) => t + x.net, 0);
     const dl = (cur, prev, o) => wdelta(cur, prev, { short: true, ...o });
     const D = { n: dl(a.n, b?.n), del: dl(a.del, b?.del), read: dl(a.read, b?.read), orders: dl(a.orders, b?.orders), net: dl(a.net, b?.net), conv: dl(pctv(a.orders, a.del), b ? pctv(b.orders, b.del) : null, { pts: true }), sp: dl(sp, spB), roas: dl(sp ? a.net / sp : null, spB ? b.net / spB : null) };
     const kp = kpis([
@@ -2709,7 +2710,7 @@ const RET = (() => {
       { l: 'Revenue', v: inr(a.net), d: D.net.d, tone: D.net.tone, s: `AOV ${a.orders ? inr(a.net / a.orders) : '—'} · UPT ${a.orders ? (a.qty / a.orders).toFixed(1) : '—'}`, b: smp() },
       { l: 'Conversion rate', v: pct(a.orders, a.del), d: D.conv.d, tone: D.conv.tone, s: 'Orders ÷ delivered', b: smp() },
       { l: 'Spend', v: inr(sp), d: D.sp.d, tone: 'flat', s: `₹${RDATA.costPerDelivered} × delivered`, b: smp() },
-      { l: 'ROAS', v: roas(a), d: D.roas.d, tone: D.roas.tone, s: 'Revenue ÷ spend', b: smp() },
+      { l: 'ROAS', v: roas(a), d: D.roas.d, tone: D.roas.tone, s: bulkN ? `${(sp ? (a.net - bulkNet) / sp : 0).toFixed(1)}× without ${bulkN} bulk order${bulkN === 1 ? '' : 's'}` : 'Revenue ÷ spend', b: smp() },
     ]);
     const data = campaignRows(r);
     const cols = [['Day 7', 'd7'], ['Day 14', 'd14'], ['Day 30', 'd30'], ['Day 60', 'd60']];
@@ -2772,7 +2773,9 @@ const RET = (() => {
     const byT = {}; OD.forEach((x) => { const t = TYPE[x.t] ? x.t : 'RETAIL'; const v = byT[t] || (byT[t] = { n: 0, net: 0 }); v.n++; v.net += x.net; });
     const bt = Object.entries(byT).sort((x, y) => y[1].net - x[1].net); const mxT = Math.max(1, ...bt.map((x) => x[1].net));
     const typeCard = card('Store bill vs online punch-in', 'How the order was billed', bt.length ? `<div class="wl-rank" style="grid-template-columns:minmax(130px,190px) minmax(0,1fr) 80px 50px">` + bt.map(([t, v]) => `<div><span class="wl-sn">${TYPE[t]}</span><span class="wl-sm">${nf(v.n)} orders · AOV ${inr(v.net / v.n)}</span></div><div class="wl-track"><div class="wl-fill" style="width:${100 * v.net / mxT}%;background:${t === 'ONLINE' ? C.rust : C.teal}"></div></div><span style="text-align:right;font-size:13px;font-weight:600">${inr(v.net)}</span><span style="text-align:right;font-size:12px;color:#5B6068">${pct(v.net, k.net, 0)}</span>`).join('') + `</div>` : '<p class="sub" style="margin-top:14px">No credited orders in this order-date range.</p>', smp());
-    return obar + kpi + daily + `<div class="wl-g2">${catCard}${prodCard}</div><div class="wl-g2">${storeCard}${typeCard}</div>`;
+    const BK = OD.filter((x) => x.bulk).sort((x, y) => y.net - x.net); const bkNet = BK.reduce((t, x) => t + x.net, 0);
+    const bulkCard = card('Bulk orders', `₹50,000 or more, or 5+ units of one product · kept in every total · ${nf(BK.length)} order${BK.length === 1 ? '' : 's'} = ${pct(bkNet, k.net, 0)} of revenue`, BK.length ? `<div class="wl-tw"><table><thead><tr><th>Order date</th><th>Broadcast</th><th>Store</th><th>Type</th><th class="r">Units</th><th class="r">Revenue</th><th class="r">Share</th></tr></thead><tbody>${BK.map((x) => `<tr><td>${dpShort(x.d)}</td><td class="b">${esc(RDATA.campaigns[x.c]?.name || '—')}</td><td>${esc(store(x.s).name)}</td><td>${x.t === 'ONLINE' ? 'Online punch-in' : 'Store bill'}</td><td class="r">${nf(x.qty)}</td><td class="r b">${inr(x.net)}</td><td class="r">${pct(x.net, k.net, 0)}</td></tr>`).join('')}</tbody></table></div><p class="wl-note" style="margin-top:10px">Revenue without bulk orders: ${inr(k.net - bkNet)}.</p>` : '<p class="sub" style="margin-top:14px">No bulk orders in this view.</p>', smp());
+    return obar + kpi + daily + `<div class="wl-g2">${catCard}${prodCard}</div><div class="wl-g2">${storeCard}${typeCard}</div>` + bulkCard;
   }
   function pDefs(){
     const box = (t, s, cl = '') => `<div class="fbox ${cl}"><b>${t}</b><span>${s}</span></div>`;
@@ -2782,7 +2785,7 @@ const RET = (() => {
       <div class="flow-row"><span class="flow-tag">1 · Offer</span>${box('Exclusive offer', 'e.g. Diwali offer', 'lead')}${ar}${box('Creatives', 'Retention team sends them', 'lead')}</div>
       <div class="flow-row"><span class="flow-tag">2 · LimeChat</span>${box('Campaign flow', 'Built on LimeChat')}${ar}${box('Broadcast', 'All existing retail customers · run date per customer')}</div>
       <div class="flow-row"><span class="flow-tag">3 · Reach</span>${box('Sent', 'Unique phone per campaign')}${ar}${box('Delivered', 'On WhatsApp')}${ar}${box('Read', 'Read Status = Read', 'gap')}${or}${box('Failed', 'WhatsApp error reason', 'leak')}</div>
-      <div class="flow-row"><span class="flow-tag">4 · Order</span>${box('DevX order', 'Read lead only · same phone · Frido store')}${ar}${box(`Day 0 – ${W}`, 'On/after this customer’s run date', 'gap')}${ar}${box('Retention revenue', 'Credited to the broadcast', 'rev')}${or}${box('Outside window', 'Before the run or after day ' + W, 'leak')}</div>
+      <div class="flow-row"><span class="flow-tag">4 · Order</span>${box('DevX order', 'Read lead only · same phone · Frido store')}${ar}${box(`Day 1 – ${W}`, 'From the day after this customer’s send · send-day orders never count', 'gap')}${ar}${box('Retention revenue', 'Credited to the broadcast', 'rev')}${or}${box('Outside window', 'Before the run or after day ' + W, 'leak')}</div>
     </div>`);
     const D = [
       ['Total · sent · delivered · failed · read', 'Message Status (Sent / Delivered / Failed) and Read Status from the LimeChat export', 'Sent = total − failed. One broadcast per send date; names in BROADCAST_NAMES.'],
@@ -2790,7 +2793,7 @@ const RET = (() => {
       ['Spend · ROAS', `Spend = ₹${RDATA ? RDATA.costPerDelivered : 0.85} × delivered · ROAS = revenue ÷ spend`, 'Conversion = orders ÷ delivered · AOV = revenue ÷ orders · UPT = units ÷ orders.'],
       ['Unique recipient', 'Unique phones per campaign in the LimeChat broadcast', 'A resend to the same phone is a duplicate; it only upgrades delivered / read / replied.'],
       ['Run date', 'The date this customer was sent this campaign', 'Campaigns sent in waves have one run date per wave.'],
-      ['Credited order', `DevX order at a Frido retail store, same phone, on/after the run date and within ${W} days`, 'Any order type billed at a store (ONLINE punch-ins too). Website orders with no store and the test store do not count. Cancelled and refunded orders are kept.'],
+      ['Credited order', `DevX order at a Frido retail store, same phone, from the day after the send and within ${W} days`, 'Any order type billed at a store (ONLINE punch-ins too). Send-day orders never count (the export has no send time). A return slip (every line returned) is not an order. Orders of ₹50,000+ or 5+ units of one product are flagged as bulk and kept in totals. Website orders with no store and the test store do not count.'],
       ['Buyers', 'Customers with a credited order', 'A buyer counts once per campaign; later orders add revenue.'],
       ['Retention revenue', 'Total Revenue (gross − discount) of credited orders', 'Same revenue rule as every Retail Revenue dashboard.'],
     ];

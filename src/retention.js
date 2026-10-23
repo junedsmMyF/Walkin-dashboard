@@ -12,7 +12,10 @@
 //                 and only if it was read BEFORE the order (Read At ≤ order time, Saiyed 22 Oct). If the export has no
 //                 Read At column, read status alone is used and the dashboard says so (readTimes = false).
 //   Spend       = ₹0.85 × delivered messages. ROAS = revenue ÷ spend. Conversion = orders ÷ delivered.
-//   Window      = order on/after the customer's run date and within 60 days of it (day 0 … day 60).
+//   Window      = order from the day AFTER the customer's run date, within 60 days of it (day 1 … day 60) — send-day
+//                 orders never count (Saiyed, 23 Oct: the export has no send time, so a send-day order may predate the message).
+//   Return slip = an order whose lines are all returns (Ret/Exc RETURNED or total qty ≤ 0) is not an order (not counted).
+//   Bulk order  = ≥ ₹50,000 or ≥ 5 units of one product: kept in totals, flagged (bulk: 1) so ROAS can be read without them.
 //   Orders      = billed at a Frido retail store (store master id; test store excluded), any order type incl. ONLINE punch-ins.
 //   Credit      = most recent touch before the order wins: retention broadcast, walk-in lead, PDP lead or Meta lead.
 //                 Two campaigns in window → the later run date wins. Same-day tie with a lead → the lead wins (customer reached out).
@@ -24,6 +27,8 @@ import { categoryOf } from './categories.js';
 import { salesDate, biginDate, daysBetween, phone10, addDays } from './dates.js';
 
 export const WINDOW_DAYS = 60;
+export const BULK_ORDER_VALUE = 50000; // ₹ — bulk/corporate order flag
+export const BULK_UNITS = 5;          // units of one product in one order
 export const COST_PER_DELIVERED = 0.85; // ₹ per delivered WhatsApp message
 // The LimeChat export has no broadcast name: one broadcast per send date. Names for the known runs (add new ones here).
 export const BROADCAST_NAMES = { '2026-09-16': 'Retail_Retention_Ganpati', '2026-09-18': 'Retail_Retention_Ganpati_2', '2026-09-26': 'Retail_Retention_Ganpati_3' };
@@ -49,11 +54,15 @@ export function storeOrders(salesRows) {
     const date = salesDate(r['POS Created At']) || salesDate(r['Shopify Created At']); if (!date) continue;
     const id = r['POS Order ID'] || r['Shopify Order ID']; if (!id) continue;
     let o = orders.get(id);
-    if (!o) { o = { id, date, ts: stamp(r['POS Created At']) || stamp(r['Shopify Created At']) || date, store, phone: phone10(r['Customer Phone']), type: (r['Order Type'] || '').toUpperCase() || 'RETAIL', net: 0, gross: 0, lines: [] }; orders.set(id, o); }
+    const ret = String(r['Ret/Exc'] || '').trim().toUpperCase() === 'RETURNED';
+    if (!o) { o = { id, date, ts: stamp(r['POS Created At']) || stamp(r['Shopify Created At']) || date, store, phone: phone10(r['Customer Phone']), type: (r['Order Type'] || '').toUpperCase() || 'RETAIL', net: 0, gross: 0, lines: [], retLines: 0 }; orders.set(id, o); }
+    if (ret) o.retLines++;
     const g = r.__gross != null ? num(r.__gross) : num(r['Amount Paid']);
     const n = r.__net != null ? num(r.__net) : g - num(r['Return Amount']);
     o.gross += g; o.net += n; o.lines.push({ p: String(r['Product Name'] || '(no product name)').trim(), net: n, gross: g, qty: num(r['Quantity']) || 1 });
   }
+  // return slip: every line is a return, or the units net to zero or less — not an order
+  for (const o of orders.values()) o.slip = o.retLines === o.lines.length || o.lines.reduce((t, l) => t + l.qty, 0) <= 0;
   return [...orders.values()];
 }
 
@@ -121,7 +130,7 @@ export function parseBroadcastCsv(text) {
 // broadcasts: [{campaign, run, phone, failed, delivered, read, replied, clicked}]
 // touches   : [{phone, d, src: 'walkin'|'pdp_call'|'pdp_text'|'meta'}]
 export function computeRetention({ broadcasts = [], orders = [], touches = [], cutoff, windowDays = WINDOW_DAYS }) {
-  const quality = { noPhone: 0, badPhone: 0, noRunDate: 0, duplicates: 0, futureRun: 0, readNoTime: 0 };
+  const quality = { noPhone: 0, badPhone: 0, noRunDate: 0, duplicates: 0, futureRun: 0, readNoTime: 0, returnSlips: 0, sameDay: 0 };
   const readTimes = broadcasts.some((b) => b.readAt); // export carries Read At → enforce read before order
   // Recipients: first row per (campaign, phone); a later row upgrades the delivery flags (resends).
   const rec = new Map();
@@ -165,13 +174,17 @@ export function computeRetention({ broadcasts = [], orders = [], touches = [], c
   for (const [p, rs] of recByPhone) {
     for (const o of byPhone.get(p) || []) {
       if (o.date > cutoff) continue;
-      const inWin = rs.filter((r) => r.delivered && r.read && o.date >= r.run && daysBetween(r.run, o.date) <= windowDays); // read leads only
+      const inWin = rs.filter((r) => r.delivered && r.read && o.date > r.run && daysBetween(r.run, o.date) <= windowDays); // read leads only · from the day after the send
+      if (o.slip) { if (inWin.length) quality.returnSlips++; continue; } // return slip inside a campaign window: not an order
+      if (!inWin.length && rs.some((r) => r.delivered && r.read && o.date === r.run)) quality.sameDay++;
       const live = readTimes ? inWin.filter((r) => r.readAt && readBefore(r.readAt, o.ts || o.date)) : inWin; // …read before the order
       if (!live.length) { if (inWin.length) { const r0 = inWin.reduce((a, b) => (b.run > a.run ? b : a)); late.push({ o: o.id, d: o.date, run: r0.run, c: cid.get(r0.campaign), s: o.store, net: Math.round(o.net), gross: Math.round(o.gross), noTime: r0.readAt ? 0 : 1 }); } continue; }
       const camp = live.reduce((a, b) => (b.run > a.run ? b : a));
       const rival = (touchBy.get(p) || []).filter((t) => (t.src === 'walkin' ? t.d < o.date : t.d <= o.date)).reduce((a, b) => (!a || b.d > a.d ? b : a), null);
       const row = { o: o.id, d: o.date, run: camp.run, c: cid.get(camp.campaign), s: o.store, hs: homeOf(p, camp.run) || '', t: o.type, net: Math.round(o.net), gross: Math.round(o.gross), lag: daysBetween(camp.run, o.date), rep: camp.replied ? 1 : 0, qty: o.lines.reduce((t, l) => t + l.qty, 0) };
       if (rival && rival.d >= camp.run) { lostTo.push({ ...row, to: rival.src, td: rival.d }); continue; }
+      const perProduct = {}; for (const l of o.lines) perProduct[l.p] = (perProduct[l.p] || 0) + l.qty;
+      row.bulk = o.net >= BULK_ORDER_VALUE || Object.values(perProduct).some((q) => q >= BULK_UNITS) ? 1 : 0;
       row.first = buyer.has(camp.campaign + '|' + p) ? 0 : 1; buyer.add(camp.campaign + '|' + p);
       row.prior = rival ? rival.src : ''; // customer also had an older lead (credit stays with retention)
       credited.push(row);
@@ -199,7 +212,7 @@ export function computeRetention({ broadcasts = [], orders = [], touches = [], c
     campaigns: campList.map((c, i) => ({ i, name: c.name, first: c.first, last: c.last, waves: [...c.waves.entries()].sort().map(([d, n]) => ({ d, n })), closes: addDays(c.last, windowDays), open: addDays(c.last, windowDays) > cutoff ? 1 : 0 })),
     recipients: [...agg.values()], credited, lostTo, late, readTimes, lines, pnames: pNames, stores,
     quality: { ...quality, recipients: recipients.length, rows: broadcasts.length },
-    rules: { eligible: readTimes ? 'Delivered and read before the order' : 'Delivered and read (no read time in export)', spend: `₹${COST_PER_DELIVERED} × delivered`, window: `Order on/after run date, within ${windowDays} days`, orders: 'Billed at a Frido retail store, same phone', credit: 'Most recent touch wins (broadcast, walk-in, PDP, Meta)', revenue: 'Total Revenue = gross − discount' },
+    rules: { eligible: readTimes ? 'Delivered and read before the order' : 'Delivered and read (no read time in export)', spend: `₹${COST_PER_DELIVERED} × delivered`, window: `Order from the day after the send, within ${windowDays} days`, bulk: `Flagged: ≥ ₹${BULK_ORDER_VALUE} or ≥ ${BULK_UNITS} units of one product`, orders: 'Billed at a Frido retail store, same phone', credit: 'Most recent touch wins (broadcast, walk-in, PDP, Meta)', revenue: 'Total Revenue = gross − discount' },
   };
 }
 
