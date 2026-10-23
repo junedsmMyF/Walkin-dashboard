@@ -201,7 +201,7 @@ async function pdpMetrics(env, ctx) {
   const cutoff = addDays(istDate(), -1);
   const idx = await env.DASH_KV.get('sales:index', 'json');
   const pinv = await pdpInventories(env);
-  const ver = ['pdp5', pinv.meta?.refreshedAt || 'none', Math.floor(Date.now() / 900e3), idx?.uploadedAt || 'none', meta.refreshedAt || 'none', cutoff].join('|');
+  const ver = ['pdp5', pinv.meta?.changedAt || pinv.meta?.refreshedAt || 'none', Math.floor(Date.now() / 900e3), idx?.uploadedAt || 'none', meta.refreshedAt || 'none', cutoff].join('|');
   const cached = await env.DASH_KV.get('pdp:cache', 'json');
   if (cached && cached.k === ver && Date.now() - cached.at < 15 * 60e3) return json(cached.body, 200, { 'cache-control': 'private, max-age=60', 'x-pdp-cache': 'hit' });
   const [callbacks, walkin] = await Promise.all([biginCallbacks(env), biginLeads(env)]);
@@ -692,7 +692,8 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    if (event.cron === '10 * * * *') { ctx.waitUntil(refreshPdpInventories(env).catch(() => {}).then(() => (env.RETENTION_CSV_URL ? retentionBroadcasts(env, true) : null)).catch(() => {})); return; } // hourly: PDP Inventories stages · retention broadcast cache
+    if (event.cron === '*/15 * * * *') { ctx.waitUntil(refreshPdpInventories(env).catch(() => {})); return; } // every 15 min: PDP Inventories stages (TATs to +-15 min)
+    if (event.cron === '10 * * * *') { ctx.waitUntil((env.RETENTION_CSV_URL ? retentionBroadcasts(env, true) : Promise.resolve()).catch(() => {})); return; } // hourly: retention broadcast cache
     ctx.waitUntil(refreshBigin(env).then(() => refreshPdpInventories(env)).then(() => rebuildBot(env)).catch(() => {}));
   },
 };

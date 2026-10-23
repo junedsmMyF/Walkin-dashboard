@@ -236,15 +236,22 @@ export async function refreshPdpInventories(env) {
     }));
     const otherPipelines = rows.length - recs.length;
     const hist = (await env.DASH_KV.get(KV_PDPHIST, 'json')) || {};
+    let histChanged = false;
     for (const x of recs) {
       const h = hist[x.i];
-      if (!h) hist[x.i] = /^new enquiry$/i.test(x.st) ? [[x.st, x.ct]] : [['New Enquiry', x.ct], [x.st, x.mt || now, 'approx']]; // moved before the first read
-      else if (h[h.length - 1][0] !== x.st) h.push([x.st, x.mt && x.mt > h[h.length - 1][1] ? x.mt : now]);
+      if (!h) { hist[x.i] = /^new enquiry$/i.test(x.st) ? [[x.st, x.ct]] : [['New Enquiry', x.ct], [x.st, x.mt || now, 'approx']]; histChanged = true; } // moved before the first read
+      else if (h[h.length - 1][0] !== x.st) { h.push([x.st, x.mt && x.mt > h[h.length - 1][1] ? x.mt : now]); histChanged = true; }
     }
-    await env.DASH_KV.put(KV_PDPINV, JSON.stringify(recs));
-    await env.DASH_KV.put(KV_PDPHIST, JSON.stringify(hist));
-    await env.DASH_KV.put(KV_PDPMETA, JSON.stringify({ status: 'ok', refreshedAt: now, count: recs.length, otherPipelines, fieldSet }));
-    return { ok: true, count: recs.length, fieldSet };
+    // Read every 15 min (stage times to +-15 min). Write only what changed so KV stays inside the free daily write limit.
+    const body = JSON.stringify(recs);
+    const changed = body !== (await env.DASH_KV.get(KV_PDPINV));
+    const prev = (await env.DASH_KV.get(KV_PDPMETA, 'json')) || {};
+    if (changed) await env.DASH_KV.put(KV_PDPINV, body);
+    if (histChanged) await env.DASH_KV.put(KV_PDPHIST, JSON.stringify(hist));
+    const changedAt = changed || histChanged || !prev.changedAt ? now : prev.changedAt;
+    if (changed || histChanged || prev.status !== 'ok' || !prev.refreshedAt || Date.parse(now) - Date.parse(prev.refreshedAt) >= 55 * 60e3)
+      await env.DASH_KV.put(KV_PDPMETA, JSON.stringify({ status: 'ok', refreshedAt: now, changedAt, count: recs.length, otherPipelines, fieldSet }));
+    return { ok: true, count: recs.length, fieldSet, changed: changed || histChanged };
   } catch (e) {
     const prev = (await env.DASH_KV.get(KV_PDPMETA, 'json')) || {};
     await env.DASH_KV.put(KV_PDPMETA, JSON.stringify({ ...prev, status: 'error', error: String(e.message || e), failedAt: now }));
