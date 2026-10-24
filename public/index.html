@@ -1454,7 +1454,7 @@ function wDefs(){
    Call route = Bigin "Callback Requests" (real) × BigQuery sales (real).
    Text route (LimeChat) and the PDP layer (views, CTA clicks) are SAMPLE until their exports are connected. */
 const PTABS = [
-  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
+  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'routing', name: 'Store routing' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
   { id: 'product', name: 'Product & category' }, { id: 'loss', name: 'Loss analysis' },
   { id: 'quality', name: 'Data quality' }, { id: 'definitions', name: 'Definitions' },
 ];
@@ -1616,7 +1616,7 @@ function pFilters(tab){
     <div class="wl-fl">DATE RANGE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
     ${sf.city}${sf.store}${sf.rest}
     <span class="wl-note" style="align-self:center">${r ? `${dpShort(r[0])} → ${dpShort(r[1])}` : 'No PDP data in this range'}${full[0] < PDATA.startDate ? ` · call leads start ${dpShort(PDATA.startDate)}` : ''}</span>
-  </div>${r ? (['overview', 'pipeline', 'tat'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
+  </div>${r ? (['overview', 'pipeline', 'tat', 'routing'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
 }
 // CTA toggle: one pill per entry point with leads in range (lead counts ignore the toggle itself)
 function ctaBar(r){
@@ -1860,6 +1860,79 @@ function pTat(r){
   return sla + `<div class="wl-g2">${dist}${byHour}</div>` + agents +
     `<p class="wl-note">WhatsApp leads from Bigin PDP Inventories created in the selected range. Call Store leads are read once a day, so their turnaround cannot be timed yet.</p>`;
 }
+/* ---- Store routing (SOP 02 · Whimsical: qualified → DSR group → routing sheet → store visit): visits, outcomes by store and agent, sheet hygiene ---- */
+const RTFLAG = { test_row: ['Test row ("test" name or tester\'s phone)', 'Use a separate test sheet'], repeat_phone: ['Same phone on several rows', 'Update the existing row'], invalid_phone: ['Invalid phone', 'Validate 10-digit mobile'],
+  duplicate_lead_id: ['Duplicate Lead ID', 'Lead ID must be unique'], store_unmapped: ['Store label not recognised', 'Use the store master list'], no_visit_date: ['No expected visit date', 'Make the date mandatory'],
+  visit_before_routing: ['Visit date before routing date', 'Date picker from today'], no_visit_time: ['No visit time slot', 'Make the slot mandatory'], visit_time_unreadable: ['Visit time not a slot ("6pm-8pm")', 'Fixed slot dropdown'],
+  category_prefix: ['Category has "NM - " prefix', 'One category list; standardised here'], no_product: ['No product', 'Make product mandatory'] };
+function pRouting(r){
+  if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
+  const cut = PDATA.cutoff;
+  const sid = (x) => x.rs || x.s;
+  const R = lRows(r).filter((x) => x.rt); const ST = R.filter((x) => !x.rv), VR = R.filter((x) => x.rv);
+  const has = (x, k) => x.o.some((o) => o.r === k);
+  const out = (xs) => { const due = xs.filter((x) => x.vd && x.vd <= cut); const so = xs.flatMap((x) => x.o.filter((o) => o.r === 'store'));
+    return { n: xs.length, due: due.length, ahead: xs.length - due.length, buy: xs.filter((x) => has(x, 'store')).length, other: due.filter((x) => x.o.length && !has(x, 'store')).length,
+      none: due.filter((x) => !x.o.length).length, net: so.reduce((u, o) => u + o.net, 0), so }; };
+  const A = out(ST);
+  const atStore = ST.reduce((u, x) => u + x.o.filter((o) => o.r === 'store' && o.s === x.rs).length, 0);
+  const kp = pkpis([
+    { l: 'Store visits scheduled', v: nf(A.n), s: `${nf(VR.length)} more routed for a video call`, b: 'v' },
+    { l: 'Visit date reached', v: nf(A.due), s: `${nf(A.ahead)} still ahead`, b: 'v' },
+    { l: 'Store visit conversion', v: nf(A.buy), s: `${pct(A.buy, A.due, 0)} of visits due · ${inr(A.net)}`, b: 'v' },
+    { l: 'No order yet', v: nf(A.none), tone: A.none ? 'bad' : '', s: `visit date passed · ${nf(A.other)} bought another day`, b: 'v' },
+    { l: 'Billed at routed store', v: pct(atStore, A.so.length, 0), s: `${nf(atStore)} of ${nf(A.so.length)} visit-day orders`, b: 'v' },
+  ]);
+
+  // outcome bar of visits due
+  const seg = [[A.buy, C.teal, 'Bought on visit date'], [A.other, C.tealMid, 'Bought on another day'], [A.none, C.rust, 'No order yet'], [A.ahead, C.track, 'Visit date ahead']];
+  const flow = pcard('What happened to scheduled visits', 'Leads routed to a store (not video) · store visit conversion = DevX order on the expected visit date',
+    `<div class="wl-tree" style="flex-wrap:wrap">${lNode('Qualified & routed', nf(R.length), 'Lead routing sheet · DSR group')}${lArrow}${lNode('Store visit', nf(A.n), `${nf(VR.length)} video call instead`)}${lArrow}${lNode('Store acknowledged', '—', VB.n, 'await')}${lArrow}${lNode('Visit date reached', nf(A.due), `${nf(A.ahead)} still ahead`)}${lArrow}${lNode('Bought on visit date', nf(A.buy), inr(A.net), 'win')}</div>
+    <div class="wl-track" style="height:14px;margin-top:18px;display:flex">${seg.map(([v, col]) => (v ? `<div class="wl-fill" style="height:14px;width:${(v / Math.max(1, A.n) * 100).toFixed(1)}%;background:${col};border-radius:0"></div>` : '')).join('')}</div>
+    <div class="wl-legend">${seg.map(([v, col, l]) => `<span><i class="wl-sw" style="background:${col}"></i>${l} ${nf(v)}</span>`).join('')}</div>`, 'v');
+
+  // by store, grouped by city (click a city)
+  const byS = {}; ST.forEach((x) => { (byS[sid(x)] = byS[sid(x)] || []).push(x); });
+  const srow = Object.entries(byS).filter(([s]) => s !== 'UNMAPPED').map(([s, xs]) => ({ s, o: out(xs), at: xs.reduce((u, x) => u + x.o.filter((o) => o.r === 'store' && o.s === x.rs).length, 0) }));
+  const cityOf = (s) => pStore(s).city;
+  const sum = (xs) => xs.reduce((u, y) => { for (const k of ['n', 'due', 'buy', 'other', 'none', 'net']) u.o[k] += y.o[k]; u.o.so += y.o.so.length; u.at += y.at; return u; }, { o: { n: 0, due: 0, buy: 0, other: 0, none: 0, net: 0, so: 0 }, at: 0 });
+  const cities = [...new Set(srow.map((x) => cityOf(x.s)))].map((c) => { const xs = srow.filter((x) => cityOf(x.s) === c).sort((a, b) => b.o.n - a.o.n); return { c, xs, t: sum(xs) }; }).sort((a, b) => b.t.o.n - a.t.o.n);
+  const cell = ({ o, at }) => { const so = typeof o.so === 'number' ? o.so : o.so.length; return `<td>${nf(o.n)}</td><td>${nf(o.due)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.due, 0)}</td><td>${nf(o.other)}</td><td class="${o.none ? 'bad' : ''}">${nf(o.none)}</td><td class="b">${inr(o.net)}</td><td>${so ? pct(at, so, 0) : '—'}</td>`; };
+  const unm = (byS.UNMAPPED || []).length;
+  const stores = pcard('By store', 'Routed store from the sheet · click a city to see its stores · conversion = of visits due',
+    srow.length ? wtable(['Store', 'Scheduled', 'Visit date reached', 'Bought on visit date', 'Conversion', 'Bought another day', 'No order yet', 'Revenue', 'Billed at this store'],
+      cities.flatMap(({ c, xs, t }) => { const open = !!F.cx[c]; return [`<tr class="je-grp cx-row" data-cx="${esc(c)}" tabindex="0" role="button" aria-expanded="${open}"><td class="b"><span class="cx-chev">${open ? '▾' : '▸'}</span> ${esc(c)} <span class="k-s">${nf(xs.length)} ${xs.length === 1 ? 'store' : 'stores'}</span></td>${cell(t)}</tr>`, ...(open ? xs.map((x) => `<tr class="je-sub"><td>${esc(pStore(x.s).name)}</td>${cell(x)}</tr>`) : [])]; }))
+      + (unm ? `<p class="wl-note" style="margin-top:8px">${nf(unm)} routed with a store label not in the store master — in the totals above, not in this table.</p>` : '') : '<p class="sub" style="margin-top:14px">No store visits scheduled in this range.</p>', 'v');
+
+  // visit planning, from the routing sheet rows (routing date in range)
+  const RS = (PDATA.routing ? PDATA.routing.routes : []).filter((x) => inPR(x.d, r) && pStoreOk(x.s) && (F.cta === 'all' || x.en === F.cta));
+  const U = RS.filter((x) => !x.test && !x.dup);
+  const LB = [['Same day', 0, 0], ['Next day', 1, 1], ['2–3 days', 2, 3], ['4–7 days', 4, 7], ['> 7 days', 8, 1e9]];
+  const lead = U.map((x) => (x.vd ? dDiff(x.d, x.vd) : null));
+  const lc = LB.map(([, a, b]) => lead.filter((v) => v != null && v >= a && v <= b).length);
+  const SL = [['Before 12 pm', 0, 12], ['12–4 pm', 12, 16], ['4–7 pm', 16, 19], ['After 7 pm', 19, 25]];
+  const sc = SL.map(([, a, b]) => U.filter((x) => x.vh != null && x.vh >= a && x.vh < b).length);
+  const noSlot = U.filter((x) => x.vh == null).length, noDate = lead.filter((v) => v == null).length, past = lead.filter((v) => v != null && v < 0).length;
+  const bars = (labels, vals, extra) => { const mx = Math.max(1, ...vals); return `<div style="display:flex;align-items:flex-end;gap:10px;height:150px;margin-top:16px">${vals.map((n) => `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;align-items:center;gap:4px"><span class="k-s">${nf(n)}</span><div style="width:100%;height:${(n / mx * 85).toFixed(1)}%;background:${C.teal};border-radius:3px 3px 0 0"></div></div>`).join('')}</div>
+    <div style="display:flex;gap:10px;margin-top:6px">${labels.map((l) => `<span class="k-s" style="flex:1;text-align:center">${l}</span>`).join('')}</div>${extra ? `<p class="wl-note" style="margin-top:8px">${extra}</p>` : ''}`; };
+  const plan = `<div class="wl-g2">${pcard('Routing → expected visit', `${nf(U.length)} routed leads · median ${((m) => (m == null ? '—' : `${m} day${m === 1 ? '' : 's'}`))(median(lead.filter((v) => v != null && v >= 0)))}`, bars(LB.map((x) => x[0]), lc, [noDate && `${nf(noDate)} with no visit date`, past && `${nf(past)} with the visit date before routing`].filter(Boolean).join(' · ')), 'v')}
+    ${pcard('Visit time slot', 'Expected visit time from the sheet', bars(SL.map((x) => x[0]), sc, noSlot ? `${nf(noSlot)} with no readable slot` : ''), 'v')}</div>`;
+
+  // by agent (lead owner)
+  const byA = {}; ST.forEach((x) => { (byA[x.ag || '(no owner)'] = byA[x.ag || '(no owner)'] || []).push(x); });
+  const agents = pcard('By agent', 'Bigin owner / LimeChat first assignee of the routed lead', wtable(['Agent', 'Scheduled', 'Visit date reached', 'Bought on visit date', 'Conversion', 'No order yet', 'Revenue', 'Video call routed'],
+    Object.entries(byA).sort((a, b) => b[1].length - a[1].length).map(([ag, xs]) => { const o = out(xs); return `<tr><td class="b">${esc(ag)}</td><td>${nf(o.n)}</td><td>${nf(o.due)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.due, 0)}</td><td class="${o.none ? 'bad' : ''}">${nf(o.none)}</td><td>${inr(o.net)}</td><td>${nf(VR.filter((x) => (x.ag || '(no owner)') === ag).length)}</td></tr>`; })), 'v');
+
+  // routing sheet hygiene
+  const rfc = {}; RS.forEach((x) => (x.fl || []).forEach((f) => { rfc[f] = (rfc[f] || 0) + 1; }));
+  const J = PDATA.leadList.all?.routing || {};
+  const hyg = pcard('Routing sheet hygiene', `${nf(RS.length)} rows routed in range · flagged, never edited`,
+    wtable(['Check', 'Rows', 'Share', 'Fix'], Object.keys(RTFLAG).map((k) => `<tr><td>${RTFLAG[k][0]}</td><td class="${rfc[k] ? 'bad' : ''}">${nf(rfc[k] || 0)}</td><td>${pct(rfc[k] || 0, RS.length, 0)}</td><td style="text-align:left;white-space:normal">${RTFLAG[k][1]}</td></tr>`))
+    + (J.rows != null ? `<p class="wl-note" style="margin-top:8px">Matched to a lead (since ${dpShort(PDATA.startDate)}): ${nf(J.matched)} of ${nf(J.rows)} non-test rows · ${nf(J.repeatRows)} repeat rows for an already routed lead · ${nf(J.beforeLead)} routed before the lead's first contact · ${nf(J.unmatched)} with no Call Store or WhatsApp lead.</p>` : ''), 'u');
+
+  return kp + flow + stores + plan + agents + hyg +
+    `<p class="wl-note">Leads whose first contact is in the selected range and that are in the Lead routing backend sheet (filled from the WhatsApp DSR groups). The DSR group reaction (store acknowledged in 10 min) is not recorded anywhere yet.</p>`;
+}
 
 function pagePdp(tab){
   if (PDATA) applyRev([PDATA.call?.attributed, PDATA.call?.lines, PDATA.call?.salesDaily, PDATA.call?.products, PDATA.text?.attributed, PDATA.routing?.routes]);
@@ -1869,7 +1942,7 @@ function pagePdp(tab){
   let body;
   if (tab === 'definitions') body = pDefs();
   else if (!PDATA || !DATA) body = PDATA_ERR || DATA_ERR ? wcard('Live data could not be loaded', esc(PDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="pRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin Callback Requests (T-1) and BigQuery sales.', '');
-  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, tat: pTat, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
+  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, tat: pTat, routing: pRouting, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
   const i = PTABS.findIndex((t) => t.id === tab);
   const prev = i > 0 ? `<a href="#/retail/pdp/${PTABS[i - 1].id}"><span class="p-dir">← Previous</span><span class="p-name">${PTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
   const next = i < PTABS.length - 1 ? `<a class="next" href="#/retail/pdp/${PTABS[i + 1].id}"><span class="p-dir">Next →</span><span class="p-name">${PTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
@@ -2346,10 +2419,7 @@ function pQuality(r){
   const audit = wtable(['Ticket', 'Flags', 'Raw status', 'Standardised stage', 'Agent replied', 'Agent', 'Raw note', 'Created'], flagged.map((x) => `<tr><td class="b">#${esc(x.i)}</td><td style="white-space:normal;min-width:180px">${(x.fl || []).map((f) => `<span class="vb vb-s" style="margin:1px 0">${esc((TF[f] || [f])[0])}</span>`).join(' ')}</td><td>${esc(x.raw)}</td><td>${esc(TSTAGE_LBL[x.st] || x.st)}</td><td>${x.am ? 'Yes' : 'No'}</td><td>${esc(x.ag || '—')}</td><td style="white-space:normal;min-width:160px">${esc(x.note || '—')}</td><td>${dpShort(x.d)}</td></tr>`));
   // routing sheet (WhatsApp DSR groups → Google Sheet)
   const g = routeAgg(r);
-  const RF = { test_row: ['Test row ("test" name or tester\'s phone)', 'Use a separate test sheet'], repeat_phone: ['Same phone on several rows', 'Update the existing row'], invalid_phone: ['Invalid phone', 'Validate 10-digit mobile'],
-    duplicate_lead_id: ['Duplicate Lead ID', 'Lead ID must be unique'], store_unmapped: ['Store label not recognised', 'Use the store master list'], no_visit_date: ['No expected visit date', 'Make the date mandatory'],
-    visit_before_routing: ['Visit date before routing date', 'Date picker from today'], no_visit_time: ['No visit time slot', 'Make the slot mandatory'], visit_time_unreadable: ['Visit time not a slot ("6pm-8pm")', 'Fixed slot dropdown'],
-    category_prefix: ['Category has "NM - " prefix', 'One category list; standardised here'], no_product: ['No product', 'Make product mandatory'] };
+  const RF = RTFLAG;
   const rfc = {}; g.all.forEach((x) => (x.fl || []).forEach((f) => { rfc[f] = (rfc[f] || 0) + 1; }));
   const routeT = wtable(['Check · routing sheet rows', 'Rows', 'Share', 'Fix'], [
     ...Object.keys(RF).map((k) => chk(RF[k][0], rfc[k] || 0, g.rows, RF[k][1])),
