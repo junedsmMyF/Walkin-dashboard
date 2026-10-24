@@ -579,7 +579,7 @@ function firstAllowed() {
   if (canP('home')) return '#/';
   if (canP('retail')) return '#/retail';
   const t = WTABS.find((x) => canP(WTAB_PERM[x.id])); if (t) return '#/retail/walk-in/' + t.id;
-  if (canP('pdp')) return '#/retail/pdp/journey';
+  if (canP('pdp')) return '#/retail/pdp/overview';
   if (canP('meta')) return '#/retail/meta-ads/overview';
   if (canP('retention')) return '#/retail/retention/overview';
   return null;
@@ -859,7 +859,7 @@ function pageRetail(){
     : v.id === 'meta-ads'
     ? `<tr><td class="strong"><a href="#/retail/meta-ads/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td><span class="vb vb-s">Sample</span></td><td>—</td><td>${META.statsLine()}</td><td><a href="#/retail/meta-ads/overview">Open →</a></td></tr>`
     : v.id === 'pdp'
-    ? `<tr><td class="strong"><a href="#/retail/pdp/journey">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td class="strong">${PDATA ? inr(pdpAllNet()) : '—'}</td><td>—</td><td>${pdpStatsLine()} · since ${PDATA ? PDATA.startDate : '8 Oct'}</td><td><a href="#/retail/pdp/journey">Open →</a></td></tr>`
+    ? `<tr><td class="strong"><a href="#/retail/pdp/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td class="strong">${PDATA ? inr(pdpAllNet()) : '—'}</td><td>—</td><td>${pdpStatsLine()} · since ${PDATA ? PDATA.startDate : '8 Oct'}</td><td><a href="#/retail/pdp/journey">Open →</a></td></tr>`
     : v.live
     ? `<tr><td class="strong"><a href="#/retail/${v.id}/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td class="strong">${inr(a.net)}</td><td class="${toneOf(deltaTxt(a.net, b?.net))} strong">${deltaTxt(a.net, b?.net).replace(' vs previous period', '')}</td><td>Capture ${a.cr == null ? '—' : a.cr.toFixed(1) + '%'} · Walk-ins ${nf(a.walk)}</td><td><a href="#/retail/${v.id}/overview">Open →</a></td></tr>`
     : `<tr><td class="strong"><a href="#/retail/${v.id}">${v.name}</a></td><td><span class="badge b-grey">Coming soon</span></td><td>—</td><td>—</td><td>—</td><td><a href="#/retail/${v.id}">View →</a></td></tr>`;
@@ -1453,7 +1453,7 @@ function wDefs(){
    Call route = Bigin "Callback Requests" (real) × BigQuery sales (real).
    Text route (LimeChat) and the PDP layer (views, CTA clicks) are SAMPLE until their exports are connected. */
 const PTABS = [
-  { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
+  { id: 'overview', name: 'Overview' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
   { id: 'product', name: 'Product & category' }, { id: 'loss', name: 'Loss analysis' },
   { id: 'quality', name: 'Data quality' }, { id: 'definitions', name: 'Definitions' },
 ];
@@ -1607,7 +1607,7 @@ function pHeader(tab){
     <div class="wl-meta"><div class="wl-asof">${asof}</div><div class="wl-pills"><span class="wl-pill p-teal">Call · Bigin live</span>${s.limechat?.status === 'live' ? (PDATA.text?.cutover ? `<span class="wl-pill p-teal" title="LimeChat export until the day before">WhatsApp · Bigin from ${dpShort(PDATA.text.cutover)}</span>` : '<span class="wl-pill p-teal">WhatsApp · LimeChat live</span>') : s.limechat?.status === 'stale' ? '<span class="wl-pill p-peach">LimeChat link failing — last good copy</span>' : '<span class="wl-pill p-peach">LimeChat not connected</span>'}${s.routing?.status === 'live' ? '<span class="wl-pill p-teal">Store routing sheet live</span>' : s.routing?.status === 'stale' ? '<span class="wl-pill p-peach">Routing sheet link failing — last good copy</span>' : '<span class="wl-pill p-peach">Routing sheet not connected</span>'}<span class="wl-pill p-peach">PDP views: sample</span><span class="wl-pill p-grey">Rules pending sign-off</span>${s.sales?.status === 'stale' ? '<span class="wl-pill p-peach">BigQuery sales upload is late</span>' : ''}<button type="button" class="wl-btn" id="pReloadBtn" style="min-height:28px;padding:4px 12px;font-size:12px">Reload data</button></div></div></div>
   <nav class="wl-tabs" aria-label="Dashboard pages">${PTABS.map((t) => `<a class="wl-tab ${t.id === tab ? 'on' : ''} ${t.id === 'definitions' ? 'aux' : ''}" href="#/retail/pdp/${t.id}" ${t.id === tab ? 'aria-current="page"' : ''}>${t.name}</a>`).join('')}</nav>`;
 }
-function pFilters(){
+function pFilters(tab){
   const sf = sharedFilters(PDATA.stores);
   const r = pRange(), full = rangeOf(F.range);
   return `<div class="wl-filters">
@@ -1615,7 +1615,7 @@ function pFilters(){
     <div class="wl-fl">DATE RANGE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
     ${sf.city}${sf.store}${sf.rest}
     <span class="wl-note" style="align-self:center">${r ? `${dpShort(r[0])} → ${dpShort(r[1])}` : 'No PDP data in this range'}${full[0] < PDATA.startDate ? ` · call leads start ${dpShort(PDATA.startDate)}` : ''}</span>
-  </div>${r ? ctaBar(r) : ''}`;
+  </div>${r ? (tab === 'overview' ? lCtaBar(r) : ctaBar(r)) : ''}`;
 }
 // CTA toggle: one pill per entry point with leads in range (lead counts ignore the toggle itself)
 function ctaBar(r){
@@ -1623,15 +1623,121 @@ function ctaBar(r){
   const keys = ['all', ...Object.keys(ENTRY).filter((k) => n[k] || F.cta === k)];
   return `<div class="ctabar" role="group" aria-label="CTA type"><span class="wl-fl" style="margin:0">CTA</span><div class="wl-seg">${keys.map((k) => `<button type="button" data-cta="${k}" class="${F.cta === k ? 'on' : ''}" aria-pressed="${F.cta === k}">${ENTRY_SHORT[k]}${k === 'all' ? ` <span>${nf(e.U)}</span>` : n[k] ? ` <span>${nf(n[k])}</span>` : ''}</button>`).join('')}</div>${F.cta !== 'all' ? `<span class="wl-note">Every number below is for <b>${ENTRY_SHORT[F.cta]}</b> leads only · ${ENTRY[F.cta][1]}</span>` : ''}</div>`;
 }
+/* ---- PDP rebuild (owner, 23 Oct 2026): one lead list (Call Store + WhatsApp), DevX attribution · SOP 02 + Whimsical routing ---- */
+// Rows come from /api/pdp leadList.rows (PII-free): d, src, e (CTA), s (store), c/n/q/x (consumed / connected / qualified / lost),
+// rt/vd/rv (routed · visit date · routing remark mentions video), vc (video call arranged), o (DevX orders with route store|video|other).
+const LCTA = { call_popup: ['Call Store', 'Store card · pop-up + OTP'], store_card: ['Chat With Store', 'Store card · WhatsApp'], store_widget: ['Store widget', 'Store-locator widget · WhatsApp'], generic: ['Generic WhatsApp', 'Find Nearby Stores · expert card · no tag'], pdp: ['PDP chat', 'Product page · WhatsApp'], store_inquiry: ['Store inquiry', 'WhatsApp'] };
+const hasLL = () => !!(PDATA && PDATA.leadList && PDATA.leadList.rows);
+const lRows = (r, cta = true) => (hasLL() && r ? PDATA.leadList.rows.filter((x) => inPR(x.d, r) && pStoreOk(x.s) && (!cta || F.cta === 'all' || x.e === F.cta)) : []);
+function lAgg(R){
+  const cut = PDATA.cutoff;
+  const O = R.flatMap((x) => x.o); const B = R.filter((x) => x.o.length);
+  const st = R.filter((x) => x.rt && !x.rv), vid = R.filter((x) => (x.rt && x.rv) || (!x.rt && x.vc));
+  const due = st.filter((x) => x.vd && x.vd <= cut);
+  const has = (x, k) => x.o.some((o) => o.r === k);
+  const net = (xs) => xs.reduce((u, o) => u + o.net, 0);
+  const route = (k) => { const os = O.filter((o) => o.r === k); return { orders: os.length, buyers: R.filter((x) => x.o[0] && x.o[0].r === k).length, net: net(os) }; };
+  return {
+    leads: R.length, call: R.filter((x) => x.src === 'call').length, wa: R.filter((x) => x.src !== 'call').length,
+    cons: R.filter((x) => x.c).length, conn: R.filter((x) => x.n).length, qual: R.filter((x) => x.q).length, lost: R.filter((x) => x.x && !x.o.length).length,
+    st: st.length, due: due.length, ahead: st.length - due.length, stBuy: st.filter((x) => has(x, 'store')).length, stNet: net(O.filter((o) => o.r === 'store')),
+    noShow: due.filter((x) => !x.o.length).length, otherDay: due.filter((x) => x.o.length && !has(x, 'store')).length,
+    vid: vid.length, vidBuy: vid.filter((x) => has(x, 'video')).length, vidNet: net(O.filter((o) => o.r === 'video')), vidLost: vid.filter((x) => x.x && !x.o.length).length,
+    buyers: B.length, orders: O.length, net: net(O), sameDay: B.filter((x) => x.o[0].lag === 0).length,
+    byRoute: { store: route('store'), video: route('video'), other: route('other') }, rep: R.reduce((u, x) => u + x.rep, 0),
+  };
+}
+const lNode = (l, v, s, cls = '') => `<div class="wl-node ${cls}"><span class="n-l">${l}</span><span class="n-v ${v === '—' ? 'none' : ''}">${v}</span><span class="n-s">${s}</span></div>`;
+const lArrow = '<span class="wl-arrow" aria-hidden="true">→</span>';
+// CTA bar for the new screens (counts ignore the CTA toggle itself)
+function lCtaBar(r){
+  const R = lRows(r, false); const n = {}; R.forEach((x) => { n[x.e] = (n[x.e] || 0) + 1; });
+  const keys = ['all', ...Object.keys(LCTA).filter((k) => n[k] || F.cta === k)];
+  return `<div class="ctabar" role="group" aria-label="CTA"><span class="wl-fl" style="margin:0">CTA</span><div class="wl-seg">${keys.map((k) => `<button type="button" data-cta="${k}" class="${F.cta === k ? 'on' : ''}" aria-pressed="${F.cta === k}">${k === 'all' ? 'All CTAs' : LCTA[k][0]} <span>${nf(k === 'all' ? R.length : n[k] || 0)}</span></button>`).join('')}</div></div>`;
+}
+function pOverview(r){
+  if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
+  const R = lRows(r), a = lAgg(R);
+  const p = pPrev(r), P = p ? lAgg(lRows(p)) : null;
+  const dl = (cur, prev, o) => wdelta(cur, prev, { short: true, ...o });
+  const rate = (x, y) => pctv(x, y);
+  const k = (l, v, d, s, b) => ({ l, v, d: d.d, tone: d.tone, s, b });
+  const kp = pkpis([
+    k('Leads', nf(a.leads), dl(a.leads, P && P.leads), `Call Store ${nf(a.call)} · WhatsApp ${nf(a.wa)}`, 'v'),
+    k('Consumption rate', pct(a.cons, a.leads, 0), dl(rate(a.cons, a.leads), P && rate(P.cons, P.leads), { pts: 1 }), `${nf(a.cons)} called · ${nf(a.leads - a.cons)} untouched`, 'v'),
+    k('Connected', nf(a.conn), dl(a.conn, P && P.conn), `${pct(a.conn, a.cons, 0)} of leads called`, 'u'),
+    k('Routed', nf(a.st + a.vid), dl(a.st + a.vid, P && P.st + P.vid), `Store visit ${nf(a.st)} · Video call ${nf(a.vid)}`, 'v'),
+    k('Conversion rate', pct(a.buyers, a.leads, 1), dl(rate(a.buyers, a.leads), P && rate(P.buyers, P.leads), { pts: 1 }), `${nf(a.buyers)} buyers · ${nf(a.orders)} DevX orders`, 'v'),
+    k('Revenue', inr(a.net), dl(a.net, P && P.net), `${a.leads ? inr(a.net / a.leads) : '—'} per lead · AOV ${a.orders ? inr(a.net / a.orders) : '—'}`, 'v'),
+  ]);
+
+  const flow = pcard('PDP routing flow', 'Every lead from the website tap to the sale · Whimsical: Final PDP routing mechanism',
+    `<div class="wl-tree" style="flex-wrap:wrap">${lNode('1 · Lead captured', nf(a.leads), `WhatsApp ${nf(a.wa)} · Call Store ${nf(a.call)}`)}${lArrow}${lNode('2 · Agent called', nf(a.cons), `${nf(a.leads - a.cons)} not called yet`, a.leads - a.cons > a.cons ? 'hot' : '')}${lArrow}${lNode('3 · Connected', nf(a.conn), `${nf(a.cons - a.conn)} RNR / not reached`)}${lArrow}${lNode('4 · Qualified', nf(a.qual), `${nf(a.lost)} not interested`)}${lArrow}${lNode('5 · Store within 15 km?', nf(a.st + a.vid), 'routed to a store or a video call')}</div>
+    <div class="wl-g2" style="margin-top:14px">
+      <div class="wl-fbox"><span class="wl-colhead">YES → STORE VISIT · LEAD FORM → DSR GROUP · BILLED ON DEVX</span>
+        <div class="wl-tree" style="margin-top:0;flex-wrap:wrap">${lNode('Store visit scheduled', nf(a.st), 'Lead routing sheet')}${lArrow}${lNode('Store acknowledged', '—', VB.n, 'await')}${lArrow}${lNode('Visit date passed', nf(a.due), `${nf(a.ahead)} still ahead`)}${lArrow}${lNode('Store visit conversion', nf(a.stBuy), `${inr(a.stNet)} · ${pct(a.stBuy, a.due, 0)} of visits due`)}</div>
+        <span class="wl-note">No-show <b style="color:#A8501A">${nf(a.noShow)}</b> · bought another day ${nf(a.otherDay)}</span></div>
+      <div class="wl-fbox"><span class="wl-colhead">NO → VIDEO CALL · LIVE DEMO · ORDER PUNCHED ON DEVX</span>
+        <div class="wl-tree" style="margin-top:0;flex-wrap:wrap">${lNode('Video call arranged', nf(a.vid), 'Bigin stage · routing remark · note')}${lArrow}${lNode('Demo held', '—', VB.n, 'await')}${lArrow}${lNode('Video call conversion', nf(a.vidBuy), `${inr(a.vidNet)} · ${pct(a.vidBuy, a.vid, 0)} of arranged`)}</div>
+        <span class="wl-note">No purchase <b style="color:#A8501A">${nf(a.vidLost)}</b> · still open ${nf(Math.max(0, a.vid - a.vidBuy - a.vidLost))}</span></div>
+    </div>
+    <p class="wl-note" style="margin-top:12px">Other conversions ${nf(a.byRoute.other.buyers)} · ${inr(a.byRoute.other.net)} — bought without a store visit on the visit date or a video call.</p>`, 'v');
+
+  // CTA performance — every CTA, same flow; click a row to see it by store
+  const all = lRows(r, false); const byE = {}; all.forEach((x) => { (byE[x.e] = byE[x.e] || []).push(x); });
+  const tot = lAgg(all);
+  const keys = Object.keys(LCTA).filter((e) => byE[e]);
+  const row = (A, label, cls = '', attrs = '') => `<tr class="${cls}" ${attrs}><td>${label}</td><td>${nf(A.leads)}</td><td>${pct(A.cons, A.leads, 0)}</td><td>${nf(A.conn)}</td><td>${nf(A.st)}</td><td>${nf(A.vid)}</td><td>${nf(A.buyers)}</td><td class="b">${pct(A.buyers, A.leads, 1)}</td><td class="b">${inr(A.net)}</td><td>${A.leads ? inr(A.net / A.leads) : '—'}</td><td style="min-width:110px"><div class="wl-track" style="height:6px"><div class="wl-fill" style="height:6px;width:${pctv(A.leads, tot.leads)?.toFixed(1) || 0}%;background:${C.teal}"></div></div><div class="wl-track" style="height:6px;margin-top:3px"><div class="wl-fill" style="height:6px;width:${pctv(A.net, tot.net)?.toFixed(1) || 0}%;background:${C.rust}"></div></div></td></tr>`;
+  const body = keys.sort((x, y) => byE[y].length - byE[x].length).flatMap((e) => {
+    const A = lAgg(byE[e]); const open = !!F.ex['l:' + e];
+    const stores = {}; byE[e].forEach((x) => { (stores[x.s] = stores[x.s] || []).push(x); });
+    const subs = Object.entries(stores).sort((x, y) => y[1].length - x[1].length);
+    return [row(A, `<span class="cx-chev">${open ? '▾' : '▸'}</span> <b>${LCTA[e][0]}</b> <span class="k-s">${LCTA[e][1]} · ${nf(subs.length)} ${subs.length === 1 ? 'store' : 'stores'}</span>`, `cx-row ${F.cta === e ? 'je-on' : ''}`, `data-ex="l:${e}" tabindex="0" role="button" aria-expanded="${open}"`),
+      ...(open ? subs.map(([s, xs]) => row(lAgg(xs), esc(s === 'UNMAPPED' ? 'Store not known' : pStore(s).name), 'je-sub')) : [])];
+  });
+  const cta = pcard('CTA performance', 'Every CTA through the same flow · bars: share of leads (teal) vs share of revenue (rust) · click a CTA to see it by store',
+    `<div class="wl-tw"><table><thead><tr><th>CTA</th><th>Leads</th><th>Consumption</th><th>Connected</th><th>Store visits</th><th>Video calls</th><th>Bought</th><th>Conversion</th><th>Revenue</th><th>Per lead</th><th>Leads · revenue</th></tr></thead><tbody>${body.join('')}<tr class="je-grp">${row(tot, '<b>All CTAs</b>').replace(/^<tr[^>]*>|<\/tr>$/g, '')}</tr><tr><td><b>Get Direction</b> <span class="k-s">Store card · Google Maps</span></td><td colspan="10" style="text-align:left">${VB.n} <span class="k-s">creates no lead</span></td></tr></tbody></table></div>`, 'v');
+
+  // revenue by conversion route + fix first
+  const rt = a.byRoute, c = PCOL();
+  const rev = pcard('Revenue by conversion', 'Unique DevX orders · latest lead before the order · within 60 days',
+    `<div class="wl-track" style="height:18px;margin-top:16px">${a.net ? ['store', 'video', 'other'].map((x) => rt[x].net ? `<div class="wl-fill" style="height:18px;width:${(rt[x].net / a.net * 100).toFixed(1)}%;background:${c[x]};border-radius:0"></div>` : '').join('') : ''}</div>
+    <div class="wl-legend">${PATHS.map(([x, l]) => `<span><i class="wl-sw" style="background:${c[x]}"></i>${l} ${inr(rt[x].net)} (${pct(rt[x].net, a.net, 0)})</span>`).join('')}</div>
+    ${wtable(['Route', 'Orders', 'Buyers', 'Revenue', 'AOV'], PATHS.map(([x, l]) => `<tr><td class="b">${l}</td><td>${nf(rt[x].orders)}</td><td>${nf(rt[x].buyers)}</td><td class="b">${inr(rt[x].net)}</td><td>${rt[x].orders ? inr(rt[x].net / rt[x].orders) : '—'}</td></tr>`))}
+    <p class="wl-note" style="margin-top:8px">${nf(a.sameDay)} of ${nf(a.buyers)} buyers bought on the day of their first contact.</p>`, 'v');
+  const fl = PDATA.pinv?.flags || {};
+  const fix = pcard('Fix first', 'Biggest leaks against SOP 02',
+    `<div class="wl-list" style="margin-top:6px">
+      <div class="row"><span>Leads never called (still New Enquiry / Yet to Call)</span><b>${nf(a.leads - a.cons)} · ${pct(a.leads - a.cons, a.leads, 0)}</b></div>
+      <div class="row"><span>Bigin tickets in New Enquiry for over 24 h (live queue)</span><b>${nf(fl.new_over_24h || 0)}</b></div>
+      <div class="row"><span>Store visits due with no DevX bill</span><b>${nf(a.noShow)}</b></div>
+      <div class="row"><span>Bought, Bigin stage not Converted</span><b>${nf(fl.order_not_converted || 0)}</b></div>
+      <div class="row"><span>Bigin tickets with no owner assigned (default owner)</span><b>${PDATA.pinv && Object.keys(PDATA.pinv.byOwner || {}).length === 1 ? nf(PDATA.pinv.total) : '0'}</b></div>
+    </div>`, 'u');
+
+  // daily leads and buyers (buyers by lead date)
+  const days = []; for (let d = r[0]; d <= r[1]; d = dAdd(d, 1)) days.push(d);
+  const ser = days.map((d) => { const xs = R.filter((x) => x.d === d); return { d, n: xs.length, b: xs.filter((x) => x.o.length).length }; });
+  const mx = Math.max(1, ...ser.map((s) => s.n)), mb = Math.max(1, ...ser.map((s) => s.b));
+  const trend = pcard('Daily leads and buyers', 'Leads by day · buyers by lead date',
+    `<div class="wl-legend"><span><i class="wl-sw" style="background:${C.tealMid}"></i>Leads</span><span><i class="wl-sw" style="background:${C.teal}"></i>Buyers</span></div>
+    <div style="display:flex;align-items:flex-end;gap:4px;height:170px;margin-top:12px">${ser.map((s) => `<div title="${dpShort(s.d)}: ${nf(s.n)} leads" style="flex:1;height:${(s.n / mx * 100).toFixed(1)}%;background:${C.tealMid};border-radius:3px 3px 0 0"></div>`).join('')}</div>
+    <div style="display:flex;align-items:flex-end;gap:4px;height:40px;margin-top:6px">${ser.map((s) => `<div title="${dpShort(s.d)}: ${nf(s.b)} buyers" style="flex:1;height:${(s.b / mb * 100).toFixed(1)}%;background:${C.teal}"></div>`).join('')}</div>
+    <div class="wl-axis"><span>${dpShort(days[0])}</span><span>${dpShort(days[days.length - 1])}</span></div>`);
+
+  return kp + flow + cta + `<div class="wl-g2">${rev}${fix}</div>` + trend +
+    `<p class="wl-note">Lead = one phone across Call Store + WhatsApp (a repeat within 30 days is the same lead) · converted = DevX order on/after the lead date within 60 days · ${nf(a.rep)} repeat contacts folded in.</p>`;
+}
+
 function pagePdp(tab){
   if (PDATA) applyRev([PDATA.call?.attributed, PDATA.call?.lines, PDATA.call?.salesDaily, PDATA.call?.products, PDATA.text?.attributed, PDATA.routing?.routes]);
-  if (!PTABS.find((t) => t.id === tab)) tab = 'journey';
+  if (!PTABS.find((t) => t.id === tab)) tab = 'overview';
   const tabName = PTABS.find((t) => t.id === tab).name;
-  const crumb = crumbs([['Founders Office', '#/'], ['Retail Revenue', '#/retail'], ['PDP inventories', '#/retail/pdp/journey'], [tabName, '#']]);
+  const crumb = crumbs([['Founders Office', '#/'], ['Retail Revenue', '#/retail'], ['PDP inventories', '#/retail/pdp/overview'], [tabName, '#']]);
   let body;
   if (tab === 'definitions') body = pDefs();
   else if (!PDATA || !DATA) body = PDATA_ERR || DATA_ERR ? wcard('Live data could not be loaded', esc(PDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="pRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin Callback Requests (T-1) and BigQuery sales.', '');
-  else { const r = pRange(); body = pFilters() + (r ? ({ journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
+  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
   const i = PTABS.findIndex((t) => t.id === tab);
   const prev = i > 0 ? `<a href="#/retail/pdp/${PTABS[i - 1].id}"><span class="p-dir">← Previous</span><span class="p-name">${PTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
   const next = i < PTABS.length - 1 ? `<a class="next" href="#/retail/pdp/${PTABS[i + 1].id}"><span class="p-dir">Next →</span><span class="p-name">${PTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
