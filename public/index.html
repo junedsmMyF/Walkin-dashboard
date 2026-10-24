@@ -1482,6 +1482,8 @@ const PTIP = {
   'Contacted': ['Unique leads moved past "Yet to Call".', 'Bigin stage · unverified'],
   'Purchased': ['Leads with a DevX order on/after lead date.', 'Bigin × BigQuery'],
   'PDP-attributed revenue': ['Orders from these leads. Total Revenue.', 'Bigin × BigQuery'],
+  'Revenue': ['Orders from leads whose first contact is in the range (lead date). Sub-text: PDP orders billed in the range (order date), as order-date reports count them.', 'DevX (BigQuery)'],
+  'Share of store sales': ['PDP orders billed in the range ÷ all store sales in the range.', 'DevX (BigQuery)'],
   'Lead → purchase': ['Purchased ÷ unique leads.', 'Bigin × BigQuery'],
   'Shared with walk-in': ['Buyers who were also walk-in leads.', 'Bigin × BigQuery'],
   'Data hygiene': ['Call leads with no typo, stale, reason or store issue.', 'Bigin'],
@@ -1648,7 +1650,7 @@ function pOverview(r){
     k('Connected', nf(a.conn), dl(a.conn, P && P.conn), `${pct(a.conn, a.cons, 0)} of leads called`, 'u'),
     k('Routed', nf(a.st + a.vid), dl(a.st + a.vid, P && P.st + P.vid), `Store visit ${nf(a.st)} · Video call ${nf(a.vid)}`, 'v'),
     k('Conversion rate', pct(a.buyers, a.leads, 1), dl(rate(a.buyers, a.leads), P && rate(P.buyers, P.leads), { pts: 1 }), `${nf(a.buyers)} buyers · ${nf(a.orders)} DevX orders`, 'v'),
-    k('Revenue', inr(a.net), dl(a.net, P && P.net), `${a.leads ? inr(a.net / a.leads) : '—'} per lead · AOV ${a.orders ? inr(a.net / a.orders) : '—'}`, 'v'),
+    k('Revenue', inr(a.net), dl(a.net, P && P.net), `From leads in range · ${inr(billed)} billed in range (order date) · AOV ${a.orders ? inr(a.net / a.orders) : '—'}`, 'v'),
     { l: 'Share of store sales', v: pct(billed, sales, 1), s: `${inr(billed)} PDP orders billed in range · of ${inr(sales)}`, b: 'v' },
   ]);
 
