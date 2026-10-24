@@ -1454,7 +1454,7 @@ function wDefs(){
    Call route = Bigin "Callback Requests" (real) × BigQuery sales (real).
    Text route (LimeChat) and the PDP layer (views, CTA clicks) are SAMPLE until their exports are connected. */
 const PTABS = [
-  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'routing', name: 'Store routing' }, { id: 'video', name: 'Video calls' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
+  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'routing', name: 'Store routing' }, { id: 'video', name: 'Video calls' }, { id: 'sources', name: 'Sources & gaps' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
   { id: 'product', name: 'Product & category' }, { id: 'loss', name: 'Loss analysis' },
   { id: 'quality', name: 'Data quality' }, { id: 'definitions', name: 'Definitions' },
 ];
@@ -1616,7 +1616,7 @@ function pFilters(tab){
     <div class="wl-fl">DATE RANGE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
     ${sf.city}${sf.store}${sf.rest}
     <span class="wl-note" style="align-self:center">${r ? `${dpShort(r[0])} → ${dpShort(r[1])}` : 'No PDP data in this range'}${full[0] < PDATA.startDate ? ` · call leads start ${dpShort(PDATA.startDate)}` : ''}</span>
-  </div>${r ? (['overview', 'pipeline', 'tat', 'routing', 'video'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
+  </div>${r && tab !== 'sources' ? (['overview', 'pipeline', 'tat', 'routing', 'video'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
 }
 // CTA toggle: one pill per entry point with leads in range (lead counts ignore the toggle itself)
 function ctaBar(r){
@@ -1992,6 +1992,96 @@ function pVideo(r){
   return kp + flow + bySrc + queue + `<div class="wl-g2">${agents}${stores}</div>` +
     `<p class="wl-note">Leads whose first contact is in the selected range. "Video call arranged" is as recorded by the agent (Bigin stage, LimeChat note or routing remark); whether the demo happened is not recorded anywhere yet.</p>`;
 }
+/* ---- Sources & gaps (SOP 02 · sections 4 and 14): CTA map with live lead counts, data sources, coverage checks, known gaps ---- */
+const CTAMAP = [
+  ['generic', 'Find Nearby Stores · Find a Store Nearby', 'Floating widget (Home) · Product Expert card', 'WhatsApp, nearest-store question', 'LimeChat → Bigin'],
+  ['store_widget', 'Chat on WhatsApp', 'Experience Store page widget', 'WhatsApp, nearest-store question', 'LimeChat → Bigin'],
+  ['store_card', 'Chat With Store', 'Store card · Home / Experience Store page', 'WhatsApp about that store', 'LimeChat → Bigin'],
+  ['store_inquiry', 'Store inquiry', 'WhatsApp, store question', 'WhatsApp', 'LimeChat → Bigin'],
+  ['pdp', 'PDP chat', 'Product page', 'WhatsApp about the product', 'LimeChat → Bigin'],
+  ['call_popup', 'Call Store', 'Store card', 'Pop-up, OTP, "Our experts will call you shortly"', 'Bigin Callback Requests'],
+];
+const KGAPS = [
+  ['Footer city links send ?city=, store page ignores it', 'Customer re-selects city; some drop off', 'Tech / Growth', 'Open'],
+  ['Find Nearby Stores → WhatsApp on Home, store page on PDP', 'Same CTA, two outcomes; source reporting inconsistent', 'Tech / Growth', 'Open'],
+  ['Header Visit Store is desktop-only', 'Lower store CTA visibility on phones', 'Tech / Growth', 'Open'],
+  ['PDP store widget missing on phone product pages', 'No store CTA for mobile PDP visitors', 'Tech / Growth', 'Open'],
+  ['Call Store sends name and phone only', 'Agents must ask which store was clicked', 'Tech / Growth', 'Open'],
+  ['DSR acknowledgement and visit outcome not captured', 'No 10-min SLA, no visited / no-show record', 'Retail ops', 'Not tracked'],
+  ['Video demo held / not held not recorded', 'Demo → order rate cannot be measured', 'Retail ops', 'Not tracked'],
+  ['Callback time and lead ID not Bigin fields', 'Callback SLA and ticket ↔ routing row link cannot be checked', 'Retail ops / Tech', 'Not tracked'],
+  ['PDP views and CTA clicks', 'Top of funnel is sample until GA4 / Shopify', 'Growth', 'Sample'],
+];
+function pSources(r){
+  if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
+  // no previous-period delta here: the conversation tag set changed in Sep–Oct 2026, so CTA counts are not comparable across periods
+  const R = lRows(r, false);
+  const n = (xs, ks) => xs.filter((x) => ks.includes(x.e)).length;
+  const k = (l, ks, s) => ({ l, v: nf(n(R, ks)), s, b: 'v' });
+  const kp = pkpis([
+    k('WhatsApp · generic', ['generic', 'store_widget'], 'Find Nearby Stores · store-page widget'),
+    k('WhatsApp · store-specific', ['store_card', 'store_inquiry'], 'Chat With Store on a store card'),
+    k('WhatsApp · PDP chat', ['pdp'], 'Product page'),
+    k('Call Store callback', ['call_popup'], 'Name + mobile + OTP · store not passed'),
+    { l: 'PDP / store page views', v: '—', s: 'Leads count only when they tap Chat or Call', b: 's' },
+  ]);
+
+  // CTA map
+  const B = R.filter((x) => x.o.length);
+  const crow = ([e, l, where, sees, cap]) => { const xs = R.filter((x) => x.e === e); const b = xs.filter((x) => x.o.length);
+    return `<tr><td class="b">${l}</td><td style="text-align:left;white-space:normal">${where}</td><td style="text-align:left;white-space:normal">${sees}</td><td style="text-align:left">${cap}</td><td class="b">${nf(xs.length)}</td><td>${pct(xs.length, R.length, 0)}</td><td>${nf(b.length)}</td><td>${inr(b.reduce((u, x) => u + x.o.reduce((v, o) => v + o.net, 0), 0))}</td></tr>`; };
+  const map = pcard('CTA map', 'SOP 02 · section 4 · every website CTA, where it sits and where its lead lands · CTA = conversation tag today',
+    wtable(['CTA', 'Where it sits', 'What the customer sees', 'Captured in', 'Leads', 'Share', 'Buyers', 'Revenue'], [
+      ...CTAMAP.map(crow),
+      `<tr><td class="b">Visit Store · Store Locator · footer · PDP widget</td><td style="text-align:left;white-space:normal">Header, nav, footer, product page</td><td style="text-align:left">Experience Store page</td><td style="text-align:left">Only after Chat or Call</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>`,
+      `<tr><td class="b">Get Direction</td><td style="text-align:left">Store card</td><td style="text-align:left">Google Maps</td><td style="text-align:left">${VB.n}</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>`,
+      `<tr class="je-grp"><td class="b">All CTAs</td><td></td><td></td><td></td><td class="b">${nf(R.length)}</td><td>100%</td><td>${nf(B.length)}</td><td class="b">${inr(B.reduce((u, x) => u + x.o.reduce((v, o) => v + o.net, 0), 0))}</td></tr>`,
+    ]) + `<p class="wl-note" style="margin-top:8px">Mobility leads go to the mobility team and are not counted. Service queries are left out.</p>`, 'v');
+
+  // data sources
+  const S = PDATA.sources || {}; const ts = (t) => (t ? new Date(t).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : '—');
+  const ok = (o) => o && !o.error && ['ok', 'live'].includes(o.status);
+  const cut = PDATA.leadList.rules?.cutover;
+  const srow = (name, feeds, cadence, o, when, size, b) => `<tr><td class="b" style="white-space:normal">${name}</td><td style="text-align:left;white-space:normal">${feeds}</td><td style="text-align:left">${cadence}</td><td>${when}</td><td>${size}</td><td style="text-align:left">${o === 'sample' ? VB.s : ok(o) ? VB[b] : `<span class="vb vb-s">${esc((o && (o.error || o.status)) || 'Not connected')}</span>`}</td></tr>`;
+  const src = pcard('Data sources', 'Where every number comes from · read-only · customer names and phones never leave the Worker',
+    wtable(['Source', 'Feeds', 'Read', 'Last read', 'Rows', 'Status'], [
+      srow('Bigin · Callback Requests', 'Call Store leads and stages', 'Daily 06:00 IST', S.callback, ts(S.callback?.refreshedAt), nf(S.callback?.records || 0), 'v'),
+      srow('Bigin · PDP Inventories', `WhatsApp leads from ${cut ? dpShort(cut) : 'the cutover'}, stages and stage times`, 'Every 15 min', S.pdpinv, ts(S.pdpinv?.refreshedAt), nf(S.pdpinv?.records || 0), 'v'),
+      srow('LimeChat export', `WhatsApp leads before ${cut ? dpShort(cut) : 'the cutover'}; coverage check after`, 'Live (published sheet)', S.limechat, '—', nf(S.limechat?.rows || 0), 'v'),
+      srow('Lead routing backend sheet', 'Store visits, video remarks, visit dates (WhatsApp DSR groups)', 'Live (published sheet)', S.routing, '—', nf(S.routing?.rows || 0), 'v'),
+      srow('DevX orders (BigQuery)', 'Orders and revenue · unique order IDs', 'Daily 08:00 IST', S.sales, ts(S.sales?.uploadedAt), '—', 'v'),
+      srow('GA4 / Shopify', 'PDP views, CTA clicks', '—', S.pdp?.status === 'sample' ? 'sample' : S.pdp, '—', '—', 'v'),
+    ]), 'v');
+
+  // coverage checks on the data
+  const J = PDATA.leadList.all?.routing || {}; const OS = PDATA.leadList.all?.orderStats || {};
+  const days = (PDATA.pinv?.recon?.days || []).filter((x) => inPR(x.d, r));
+  const lcL = days.reduce((u, x) => u + x.lcLeads, 0), miss = days.reduce((u, x) => u + x.missing, 0), notEx = days.reduce((u, x) => u + x.notInExport, 0);
+  const unm = R.filter((x) => x.s === 'UNMAPPED').length;
+  const ALL = PDATA.leadList.rows.filter((x) => pStoreOk(x.s));
+  const gone = CTAMAP.filter(([e]) => !n(R, [e]) && n(ALL, [e])).map(([e, l]) => `${l} (last ${dpShort(ALL.filter((x) => x.e === e).map((x) => x.d).sort().pop())})`);
+  const chk = (l, v, of, eff, b) => `<tr><td style="white-space:normal">${l}</td><td class="${v ? 'bad' : ''}">${nf(v)}</td><td>${of == null ? '—' : pct(v, of, 0)}</td><td style="text-align:left;white-space:normal">${eff}</td><td style="text-align:left">${VB[b]}</td></tr>`;
+  const cov = pcard('Coverage checks', 'What the data itself shows is missing or unmatched · selected range unless noted',
+    wtable(['Check', 'Count', 'Share', 'Effect', 'Basis'], [
+      chk('Leads with no store', unm, R.length, 'Mostly generic WhatsApp · kept in totals, left out of store views', 'v'),
+      chk(`CTA tags with no leads in range${gone.length ? ': ' + gone.join(', ') : ''}`, gone.length, null, 'Tag no longer applied: these leads now land under another CTA', 'v'),
+      chk('Leads with no valid phone', R.filter((x) => x.np).length, R.length, 'Cannot be matched to an order or routing row', 'v'),
+      chk(`LimeChat chats not in Bigin (from ${cut ? dpShort(cut) : 'cutover'})`, miss, lcL || null, 'Integration gap: lead not in the agent queue', 'v'),
+      chk('Bigin tickets not in the LimeChat export', notEx, null, 'Created in Bigin directly or export lag', 'v'),
+      chk('Routing rows with no Call Store or WhatsApp lead (all time)', J.unmatched || 0, J.rows || null, 'Store visit cannot be tied to a CTA', 'v'),
+      chk('Orders before the lead date (all time)', OS.beforeLead || 0, null, 'Existing customers: not credited to PDP', 'v'),
+      chk('Orders after the 60-day window (all time)', OS.beyondWindow || 0, null, 'Not credited to PDP', 'v'),
+      chk('Repeat contacts inside 30 days', R.reduce((u, x) => u + x.rep, 0), null, 'Folded into the first lead, not new leads', 'v'),
+    ]), 'v');
+
+  // known gaps (SOP 02 · section 14 audit + tracking gaps)
+  const st = (s) => (s === 'Open' ? '<span class="vb vb-u">Open</span>' : s === 'Sample' ? VB.s : VB.n);
+  const gaps = pcard('Known gaps', 'SOP 02 · section 14 (CTA audit 7 Oct 2026) + tracking gaps · what stops a lead or a number from being measured',
+    wtable(['Gap', 'Effect', 'Owner', 'Status'], KGAPS.map(([g, e, o, s]) => `<tr><td class="b" style="white-space:normal">${g}</td><td style="text-align:left;white-space:normal">${e}</td><td style="text-align:left">${o}</td><td style="text-align:left">${st(s)}</td></tr>`)), '');
+
+  return kp + map + src + cov + gaps +
+    `<p class="wl-note">Lead counts ignore the CTA toggle on this tab · leads whose first contact is in the selected range.</p>`;
+}
 
 function pagePdp(tab){
   if (PDATA) applyRev([PDATA.call?.attributed, PDATA.call?.lines, PDATA.call?.salesDaily, PDATA.call?.products, PDATA.text?.attributed, PDATA.routing?.routes]);
@@ -2001,7 +2091,7 @@ function pagePdp(tab){
   let body;
   if (tab === 'definitions') body = pDefs();
   else if (!PDATA || !DATA) body = PDATA_ERR || DATA_ERR ? wcard('Live data could not be loaded', esc(PDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="pRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin Callback Requests (T-1) and BigQuery sales.', '');
-  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, tat: pTat, routing: pRouting, video: pVideo, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
+  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, tat: pTat, routing: pRouting, video: pVideo, sources: pSources, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
   const i = PTABS.findIndex((t) => t.id === tab);
   const prev = i > 0 ? `<a href="#/retail/pdp/${PTABS[i - 1].id}"><span class="p-dir">← Previous</span><span class="p-name">${PTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
   const next = i < PTABS.length - 1 ? `<a class="next" href="#/retail/pdp/${PTABS[i + 1].id}"><span class="p-dir">Next →</span><span class="p-name">${PTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
