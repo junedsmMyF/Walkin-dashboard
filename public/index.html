@@ -1635,8 +1635,12 @@ function lCtaBar(r){
   return `<div class="ctabar" role="group" aria-label="CTA"><span class="wl-fl" style="margin:0">CTA</span><div class="wl-seg">${keys.map((k) => `<button type="button" data-cta="${k}" class="${F.cta === k ? 'on' : ''}" aria-pressed="${F.cta === k}">${k === 'all' ? 'All CTAs' : LCTA[k][0]} <span>${nf(k === 'all' ? R.length : n[k] || 0)}</span></button>`).join('')}</div></div>`;
 }
 // Orders billed in the range (order date, owner 24 Oct 2026) from any PDP lead · CTA filter on the lead's CTA, store filters on the billing store
+function oRows(r, f = () => true){
+  const O = []; (PDATA.leadList.rows || []).forEach((x) => { if ((F.cta !== 'all' && x.e !== F.cta) || !f(x)) return; x.o.forEach((o) => { if (inPR(o.d, r) && pStoreOk(o.s)) O.push({ ...o, x }); }); });
+  return O;
+}
 function oAgg(r){
-  const O = []; (PDATA.leadList.rows || []).forEach((x) => { if (F.cta !== 'all' && x.e !== F.cta) return; x.o.forEach((o) => { if (inPR(o.d, r) && pStoreOk(o.s)) O.push({ ...o, x }); }); });
+  const O = oRows(r);
   const sum = (os) => ({ orders: os.length, buyers: new Set(os.map((o) => o.x)).size, net: os.reduce((u, o) => u + o.net, 0) });
   return { ...sum(O), byRoute: { store: sum(O.filter((o) => o.r === 'store')), video: sum(O.filter((o) => o.r === 'video')), other: sum(O.filter((o) => o.r === 'other')) }, sameDay: O.filter((o) => o.lag === 0).length };
 }
@@ -1877,31 +1881,36 @@ function pRouting(r){
     return { n: xs.length, due: due.length, ahead: xs.length - due.length, buy: xs.filter((x) => has(x, 'store')).length, other: due.filter((x) => x.o.length && !has(x, 'store')).length,
       none: due.filter((x) => !x.o.length).length, net: so.reduce((u, o) => u + o.net, 0), so }; };
   const A = out(ST);
-  const atStore = ST.reduce((u, x) => u + x.o.filter((o) => o.r === 'store' && o.s === x.rs).length, 0);
+  // revenue by order date (owner, 24 Oct 2026): store-visit orders billed in the range, from routed leads of any lead date
+  const SO = oRows(r, (x) => x.rt && !x.rv).filter((o) => o.r === 'store');
+  const soOf = (f) => { const os = SO.filter(f); return { net: os.reduce((u, o) => u + o.net, 0), so: os, at: os.filter((o) => o.s === o.x.rs).length }; };
+  const SA = soOf(() => true);
+  const atStore = SA.at;
   const kp = pkpis([
     { l: 'Store visits scheduled', v: nf(A.n), s: `${nf(VR.length)} more routed for a video call`, b: 'v' },
     { l: 'Visit date reached', v: nf(A.due), s: `${nf(A.ahead)} still ahead`, b: 'v' },
-    { l: 'Store visit conversion', v: nf(A.buy), s: `${pct(A.buy, A.due, 0)} of visits due · ${inr(A.net)}`, b: 'v' },
+    { l: 'Store visit conversion', v: nf(A.buy), s: `${pct(A.buy, A.due, 0)} of visits due · ${inr(SA.net)} billed in range`, b: 'v' },
     { l: 'No order yet', v: nf(A.none), tone: A.none ? 'bad' : '', s: `visit date passed · ${nf(A.other)} bought another day`, b: 'v' },
-    { l: 'Billed at routed store', v: pct(atStore, A.so.length, 0), s: `${nf(atStore)} of ${nf(A.so.length)} visit-day orders`, b: 'v' },
+    { l: 'Billed at routed store', v: pct(atStore, SA.so.length, 0), s: `${nf(atStore)} of ${nf(SA.so.length)} store-visit orders billed in range`, b: 'v' },
   ]);
 
   // outcome bar of visits due
   const seg = [[A.buy, C.teal, 'Bought on visit date'], [A.other, C.tealMid, 'Bought on another day'], [A.none, C.rust, 'No order yet'], [A.ahead, C.track, 'Visit date ahead']];
   const flow = pcard('What happened to scheduled visits', 'Leads routed to a store (not video) · store visit conversion = DevX order on the expected visit date',
-    `<div class="wl-tree" style="flex-wrap:wrap">${lNode('Qualified & routed', nf(R.length), 'Lead routing sheet · DSR group')}${lArrow}${lNode('Store visit', nf(A.n), `${nf(VR.length)} video call instead`)}${lArrow}${lNode('Store acknowledged', '—', VB.n, 'await')}${lArrow}${lNode('Visit date reached', nf(A.due), `${nf(A.ahead)} still ahead`)}${lArrow}${lNode('Bought on visit date', nf(A.buy), inr(A.net), 'win')}</div>
+    `<div class="wl-tree" style="flex-wrap:wrap">${lNode('Qualified & routed', nf(R.length), 'Lead routing sheet · DSR group')}${lArrow}${lNode('Store visit', nf(A.n), `${nf(VR.length)} video call instead`)}${lArrow}${lNode('Store acknowledged', '—', VB.n, 'await')}${lArrow}${lNode('Visit date reached', nf(A.due), `${nf(A.ahead)} still ahead`)}${lArrow}${lNode('Bought on visit date', nf(A.buy), `${inr(SA.net)} billed in range`, 'win')}</div>
     <div class="wl-track" style="height:14px;margin-top:18px;display:flex">${seg.map(([v, col]) => (v ? `<div class="wl-fill" style="height:14px;width:${(v / Math.max(1, A.n) * 100).toFixed(1)}%;background:${col};border-radius:0"></div>` : '')).join('')}</div>
     <div class="wl-legend">${seg.map(([v, col, l]) => `<span><i class="wl-sw" style="background:${col}"></i>${l} ${nf(v)}</span>`).join('')}</div>`, 'v');
 
   // by store, grouped by city (click a city)
   const byS = {}; ST.forEach((x) => { (byS[sid(x)] = byS[sid(x)] || []).push(x); });
-  const srow = Object.entries(byS).filter(([s]) => s !== 'UNMAPPED').map(([s, xs]) => ({ s, o: out(xs), at: xs.reduce((u, x) => u + x.o.filter((o) => o.r === 'store' && o.s === x.rs).length, 0) }));
+  const skeys = [...new Set([...Object.keys(byS), ...SO.map((o) => sid(o.x))])].filter((k) => k !== 'UNMAPPED');
+  const srow = skeys.map((k) => { const w = soOf((o) => sid(o.x) === k); return { s: k, o: { ...out(byS[k] || []), net: w.net, so: w.so }, at: w.at }; });
   const cityOf = (s) => pStore(s).city;
   const sum = (xs) => xs.reduce((u, y) => { for (const k of ['n', 'due', 'buy', 'other', 'none', 'net']) u.o[k] += y.o[k]; u.o.so += y.o.so.length; u.at += y.at; return u; }, { o: { n: 0, due: 0, buy: 0, other: 0, none: 0, net: 0, so: 0 }, at: 0 });
   const cities = [...new Set(srow.map((x) => cityOf(x.s)))].map((c) => { const xs = srow.filter((x) => cityOf(x.s) === c).sort((a, b) => b.o.n - a.o.n); return { c, xs, t: sum(xs) }; }).sort((a, b) => b.t.o.n - a.t.o.n);
   const cell = ({ o, at }) => { const so = typeof o.so === 'number' ? o.so : o.so.length; return `<td>${nf(o.n)}</td><td>${nf(o.due)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.due, 0)}</td><td>${nf(o.other)}</td><td class="${o.none ? 'bad' : ''}">${nf(o.none)}</td><td class="b">${inr(o.net)}</td><td>${so ? pct(at, so, 0) : '—'}</td>`; };
   const unm = (byS.UNMAPPED || []).length;
-  const stores = pcard('By store', 'Routed store from the sheet · click a city to see its stores · conversion = of visits due',
+  const stores = pcard('By store', 'Routed store from the sheet · click a city to see its stores · conversion = of visits due · revenue = store-visit orders billed in range (order date)',
     srow.length ? wtable(['Store', 'Scheduled', 'Visit date reached', 'Bought on visit date', 'Conversion', 'Bought another day', 'No order yet', 'Revenue', 'Billed at this store'],
       cities.flatMap(({ c, xs, t }) => { const open = !!F.cx[c]; return [`<tr class="je-grp cx-row" data-cx="${esc(c)}" tabindex="0" role="button" aria-expanded="${open}"><td class="b"><span class="cx-chev">${open ? '▾' : '▸'}</span> ${esc(c)} <span class="k-s">${nf(xs.length)} ${xs.length === 1 ? 'store' : 'stores'}</span></td>${cell(t)}</tr>`, ...(open ? xs.map((x) => `<tr class="je-sub"><td>${esc(pStore(x.s).name)}</td>${cell(x)}</tr>`) : [])]; }))
       + (unm ? `<p class="wl-note" style="margin-top:8px">${nf(unm)} routed with a store label not in the store master — in the totals above, not in this table.</p>` : '') : '<p class="sub" style="margin-top:14px">No store visits scheduled in this range.</p>', 'v');
@@ -1923,7 +1932,7 @@ function pRouting(r){
   // by agent (lead owner)
   const byA = {}; ST.forEach((x) => { (byA[x.ag || '(no owner)'] = byA[x.ag || '(no owner)'] || []).push(x); });
   const agents = pcard('By agent', 'Bigin owner / LimeChat first assignee of the routed lead', wtable(['Agent', 'Scheduled', 'Visit date reached', 'Bought on visit date', 'Conversion', 'No order yet', 'Revenue', 'Video call routed'],
-    Object.entries(byA).sort((a, b) => b[1].length - a[1].length).map(([ag, xs]) => { const o = out(xs); return `<tr><td class="b">${esc(ag)}</td><td>${nf(o.n)}</td><td>${nf(o.due)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.due, 0)}</td><td class="${o.none ? 'bad' : ''}">${nf(o.none)}</td><td>${inr(o.net)}</td><td>${nf(VR.filter((x) => (x.ag || '(no owner)') === ag).length)}</td></tr>`; })), 'v');
+    [...new Set([...Object.keys(byA), ...SO.map((o) => o.x.ag || '(no owner)')])].map((k) => [k, byA[k] || []]).sort((a, b) => b[1].length - a[1].length).map(([ag, xs]) => { const o = { ...out(xs), net: soOf((w) => (w.x.ag || '(no owner)') === ag).net }; return `<tr><td class="b">${esc(ag)}</td><td>${nf(o.n)}</td><td>${nf(o.due)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.due, 0)}</td><td class="${o.none ? 'bad' : ''}">${nf(o.none)}</td><td>${inr(o.net)}</td><td>${nf(VR.filter((x) => (x.ag || '(no owner)') === ag).length)}</td></tr>`; })), 'v');
 
   // routing sheet hygiene
   const rfc = {}; RS.forEach((x) => (x.fl || []).forEach((f) => { rfc[f] = (rfc[f] || 0) + 1; }));
@@ -1945,9 +1954,12 @@ function pVideo(r){
     return { n: xs.length, buy: buy.length, net: vo.reduce((u, o) => u + o.net, 0), orders: vo.length, other: xs.filter((x) => x.o.length && !x.o.some((o) => o.r === 'video')).length,
       lost: xs.filter((x) => x.x && !x.o.length).length, open: xs.filter((x) => !x.x && !x.o.length).length, lag: median(buy.map((x) => x.o.find((o) => o.r === 'video').lag)), vo }; };
   const A = out(V);
+  // revenue by order date (owner, 24 Oct 2026): video-call orders billed in the range, from video leads of any lead date
+  const VO = oRows(r, (x) => (x.rt && x.rv) || (!x.rt && x.vc)).filter((o) => o.r === 'video');
+  const voNet = (f) => VO.filter(f).reduce((u, o) => u + o.net, 0);
   const kp = pkpis([
     { l: 'Video calls arranged', v: nf(A.n), s: `${nf(V.filter((x) => x.rt).length)} via routing sheet · ${nf(V.filter((x) => !x.rt).length)} Bigin / LimeChat`, b: 'u' },
-    { l: 'Video call conversion', v: nf(A.buy), s: `${pct(A.buy, A.n, 0)} of arranged · ${inr(A.net)}`, b: 'v' },
+    { l: 'Video call conversion', v: nf(A.buy), s: `${pct(A.buy, A.n, 0)} of arranged · ${inr(voNet(() => true))} billed in range`, b: 'v' },
     { l: 'Not interested', v: nf(A.lost), s: 'after the video call was arranged', b: 'u' },
     { l: 'Still open', v: nf(A.open), tone: A.open ? 'bad' : '', s: 'no order, not closed', b: 'u' },
     { l: 'Lead → order', v: A.lag == null ? '—' : `${A.lag} day${A.lag === 1 ? '' : 's'}`, s: 'median, video call orders', b: 'v' },
@@ -1955,12 +1967,12 @@ function pVideo(r){
 
   const seg = [[A.buy, C.teal, 'Bought (video call)'], [A.other, C.tealMid, 'Bought, other route'], [A.lost, C.sandDk, 'Not interested'], [A.open, C.rust, 'Still open']];
   const flow = pcard('What happened to video calls', 'Video call conversion = routing remark "video" and order on/after the visit date, or not routed with a video call arranged and order on/after the lead date',
-    `<div class="wl-tree" style="flex-wrap:wrap">${lNode('Qualified', nf(lRows(r).filter((x) => x.q).length), 'Call Store + WhatsApp')}${lArrow}${lNode('Video call arranged', nf(A.n), 'store beyond 15 km')}${lArrow}${lNode('Demo held', '—', VB.n, 'await')}${lArrow}${lNode('Order by store team', nf(A.buy), inr(A.net), 'win')}</div>
+    `<div class="wl-tree" style="flex-wrap:wrap">${lNode('Qualified', nf(lRows(r).filter((x) => x.q).length), 'Call Store + WhatsApp')}${lArrow}${lNode('Video call arranged', nf(A.n), 'store beyond 15 km')}${lArrow}${lNode('Demo held', '—', VB.n, 'await')}${lArrow}${lNode('Order by store team', nf(A.buy), `${inr(voNet(() => true))} billed in range`, 'win')}</div>
     <div class="wl-track" style="height:14px;margin-top:18px;display:flex">${seg.map(([v, col]) => (v ? `<div class="wl-fill" style="height:14px;width:${(v / Math.max(1, A.n) * 100).toFixed(1)}%;background:${col};border-radius:0"></div>` : '')).join('')}</div>
     <div class="wl-legend">${seg.map(([v, col, l]) => `<span><i class="wl-sw" style="background:${col}"></i>${l} ${nf(v)}</span>`).join('')}</div>`, 'v');
 
   // where the video call was recorded
-  const brow = ([k, l, sub]) => { const o = out(V.filter((x) => basis(x) === k)); return `<tr><td style="white-space:normal"><b>${l}</b><br><span class="k-s">${sub}</span></td><td>${nf(o.n)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.n, 0)}</td><td>${inr(o.net)}</td><td>${nf(o.lost)}</td><td class="${o.open ? 'bad' : ''}">${nf(o.open)}</td></tr>`; };
+  const brow = ([k, l, sub]) => { const o = out(V.filter((x) => basis(x) === k)); return `<tr><td style="white-space:normal"><b>${l}</b><br><span class="k-s">${sub}</span></td><td>${nf(o.n)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.n, 0)}</td><td>${inr(voNet((w) => basis(w.x) === k))}</td><td>${nf(o.lost)}</td><td class="${o.open ? 'bad' : ''}">${nf(o.open)}</td></tr>`; };
   const bySrc = pcard('Where the video call was recorded', 'Lead\'s first contact source · a routing-sheet row with a video remark wins',
     wtable(['Recorded in', 'Arranged', 'Bought', 'Conversion', 'Revenue', 'Not interested', 'Still open'], VBASIS.map(brow)), 'u');
 
@@ -1984,12 +1996,12 @@ function pVideo(r){
   // by agent
   const byA = {}; V.forEach((x) => { (byA[x.ag || '(no owner)'] = byA[x.ag || '(no owner)'] || []).push(x); });
   const agents = pcard('By agent', 'Bigin owner / LimeChat first assignee who arranged the call', wtable(['Agent', 'Arranged', 'Bought', 'Conversion', 'Revenue', 'Not interested', 'Still open'],
-    Object.entries(byA).sort((a, b) => b[1].length - a[1].length).map(([ag, xs]) => { const o = out(xs); return `<tr><td class="b">${esc(ag)}</td><td>${nf(o.n)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.n, 0)}</td><td>${inr(o.net)}</td><td>${nf(o.lost)}</td><td class="${o.open ? 'bad' : ''}">${nf(o.open)}</td></tr>`; })), 'u');
+    Object.entries(byA).sort((a, b) => b[1].length - a[1].length).map(([ag, xs]) => { const o = { ...out(xs), net: voNet((w) => (w.x.ag || '(no owner)') === ag) }; return `<tr><td class="b">${esc(ag)}</td><td>${nf(o.n)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.n, 0)}</td><td>${inr(o.net)}</td><td>${nf(o.lost)}</td><td class="${o.open ? 'bad' : ''}">${nf(o.open)}</td></tr>`; })), 'u');
 
   // billing store of video call orders
-  const byS = {}; A.vo.forEach((o) => { const v = (byS[o.s] = byS[o.s] || { n: 0, net: 0 }); v.n++; v.net += o.net; });
-  const stores = pcard('Where video call orders were billed', 'DevX billing store · the store team places the order',
-    A.vo.length ? wtable(['Store', 'City', 'Orders', 'Revenue'], Object.entries(byS).sort((a, b) => b[1].net - a[1].net).map(([s, v]) => `<tr><td class="b">${esc(pStore(s).name)}</td><td>${esc(pStore(s).city)}</td><td>${nf(v.n)}</td><td class="b">${inr(v.net)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No video call orders in this range yet.</p>', 'v');
+  const byS = {}; VO.forEach((o) => { const v = (byS[o.s] = byS[o.s] || { n: 0, net: 0 }); v.n++; v.net += o.net; });
+  const stores = pcard('Where video call orders were billed', 'Orders billed in range (order date) · DevX billing store · the store team places the order',
+    VO.length ? wtable(['Store', 'City', 'Orders', 'Revenue'], Object.entries(byS).sort((a, b) => b[1].net - a[1].net).map(([s, v]) => `<tr><td class="b">${esc(pStore(s).name)}</td><td>${esc(pStore(s).city)}</td><td>${nf(v.n)}</td><td class="b">${inr(v.net)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No video call orders in this range yet.</p>', 'v');
 
   return kp + flow + bySrc + queue + `<div class="wl-g2">${agents}${stores}</div>` +
     `<p class="wl-note">Leads whose first contact is in the selected range. "Video call arranged" is as recorded by the agent (Bigin stage, LimeChat note or routing remark); whether the demo happened is not recorded anywhere yet.</p>`;
@@ -2159,11 +2171,9 @@ function allAttributed(cta = true){
   return cta ? out.filter((x) => (x.rt === 'call' ? callOn() : ctaOk(x.entry))) : out;
 }
 
-/* ---- PDP · Product & category ---- */
 /* ---- Products (lead list): category of interest → purchase, product pages, what was bought ---- */
 // Lead rows carry ci (category of interest: Bigin field, product page tag or routing sheet), pp (product page tag) and
 // order lines o[].i = [product index into leadList.pnames, category, qty, net].
-const lNet = (x) => x.o.reduce((u, o) => u + o.net, 0);
 // interest categories (routing sheet / Bigin) → DevX product categories that count as the same thing
 const CI_BUY = { 'pillows & cushions': ['Pillows', 'Cushions'], 'ergonomic furniture': ['Chairs', 'Workspace'], footwear: ['Footwear', 'Barefoot', 'Socks'], insoles: ['Insoles'], orthotics: ['Orthotics'], mattress: ['Mattress'], chairs: ['Chairs'], 'car seat': ['Cushions'] };
 const ciMatch = (ci, cat) => { const k = String(ci || '').toLowerCase(); return (CI_BUY[k] || []).includes(cat) || k === String(cat || '').toLowerCase(); };
@@ -2172,7 +2182,9 @@ function pProduct(r){
   const R = lRows(r); const names = PDATA.leadList.pnames || [];
   if (!R.some((x) => 'ci' in x)) return wcard('Product data arrives with the next data refresh', 'The lead list does not carry products yet; reload in 15 minutes.', '');
   const B = R.filter((x) => x.o.length);
-  const lines = R.flatMap((x) => x.o.flatMap((o) => (o.i || []).map(([p, c, q, net]) => ({ p, c: c || 'Other', q, net, s: o.s }))));
+  // what was bought and revenue by order date (owner, 24 Oct 2026): orders billed in the range, from leads of any lead date
+  const OD = oRows(r); const odNet = (f) => OD.filter(f).reduce((u, o) => u + o.net, 0);
+  const lines = OD.flatMap((o) => (o.i || []).map(([p, c, q, net]) => ({ p, c: c || 'Other', q, net, s: o.s })));
   const known = R.filter((x) => x.ci);
   const by = (xs, k) => xs.reduce((m, x) => { const v = k(x); (m[v] = m[v] || []).push(x); return m; }, {});
   const ciG = by(R, (x) => x.ci || 'Not known');
@@ -2183,27 +2195,27 @@ function pProduct(r){
     { l: 'Leads with a known interest', v: pct(known.length, R.length, 0), s: `${nf(known.length)} of ${nf(R.length)} · product or category on the lead`, b: 'v' },
     { l: 'Top interest', v: topCi ? esc(topCi[0]) : '—', s: topCi ? `${nf(topCi[1].length)} leads` : 'No product on leads', b: 'u' },
     { l: 'Top category bought', v: topBuy ? esc(topBuy[0]) : '—', s: topBuy ? `${inr(topBuy[1])} · ${pct(topBuy[1], lines.reduce((u, x) => u + x.net, 0), 0)} of revenue` : 'No orders yet', b: 'v' },
-    { l: 'Units bought', v: nf(lines.reduce((u, x) => u + x.q, 0)), s: `${nf(B.length)} buyers · ${nf(R.reduce((u, x) => u + x.o.length, 0))} orders`, b: 'v' },
+    { l: 'Units bought', v: nf(lines.reduce((u, x) => u + x.q, 0)), s: `${nf(new Set(OD.map((o) => o.x)).size)} buyers · ${nf(OD.length)} orders billed in range`, b: 'v' },
     { l: 'Product page chat → purchase', v: pct(ppB.length, PP.length, 1), s: `${nf(ppB.length)} of ${nf(PP.length)} PDP-tagged chats bought`, b: 'v' },
   ]);
 
   // interest → purchase
   const same = (x, c) => x.o.some((o) => (o.i || []).some((ln) => ciMatch(c, ln[1])));
-  const irow = ([c, xs]) => { const b = xs.filter((x) => x.o.length); return `<tr><td class="b">${esc(c)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => x.q).length)}</td><td>${nf(xs.filter((x) => x.rt).length)}</td><td>${nf(b.length)}</td><td class="b">${pct(b.length, xs.length, 1)}</td><td class="b">${inr(xs.reduce((u, x) => u + lNet(x), 0))}</td><td>${c === 'Not known' ? '—' : pct(b.filter((x) => same(x, c)).length, b.length, 0)}</td></tr>`; };
-  const interest = pcard('Interest → purchase by category', 'Category the lead asked about (Bigin product, product page tag or routing sheet) · bought same = buyers whose order has that category (Pillows & Cushions = pillows or cushions, Ergonomic Furniture = chairs or workspace)',
+  const irow = ([c, xs]) => { const b = xs.filter((x) => x.o.length); return `<tr><td class="b">${esc(c)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => x.q).length)}</td><td>${nf(xs.filter((x) => x.rt).length)}</td><td>${nf(b.length)}</td><td class="b">${pct(b.length, xs.length, 1)}</td><td class="b">${inr(odNet((o) => (o.x.ci || 'Not known') === c))}</td><td>${c === 'Not known' ? '—' : pct(b.filter((x) => same(x, c)).length, b.length, 0)}</td></tr>`; };
+  const interest = pcard('Interest → purchase by category', 'Category the lead asked about (Bigin product, product page tag or routing sheet) · revenue = orders billed in range · bought same = buyers whose order has that category (Pillows & Cushions = pillows or cushions, Ergonomic Furniture = chairs or workspace)',
     wtable(['Category of interest', 'Leads', 'Qualified', 'Routed', 'Bought', 'Conversion', 'Revenue', 'Bought same category'], Object.entries(ciG).sort((a, b) => (a[0] === 'Not known') - (b[0] === 'Not known') || b[1].length - a[1].length).map(irow)), 'v');
 
   // product pages (PDP chat tag)
   const ppG = Object.entries(by(PP, (x) => x.pp)).sort((a, b) => b[1].length - a[1].length);
   const pages = pcard('Which product pages generate leads', 'WhatsApp chats tagged with a product page · other CTAs do not record the page',
-    ppG.length ? wtable(['Product page', 'Leads', 'Called', 'Qualified', 'Bought', 'Conversion', 'Revenue'], ppG.map(([p, xs]) => { const b = xs.filter((x) => x.o.length); return `<tr><td class="b">${esc(p)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => x.c).length)}</td><td>${nf(xs.filter((x) => x.q).length)}</td><td>${nf(b.length)}</td><td class="b">${pct(b.length, xs.length, 1)}</td><td>${inr(xs.reduce((u, x) => u + lNet(x), 0))}</td></tr>`; }))
+    ppG.length ? wtable(['Product page', 'Leads', 'Called', 'Qualified', 'Bought', 'Conversion', 'Revenue'], ppG.map(([p, xs]) => { const b = xs.filter((x) => x.o.length); return `<tr><td class="b">${esc(p)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => x.c).length)}</td><td>${nf(xs.filter((x) => x.q).length)}</td><td>${nf(b.length)}</td><td class="b">${pct(b.length, xs.length, 1)}</td><td>${inr(odNet((o) => o.x.pp === p))}</td></tr>`; }))
       : `<p class="sub" style="margin-top:14px">No product-page chats in this range.${PDATA.leadList.rows.some((x) => x.pp) ? ` The PDP chat tag was last used on ${dpShort(PDATA.leadList.rows.filter((x) => x.pp).map((x) => x.d).sort().pop())}.` : ''}</p>`, 'v');
 
   // what was bought
   const tot = lines.reduce((u, x) => u + x.net, 0);
   const cl = Object.entries(catNet).map(([c, xs]) => ({ c, net: xs.reduce((u, x) => u + x.net, 0), q: xs.reduce((u, x) => u + x.q, 0) })).sort((a, b) => b.net - a.net);
   const mxc = Math.max(1, ...cl.map((x) => x.net));
-  const rank = pcard('Category ranking', 'What PDP leads bought · DevX order lines', cl.length ? wtable(['Category', 'Revenue', '', 'Units', 'Share'], cl.map((o) => `<tr><td class="b">${esc(o.c)}</td><td class="b">${inr(o.net)}</td><td style="width:30%"><div class="wl-track"><div class="wl-fill" style="width:${(o.net / mxc * 100).toFixed(1)}%;background:${C.teal}"></div></div></td><td>${nf(o.q)}</td><td>${pct(o.net, tot, 0)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
+  const rank = pcard('Category ranking', 'What PDP leads bought · DevX order lines billed in range (order date)', cl.length ? wtable(['Category', 'Revenue', '', 'Units', 'Share'], cl.map((o) => `<tr><td class="b">${esc(o.c)}</td><td class="b">${inr(o.net)}</td><td style="width:30%"><div class="wl-track"><div class="wl-fill" style="width:${(o.net / mxc * 100).toFixed(1)}%;background:${C.teal}"></div></div></td><td>${nf(o.q)}</td><td>${pct(o.net, tot, 0)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
 
   const sc = {}; lines.forEach((x) => { (sc[x.s] = sc[x.s] || {})[x.c] = (sc[x.s]?.[x.c] || 0) + x.net; });
   const topC = cl.slice(0, 6).map((x) => x.c); const stot = (s) => Object.values(sc[s]).reduce((u, v) => u + v, 0);
@@ -2217,7 +2229,7 @@ function pProduct(r){
   const ga = pcard('PDP views and store CTA clicks', 'Illustrative until GA4 / Shopify page events are connected', wtable(['PDP', 'Views', 'Lead CTA clicks', 'CTR', 'WhatsApp', 'Call'], m.map((x) => `<tr><td class="b">${esc(x.n)}</td><td>${nf(x.views)}</td><td>${nf(x.clicks)}</td><td>${pct(x.clicks, x.views, 2)}</td><td>${nf(x.wa)}</td><td>${nf(x.call)}</td></tr>`)), 's');
 
   return kp + interest + pages + `<div class="wl-g2">${rank}${heat}</div>` + prods + ga +
-    `<p class="wl-note">Leads whose first contact is in the selected range · orders = DevX orders credited to those leads (60 days, latest lead before the order).</p>`;
+    `<p class="wl-note">Leads, bought and conversion: leads whose first contact is in the range. Revenue and products: DevX orders billed in the range (order date), credited to a PDP lead (60 days, latest lead before the order).</p>`;
 }
 
 /* ---- Lost leads (lead list): where leads stop, loss reasons by source, store, category and agent ---- */
