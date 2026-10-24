@@ -639,7 +639,7 @@ function renderView(p){
   if (p.length === 0) view.innerHTML = pageHome();
   else if (p[0] === 'retail' && p.length === 1) view.innerHTML = pageRetail();
   else if (p[0] === 'retail' && p[1] === 'walk-in') view.innerHTML = pageWalkIn(p[2] || 'overview');
-  else if (p[0] === 'retail' && p[1] === 'pdp') view.innerHTML = pagePdp(p[2] || 'journey');
+  else if (p[0] === 'retail' && p[1] === 'pdp') view.innerHTML = pagePdp(p[2] || 'overview');
   else if (p[0] === 'retail' && p[1] === 'meta-ads') view.innerHTML = META.page(p[2] || 'overview');
   else if (p[0] === 'retail' && p[1] === 'retention') view.innerHTML = RET.page(p[2] || 'overview');
   else if (p[0] === 'retail') { const v = VERTICALS.find(x => x.id === p[1]); view.innerHTML = v ? pageSoon(v.name, v.desc, [['Founders Office','#/'],['Retail Revenue','#/retail']], '#/retail', 'Back to Retail Revenue') : pageNotFound(); }
@@ -662,7 +662,7 @@ function renderSide(p){
     if (pr.id === 'retail' && retailOpen) {
       html += `<div class="nav-sub">` + VERTICALS.filter(v => v.id === 'walk-in' ? canWalkinAny() : v.id === 'pdp' ? canP('pdp') : v.id === 'meta-ads' ? canP('meta') : v.id === 'retention' ? canP('retention') : canP('retail')).map(v => {
         const vh = '#/retail/' + v.id; const a = is(vh);
-        const firstTab = v.id === 'walk-in' ? (WTABS.find((x) => canP(WTAB_PERM[x.id])) || { id: 'overview' }).id : v.id === 'pdp' ? 'journey' : 'overview';
+        const firstTab = v.id === 'walk-in' ? (WTABS.find((x) => canP(WTAB_PERM[x.id])) || { id: 'overview' }).id : 'overview';
         return `<a class="nav-link ${a?'active':''}" href="${v.live ? vh + '/' + firstTab : vh}" ${a?'aria-current="page"':''}>${v.name}${v.live ? '' : '<span class="soon">Soon</span>'}</a>`;
       }).join('') + `</div>`;
     }
@@ -1454,9 +1454,9 @@ function wDefs(){
    Call route = Bigin "Callback Requests" (real) × BigQuery sales (real).
    Text route (LimeChat) and the PDP layer (views, CTA clicks) are SAMPLE until their exports are connected. */
 const PTABS = [
-  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'routing', name: 'Store routing' }, { id: 'video', name: 'Video calls' }, { id: 'sources', name: 'Sources & gaps' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
+  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'routing', name: 'Store routing' }, { id: 'video', name: 'Video calls' }, { id: 'sources', name: 'Sources & gaps' },
   { id: 'product', name: 'Product & category' }, { id: 'loss', name: 'Loss analysis' },
-  { id: 'quality', name: 'Data quality' }, { id: 'definitions', name: 'Definitions' },
+  { id: 'definitions', name: 'Definitions' },
 ];
 let PDATA = null, PDATA_ERR = null, PLOADING = false;
 async function loadPdp(force){
@@ -1535,11 +1535,6 @@ function callAgg(r){
 // Rule (owner, 22 Oct): store = routed + bought on the expected visit date · video = not routed + video call arranged · else other.
 const PATHS = [['store', 'Store visit', 'Routed · bought on visit date'], ['video', 'Video call', 'Not routed · VC arranged'], ['other', 'Other', 'Other day / no VC']];
 const PCOL = () => ({ store: C.teal, video: C.tealMid, other: C.sand });
-function pathAgg(A){
-  const o = {}; const cap = { store: 'Store', video: 'Video', other: 'Other' };
-  for (const [k] of PATHS) { const xs = A.filter((x) => x.path === k); o['buy' + cap[k]] = xs.filter((x) => x.first).length; o['net' + cap[k]] = xs.reduce((u, x) => u + x.net, 0); o['ord' + cap[k]] = xs.length; }
-  o.routedBuy = A.filter((x) => x.first && x.rtd).length; return o;
-}
 // ---------- aggregation: store routing = "Lead routing backend" sheet (WhatsApp DSR groups) ----------
 const hasRouting = () => !!(PDATA && PDATA.routing && PDATA.routing.routes);
 function routeAgg(r){
@@ -1559,7 +1554,6 @@ function routeAgg(r){
 // ---------- aggregation: text route = real LimeChat tickets (standardised in src/limechat.js) ----------
 // Stage map → call-style groups so shared views (agents, follow-up) work for both routes.
 const TSTAGE_G = { bot_only: 'botOnly', handoff_unassigned: 'botOnly', assigned_no_action: 'notCalled', messaged_no_outcome: 'messaged', not_reached: 'ringing', followup_pending: 'engaged', qualified: 'engaged', lost: 'lost', online: 'other', service: 'svc' };
-const TSTAGE_LBL = { service: 'Not a lead (order / return query)', bot_only: 'Not picked up (no reply, no note)', handoff_unassigned: 'Not picked up (no reply, no note)', assigned_no_action: 'Not picked up (no reply, no note)', messaged_no_outcome: 'Agent messaged, outcome not logged', not_reached: 'Agent tried, not reached', followup_pending: 'Reached, follow-up pending', qualified: 'Qualified (store / video / interested)', lost: 'Lost', online: 'Bought online (stated)' };
 const OC_LBL = { lost_not_interested: 'Not interested', lost_bought_elsewhere: 'Bought elsewhere', bought_online_d2c: 'Bought / will buy online', purchased_stated: 'Says purchased', routed_store: 'Store visit / store team', routed_video: 'Video consultation', qualified_other: 'Interested', followup_pending: 'Follow-up pending', not_reached: 'Not reached (RNR / declined)', unclassified: 'Not classifiable' };
 const hasText = () => !!(PDATA && PDATA.text && PDATA.text.tickets);
 const lastTagDate = (entry) => { const xs = hasText() ? PDATA.text.tickets.filter((x) => x.entry === entry) : []; return xs.length ? xs[xs.length - 1].d : null; };
@@ -1663,6 +1657,9 @@ function pOverview(r){
   const dl = (cur, prev, o) => wdelta(cur, prev, { short: true, ...o });
   const rate = (x, y) => pctv(x, y);
   const k = (l, v, d, s, b) => ({ l, v, d: d.d, tone: d.tone, s, b });
+  // share of store sales: PDP-credited orders billed in the range (any lead date, store filters on the billing store) ÷ all store sales in the range
+  const billed = (PDATA.leadList.rows || []).filter((x) => F.cta === 'all' || x.e === F.cta).reduce((u, x) => u + x.o.filter((o) => inPR(o.d, r) && pStoreOk(o.s)).reduce((v, o) => v + o.net, 0), 0);
+  const sales = (PDATA.call.salesDaily || []).filter((x) => inPR(x.d, r) && pStoreOk(x.s)).reduce((u, x) => u + x.net, 0);
   const kp = pkpis([
     k('Leads', nf(a.leads), dl(a.leads, P && P.leads), `Call Store ${nf(a.call)} · WhatsApp ${nf(a.wa)}`, 'v'),
     k('Consumption rate', pct(a.cons, a.leads, 0), dl(rate(a.cons, a.leads), P && rate(P.cons, P.leads), { pts: 1 }), `${nf(a.cons)} called · ${nf(a.leads - a.cons)} untouched`, 'v'),
@@ -1670,6 +1667,7 @@ function pOverview(r){
     k('Routed', nf(a.st + a.vid), dl(a.st + a.vid, P && P.st + P.vid), `Store visit ${nf(a.st)} · Video call ${nf(a.vid)}`, 'v'),
     k('Conversion rate', pct(a.buyers, a.leads, 1), dl(rate(a.buyers, a.leads), P && rate(P.buyers, P.leads), { pts: 1 }), `${nf(a.buyers)} buyers · ${nf(a.orders)} DevX orders`, 'v'),
     k('Revenue', inr(a.net), dl(a.net, P && P.net), `${a.leads ? inr(a.net / a.leads) : '—'} per lead · AOV ${a.orders ? inr(a.net / a.orders) : '—'}`, 'v'),
+    { l: 'Share of store sales', v: pct(billed, sales, 1), s: `${inr(billed)} PDP orders billed in range · of ${inr(sales)}`, b: 'v' },
   ]);
 
   const flow = pcard('PDP routing flow', 'Every lead from the website tap to the sale · Whimsical: Final PDP routing mechanism',
@@ -1726,7 +1724,14 @@ function pOverview(r){
     <div style="display:flex;align-items:flex-end;gap:4px;height:40px;margin-top:6px">${ser.map((s) => `<div title="${dpShort(s.d)}: ${nf(s.b)} buyers" style="flex:1;height:${(s.b / mb * 100).toFixed(1)}%;background:${C.teal}"></div>`).join('')}</div>
     <div class="wl-axis"><span>${dpShort(days[0])}</span><span>${dpShort(days[days.length - 1])}</span></div>`);
 
-  return kp + flow + cta + `<div class="wl-g2">${rev}${fix}</div>` + trend +
+  // lead cohorts by lead week (Mon)
+  const wk = (d) => dAdd(d, -((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7));
+  const coh = [...new Set(R.map((x) => wk(x.d)))].sort().map((w) => { const xs = R.filter((x) => wk(x.d) === w), b = xs.filter((x) => x.o.length);
+    return { w, n: xs.length, b: b.length, net: xs.reduce((u, x) => u + x.o.reduce((v, o) => v + o.net, 0), 0), st: xs.filter((x) => x.o.some((o) => o.r === 'store')).length, lag: median(b.map((x) => x.o[0].lag)) }; });
+  const cohorts = pcard('Lead cohorts', 'By lead week (Mon) · revenue to date from those leads · recent weeks are still converting',
+    wtable(['Week of', 'Leads', 'Bought', 'Conversion', 'Store visit conversion', 'Revenue', 'Median days to order'], coh.map((x) => `<tr><td class="b">${dpShort(x.w < r[0] ? r[0] : x.w)}${x.w < r[0] || dAdd(x.w, 6) > r[1] ? ' <span class="k-s">part week</span>' : ''}</td><td>${nf(x.n)}</td><td>${nf(x.b)}</td><td class="b">${pct(x.b, x.n, 1)}</td><td>${nf(x.st)}</td><td>${inr(x.net)}</td><td>${x.lag == null ? '—' : x.lag}</td></tr>`)), 'v');
+
+  return kp + flow + cta + `<div class="wl-g2">${rev}${fix}</div>` + trend + cohorts +
     `<p class="wl-note">Lead = one phone across Call Store + WhatsApp (a repeat within 30 days is the same lead) · converted = DevX order on/after the lead date within 60 days · ${nf(a.rep)} repeat contacts folded in.</p>`;
 }
 
@@ -1790,7 +1795,7 @@ function pPipeline(r){
   const byA = {}; T.forEach((t) => { (byA[t.ag || '(no owner)'] = byA[t.ag || '(no owner)'] || []).push(t); });
   const arow = ([ag, xs]) => { const called = xs.filter((t) => t.g !== 'new'), conn = xs.filter((t) => ['connected', 'visit', 'video', 'converted', 'lost'].includes(t.g)); const tf = median(xs.map((t) => t.tFirst).filter((v) => v != null));
     return `<tr><td class="b">${esc(ag)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter(isOpen).length)}</td><td>${pct(called.length, xs.length, 0)}</td><td>${nf(conn.length)}</td><td>${nf(xs.filter((t) => t.rt).length)}</td><td>${nf(xs.filter((t) => t.ord).length)}</td><td class="b">${inr(xs.reduce((u, t) => u + t.net, 0))}</td><td>${tf == null ? '—' : ageTxt(tf)}</td><td class="bad">${nf(xs.filter(breach).length)}</td></tr>`; };
-  const agents = pcard('By agent', 'Bigin ticket owner · first call = median time to leave New Enquiry (tracked since 23 Oct)',
+  const agents = pcard('By agent · WhatsApp tickets in Bigin', 'Bigin ticket owner · first call = median time to leave New Enquiry (tracked since 23 Oct)',
     wtable(['Agent', 'Tickets', 'Open', 'Called', 'Connected', 'Routed', 'Bought', 'Revenue', 'First call', 'SOP breaches'], Object.entries(byA).sort((x, y) => y[1].length - x[1].length).map(arow)), 'v');
 
   // Call Store (Bigin Callback Requests) — its own stage list
@@ -1799,7 +1804,14 @@ function pPipeline(r){
   const call = CL.length ? pcard('Call Store pipeline', 'Bigin Callback Requests · its own stage list',
     `<div class="pst" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px">${Object.entries(cs).sort((x, y) => y[1] - x[1]).map(([s, n]) => `<div class="stage ${s === 'Yet to Call' ? 'hot' : ''}"><span class="s-l">${esc(s)}</span><span class="s-n">${nf(n)}</span><span class="s-v">${pct(n, CL.length, 0)}</span></div>`).join('')}</div>`, 'u') : '';
 
-  return kp + board + hyg + agents + call +
+  // agent scorecard across Call Store + WhatsApp (lead list, same rules as Overview)
+  const LR = lRows(r); const byL = {}; LR.forEach((x) => { (byL[x.ag || '(no owner)'] = byL[x.ag || '(no owner)'] || []).push(x); });
+  const srow = ([ag, xs]) => { const b = xs.filter((x) => x.o.length); const net = xs.reduce((u, x) => u + x.o.reduce((v, o) => v + o.net, 0), 0);
+    return `<tr><td class="b">${esc(ag)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => x.src === 'call').length)}</td><td>${pct(xs.filter((x) => x.c).length, xs.length, 0)}</td><td>${nf(xs.filter((x) => x.n).length)}</td><td>${nf(xs.filter((x) => x.q).length)}</td><td>${nf(xs.filter((x) => x.rt && !x.rv).length)}</td><td>${nf(xs.filter((x) => (x.rt && x.rv) || (!x.rt && x.vc)).length)}</td><td>${nf(b.length)}</td><td class="b">${pct(b.length, xs.length, 1)}</td><td class="b">${inr(net)}</td></tr>`; };
+  const score = pcard('Agent scorecard', 'Call Store + WhatsApp leads in range · Bigin owner / LimeChat first assignee of the lead · same rules as Overview',
+    wtable(['Agent', 'Leads', 'Call Store', 'Called', 'Connected', 'Qualified', 'Store visit', 'Video call', 'Bought', 'Conversion', 'Revenue'], Object.entries(byL).sort((a, b) => b[1].length - a[1].length).map(srow)), 'v');
+
+  return kp + board + hyg + score + agents + call +
     `<p class="wl-note">Tickets created in the selected range · WhatsApp leads from Bigin PDP Inventories (read every 15 min) · Bigin ${PDATA.pinv.meta?.refreshedAt ? 'read ' + new Date(PDATA.pinv.meta.refreshedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : ''}.</p>`;
 }
 
@@ -2079,7 +2091,12 @@ function pSources(r){
   const gaps = pcard('Known gaps', 'SOP 02 · section 14 (CTA audit 7 Oct 2026) + tracking gaps · what stops a lead or a number from being measured',
     wtable(['Gap', 'Effect', 'Owner', 'Status'], KGAPS.map(([g, e, o, s]) => `<tr><td class="b" style="white-space:normal">${g}</td><td style="text-align:left;white-space:normal">${e}</td><td style="text-align:left">${o}</td><td style="text-align:left">${st(s)}</td></tr>`)), '');
 
-  return kp + map + src + cov + gaps +
+  const DD = (PDATA.pinv?.recon?.days || []).filter((x) => inPR(x.d, r));
+  const daily = DD.length ? pcard('LimeChat → Bigin coverage by day', `Every WhatsApp chat should reach Bigin PDP Inventories (matched by conversation ID) · from ${cut ? dpShort(cut) : 'the cutover'}`,
+    wtable(['Date', 'LimeChat leads', 'In Bigin', 'Missing', 'Bigin tickets', 'Not in export'], DD.map((x) => `<tr><td class="b">${dpShort(x.d)}</td><td>${nf(x.lcLeads)}</td><td>${nf(x.inBigin)}</td><td class="${x.missing ? 'bad' : ''}">${nf(x.missing)}</td><td>${nf(x.bigin)}</td><td>${nf(x.notInExport)}</td></tr>`))
+    + `<p class="wl-note" style="margin-top:8px">LimeChat export covers to ${PDATA.pinv.recon.lcEnd ? dpShort(PDATA.pinv.recon.lcEnd) : '—'}; later days show Bigin only until the export catches up.</p>`, 'v') : '';
+
+  return kp + map + src + cov + daily + gaps +
     `<p class="wl-note">Lead counts ignore the CTA toggle on this tab · leads whose first contact is in the selected range.</p>`;
 }
 
@@ -2091,7 +2108,7 @@ function pagePdp(tab){
   let body;
   if (tab === 'definitions') body = pDefs();
   else if (!PDATA || !DATA) body = PDATA_ERR || DATA_ERR ? wcard('Live data could not be loaded', esc(PDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="pRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin Callback Requests (T-1) and BigQuery sales.', '');
-  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, tat: pTat, routing: pRouting, video: pVideo, sources: pSources, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
+  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, tat: pTat, routing: pRouting, video: pVideo, sources: pSources, product: pProduct, loss: pLoss }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
   const i = PTABS.findIndex((t) => t.id === tab);
   const prev = i > 0 ? `<a href="#/retail/pdp/${PTABS[i - 1].id}"><span class="p-dir">← Previous</span><span class="p-name">${PTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
   const next = i < PTABS.length - 1 ? `<a class="next" href="#/retail/pdp/${PTABS[i + 1].id}"><span class="p-dir">Next →</span><span class="p-name">${PTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
@@ -2109,62 +2126,8 @@ function funnel(steps){
   }).join('') + `</div>`;
 }
 
-/* ---- Customer journey (the story): PDP → lead → follow-up → visit → purchase → revenue ---- */
-const jPct = (a, b) => (b > 0 ? (a / b) * 100 : null);
-const jTxt = (v) => (v == null || !isFinite(v) ? '—' : v < 10 ? v.toFixed(1) + '%' : Math.round(v) + '%');
-// Lead funnel = PDP → lead capture → consumed → connected → qualified → conversion outcome.
-// Store visit / video consultation is NOT a funnel stage: it is where the agent routes a qualified lead (shown separately).
-function journeyData(r){
-  const a = callAgg(r), t = textAgg(r), pd = pdpAgg(r);
-  const views = pd.reduce((s, x) => s + x.views, 0), clicks = pd.reduce((s, x) => s + x.clicks, 0);
-  const callCta = pd.reduce((s, x) => s + x.call, 0), waCta = pd.reduce((s, x) => s + x.wa, 0);
-  const aOpen = Math.max(0, a.engaged - a.purchased), tOpen = Math.max(0, t.engaged + t.followup - t.purchased);
-  const call = [
-    { k: 'view', v: views, b: 's' }, { k: 'cta', v: callCta, b: 's' }, { k: 'lead', v: a.unique, b: 'v' }, { k: 'cons', v: a.consumed, b: 'u' },
-    { k: 'fu', v: a.connected, b: 'u' }, { k: 'qual', v: a.engaged, b: 'u', split: `Store visit ${nf(a.qualVisit)} · VC ${nf(a.qualVc)}` },
-    { k: 'conv', v: a.purchased, b: 'v', split: `Lost ${nf(a.lost)} · Open ${nf(aOpen)}` },
-    { k: 'rev', v: a.net, b: 'v', money: 1 },
-  ];
-  const text = [
-    { k: 'view', v: views, b: 's' }, { k: 'cta', v: t.chats, b: 'v', split: `${nf(t.svc)} order queries` }, { k: 'lead', v: t.unique, b: 'v' }, { k: 'cons', v: t.consumed, b: 'v' },
-    { k: 'fu', v: t.reached, b: 'u' }, { k: 'qual', v: t.engaged, b: 'u', split: `Store visit ${nf(t.qualVisit)} · VC ${nf(t.qualVc)}` },
-    { k: 'conv', v: t.purchased, b: 'v', split: `Lost ${nf(t.lost)} · Open ${nf(tOpen)}` },
-    { k: 'rev', v: t.net, b: 'v', money: 1 },
-  ];
-  return { a, t, pd, views, clicks, callCta, waCta, call, text, aOpen, tOpen };
-}
-const JSTAGES = [
-  { k: 'view', n: 'PDP views', ch: 1 }, { k: 'cta', n: 'Call pop-up / chat', ch: 2 }, { k: 'lead', n: 'Lead captured', ch: 2 },
-  { k: 'cons', n: 'Consumed', ch: 3 }, { k: 'fu', n: 'Connected', ch: 4 }, { k: 'qual', n: 'Qualified', ch: 5 },
-  { k: 'conv', n: 'Converted', ch: 6 }, { k: 'rev', n: 'Revenue', ch: 6 },
-];
-function jRail(J){
-  const cell = (s, prev, i) => {
-    const conv = i && !s.money && prev && prev.v != null && s.v != null ? jPct(s.v, prev.v) : null;
-    const val = s.v == null ? '—' : s.money ? inr(s.v) : nf(s.v);
-    return `<div class="jr-c ${s.b === 's' ? 'smp' : ''} ${s.b === 'n' ? 'nt' : ''}">${conv != null ? `<span class="jr-cv ${conv < 30 ? 'low' : ''}">${jTxt(conv)}</span>` : ''}<b>${val}</b>${s.split ? `<span class="jr-sp">${s.split}</span>` : ''}</div>`;
-  };
-  const row = (label, sub, arr) => `<div class="jr-row"><div class="jr-h"><b>${label}</b><span>${sub}</span></div>${arr.map((s, i) => cell(s, arr[i - 1], i)).join('')}</div>`;
-  return `<div class="jrail" role="table" aria-label="Lead funnel by route">
-    <div class="jr-row jr-head"><div class="jr-h"></div>${JSTAGES.map((s) => `<a class="jr-s" role="button" tabindex="0" data-jump="jch${s.ch}"><span>${s.ch}</span>${s.n}</a>`).join('')}</div>
-    ${row('Call', 'Bigin', J.call)}${row('Text', 'LimeChat', J.text)}
-  </div><p class="wl-note" style="margin-top:8px">Small numbers = conversion from the previous stage (orange under 30%). Hatched = sample (GA4 pending).</p>`;
-}
-const JLINK = { 1: ['product', 'PDP & product'], 2: ['quality', 'Lead data quality'], 3: ['follow-up', 'Follow-up'], 4: ['follow-up', 'Follow-up'], 5: ['loss', 'Loss analysis'], 6: ['revenue', 'Revenue'], 7: ['revenue', 'Store visits by store'] };
-function jChapter(n, title, ask, kpis, lost, bottleneck, extra = '', sampleOnly = false, cls = ''){
-  return `<section class="jch ${sampleOnly ? 'smp' : ''} ${cls}" id="jch${n}">
-    <div class="jch-h"><span class="jch-n">${cls === 'jside' ? '↳' : n}</span><div style="flex:1"><h2>${title}</h2><p class="sub">${ask}</p></div>${JLINK[n] ? `<a class="jch-go" href="#/retail/pdp/${JLINK[n][0]}">${JLINK[n][1]} →</a>` : ''}</div>
-    <div class="jch-b ${kpis ? '' : 'nok'}">${kpis ? `<div class="jch-k">${kpis}</div>` : ''}
-      <div class="jch-side">${lost ? `<div class="jlost"><span class="jl-t">Lost at this stage</span>${lost}</div>` : ''}${bottleneck ? `<div class="jbn"><span class="jl-t">Bottleneck</span>${bottleneck}</div>` : ''}</div></div>${extra}</section>`;
-}
 const jk = (l, v, s, b) => `<div class="jk ${b === 's' ? 'smp' : ''}"><span class="k-l">${l}</span><span class="jk-v ${v === '—' ? 'none' : ''}">${v}</span><span class="k-s">${s}</span>${VB[b]}</div>`;
-const jLostRow = (label, n, of, b) => `<div class="jl-r"><span>${label}</span><b>${nf(n)}</b><span class="k-s">${of ? pct(n, of, 0) : ''}</span>${VB[b]}</div>`;
-const jVs = (cHtml, tHtml) => `<div class="jvs"><div><div class="jvs-h">Call · Bigin</div>${cHtml}</div><div><div class="jvs-h">Text · LimeChat</div>${tHtml}</div></div>`;
-const jPaths = (o, money, b) => { const v = { store: o.netStore, video: o.netVideo, other: o.netOther }; if (!money) Object.assign(v, { store: o.buyStore, video: o.buyVideo, other: o.buyOther }); const tot = v.store + v.video + v.other; const f = money ? inr : nf; const c = PCOL();
-  return `<div class="jsplit ${b === 's' ? 'smp' : ''}"><div class="wl-track" style="height:14px">${tot ? PATHS.map(([k]) => v[k] ? `<div class="wl-fill" style="height:14px;width:${(v[k] / tot * 100).toFixed(1)}%;background:${c[k]};border-radius:0"></div>` : '').join('') : ''}</div><div class="wl-legend" style="margin-top:6px">${PATHS.map(([k, l]) => `<span><i class="wl-sw" style="background:${c[k]}"></i>${l} ${f(v[k])} (${pct(v[k], tot, 0)})</span>`).join('')}</div></div>`; };
 const jSplit = (store, video, money, b, l1 = 'In-store', l2 = 'Video') => { const tot = store + video; const f = money ? inr : nf; return `<div class="jsplit ${b === 's' ? 'smp' : ''}"><div class="wl-track" style="height:14px">${tot ? `<div class="wl-fill" style="height:14px;width:${(store / tot * 100).toFixed(1)}%;background:${C.teal};border-radius:0"></div><div class="wl-fill" style="height:14px;width:${(video / tot * 100).toFixed(1)}%;background:${C.rust};border-radius:0"></div>` : ''}</div><div class="wl-legend" style="margin-top:6px"><span><i class="wl-sw" style="background:${C.teal}"></i>${l1} ${f(store)} (${pct(store, tot, 0)})</span><span><i class="wl-sw" style="background:${C.rust}"></i>${l2} ${f(video)} (${pct(video, tot, 0)})</span></div></div>`; };
-// Outcome bar: converted / lost / still open (of qualified + lost)
-const jOutcome = (conv, lost, open, b) => { const tot = conv + lost + open; return `<div class="jsplit ${b === 's' ? 'smp' : ''}"><div class="wl-track" style="height:14px">${tot ? [[conv, C.teal], [lost, C.rust], [open, C.sand]].map(([v, c]) => v ? `<div class="wl-fill" style="height:14px;width:${(v / tot * 100).toFixed(1)}%;background:${c};border-radius:0"></div>` : '').join('') : ''}</div><div class="wl-legend" style="margin-top:6px"><span><i class="wl-sw" style="background:${C.teal}"></i>Converted ${nf(conv)}</span><span><i class="wl-sw" style="background:${C.rust}"></i>Lost ${nf(lost)}</span><span><i class="wl-sw" style="background:${C.sand}"></i>Still open ${nf(open)}</span></div></div>`; };
 
 // ---------- entry point → revenue (both routes) ----------
 // Call = website Call Store pop-up (Bigin). WhatsApp = LimeChat Level 1 tag: PDP chat, store widget, store card, store inquiry, generic.
@@ -2188,198 +2151,10 @@ function entryAgg(r){
   const U = rows.reduce((u, o) => u + o.u, 0), N = rows.reduce((u, o) => u + o.net, 0);
   return { rows, subs, U, N, A };
 }
-const eRow = (o, cls, label) => `<tr class="${cls}"><td class="b">${label}</td><td class="b">${nf(o.u)}</td><td>${pct(o.cons, o.u, 0)}</td><td>${nf(o.q)}</td><td class="b">${nf(o.b)}</td><td>${pct(o.b, o.u, 1)}</td><td class="b">${inr(o.net)}</td><td>${o.u ? inr(o.net / o.u) : '—'}</td></tr>`;
-function jEntry(e, full, sel = 'all'){
-  if (!e.rows.length) return '<p class="sub" style="margin-top:14px">No leads in this range.</p>';
-  const rows = sel === 'all' ? e.rows : e.rows.filter((o) => o.k === sel);
-  const mx = Math.max(1, ...e.rows.map((o) => Math.max(pctv(o.u, e.U) || 0, pctv(o.net, e.N) || 0)));
-  const bars = `<div class="jentry">${e.rows.map((o) => { const ls = pctv(o.u, e.U) || 0, rs = pctv(o.net, e.N) || 0; return `<span class="wl-sn ${sel === o.k ? 'je-on' : ''}">${esc(ENTRY[o.k]?.[0] || o.k)} <span class="k-s">${ENTRY[o.k]?.[1] || ''}</span></span><div class="je-b"><div class="wl-track"><div class="wl-fill" style="width:${(ls / mx * 100).toFixed(1)}%;background:${C.tealMid}"></div></div><div class="wl-track"><div class="wl-fill" style="width:${(rs / mx * 100).toFixed(1)}%;background:${C.teal}"></div></div></div><span class="je-v">${pctTxt(ls, 0)}<br><b>${pctTxt(rs, 0)}</b></span>`; }).join('')}</div><div class="wl-legend" style="margin-top:6px"><span><i class="wl-sw" style="background:${C.tealMid}"></i>Share of leads</span><span><i class="wl-sw" style="background:${C.teal}"></i>Share of revenue</span></div>`;
-  const head = ['CTA', 'Leads', 'Consumed', 'Qualified', 'Bought', 'Conversion', 'Revenue', 'Per lead'];
-  // one table: click a CTA row to expand it into its stores (Call Store, Chat with store…) or products (PDP chat)
-  const tbl = wtable(head, e.rows.flatMap((o) => { const subs = e.subs[o.k] || []; const open = !!F.ex[o.k]; const n = subs.length; const what = o.k === 'pdp' ? (n === 1 ? 'product' : 'products') : (n === 1 ? 'store' : 'stores');
-    return [eRow(o, `cx-row ${sel === o.k ? 'je-on' : ''}" data-ex="${o.k}" tabindex="0" role="button" aria-expanded="${open}`, `<span class="cx-chev">${open ? '▾' : '▸'}</span> ${esc(ENTRY[o.k]?.[0] || o.k)} <span class="k-s">${ENTRY[o.k]?.[1] || ''} · ${nf(n)} ${what}</span>`), ...(open ? subs.map((x) => eRow(x, 'je-sub', esc(x.sub))) : [])]; }));
-  return full ? bars + `<div style="margin-top:14px">${tbl}</div>` : bars;
-}
-// Entry point whose share of leads most exceeds its share of revenue (or the reverse) — one-line takeaway.
-function entryTake(e){
-  if (!e.U) return '';
-  if (e.rows.length === 1) { const o = e.rows[0]; return `Only ${esc(ENTRY[o.k]?.[0] || o.k)} has leads in this range — ${pct(o.b, o.u, 1)} convert at ${inr(o.net / o.u)} per lead.`; }
-  const best = [...e.rows].filter((o) => o.u >= 5).sort((x, y) => y.net / y.u - x.net / x.u)[0];
-  const gap = [...e.rows].sort((x, y) => ((pctv(y.u, e.U) || 0) - (pctv(y.net, e.N) || 0)) - ((pctv(x.u, e.U) || 0) - (pctv(x.net, e.N) || 0)))[0];
-  if (!e.N) return `No revenue matched yet — ${esc(ENTRY[gap.k]?.[0] || gap.k)} brings ${pct(gap.u, e.U, 0)} of leads.`;
-  return `${esc(ENTRY[gap.k]?.[0] || gap.k)} brings ${pct(gap.u, e.U, 0)} of leads but ${pct(gap.net, e.N, 0)} of revenue.` + (best && best.k !== gap.k ? ` Best value per lead: ${esc(ENTRY[best.k]?.[0] || best.k)} (${inr(best.net / best.u)}).` : '');
-}
-function pJourney(r){
-  const J = journeyData(r), { a, t, pd } = J;
-  const g = routeAgg(r), E = entryAgg(r);
-  const p = pPrev(r), pa = p ? callAgg(p) : null, pt = p ? textAgg(p) : null;
-  const AA = allAttributed().filter((x) => inPR(x.ld, r) && pStoreOk(x.cs));
-  const U = a.unique + t.unique, CS = a.consumed + t.consumed, Q = a.engaged + t.engaged, B = AA.filter((x) => x.first).length, N = AA.reduce((u, x) => u + x.net, 0);
-  const prevOk = p && p[0] >= (PDATA.callStart || PDATA.startDate) && !(PDATA.text?.gaps || []).some((x) => !(x.to < p[0] || x.from > p[1]));
-  const dU = wdelta(U, prevOk && pa && pt ? pa.unique + pt.unique : null, { short: true });
-  const P2 = pathAgg(AA); // deduped orders, same base as N
-  const cta = F.cta === 'all' ? 'All CTAs' : ENTRY_SHORT[F.cta];
-  const leaks = jLeaks(a, t, J, g);
-
-  // the story in three lines
-  const story = `<section class="jstory"><span class="wl-eyebrow">${esc(cta.toUpperCase())} · ${dpShort(r[0])} → ${dpShort(r[1])}</span>
-    <p><b>${nf(U)}</b> leads → <b>${nf(CS)}</b> consumed (${pct(CS, U, 0)}) → <b>${nf(Q)}</b> qualified → <b>${nf(B)}</b> bought → <b>${inr(N)}</b> revenue.<br>
-    <i>WORKING</i> ${F.cta === 'all' ? entryTake(E) : `${esc(cta)} converts ${pct(B, U, 1)} of its leads at ${U ? inr(N / U) : '—'} per lead.`}${N ? ` ${pct(P2.netStore, N, 0)} of revenue is store visit conversions, ${pct(P2.netVideo, N, 0)} video call conversions, ${pct(P2.netOther, N, 0)} other.` : ''}<br>
-    <i>FIX FIRST</i> <b class="bad">${leaks[0] ? `${esc(leaks[0].l)} — ${nf(leaks[0].n)} leads (${pct(leaks[0].n, leaks[0].of, 0)})` : 'No major leak in this range'}</b></p></section>`;
-
-  const kp = pkpis([
-    { l: 'Leads', v: nf(U), d: dU.d, tone: dU.tone, s: `${nf(a.unique)} call · ${nf(t.unique)} WhatsApp`, b: 'v' },
-    { l: 'Consumption rate', v: pct(CS, U, 0), tone: pctv(CS, U) < 60 ? 'bad' : '', s: `${nf(U - CS)} untouched`, b: 'v' },
-    { l: 'Qualified', v: nf(Q), s: `${pct(Q, CS, 0)} of consumed`, b: 'u' },
-    { l: 'Converted', v: pct(B, U, 1), s: `${nf(B)} buyers`, b: 'v' },
-    { l: 'Revenue', v: inr(N), s: `${U ? inr(N / U) : '—'} per lead`, b: 'v' },
-  ]);
-
-  const funnelC = pcard('Lead funnel', 'Each stage by route · click a stage for its detail', jRail(J));
-  const ctaC = pcard('CTA performance', 'Share of leads vs share of revenue · click a CTA to see it by store or product page', jEntry(E, true, F.cta), 'v');
-  const conv = pcard('How qualified leads convert', 'Store visit = routed, bought on visit date · video call = not routed, VC arranged · other', jPaths(P2, 1, 'v') +
-    `<div class="jmini">${g.has ? `<span><b>${nf(g.routed)}</b> routed to a store → <b>${nf(g.bought)}</b> billed · <b class="${g.missed ? 'bad' : ''}">${nf(g.missed)}</b> missed their visit date</span>` : '<span>Store routing sheet not connected</span>'}<span>Video consults booked: ${VB.n}</span></div>`, 'v');
-  const fix = pcard('What to fix', 'Biggest leaks, ranked by leads lost · each with the next action', leaks.length ? `<ol class="jfix">${leaks.slice(0, 4).map((x) => `<li><div><b>${esc(x.l)}</b><span class="k-s">${nf(x.n)} leads · ${pct(x.n, x.of, 0)} of ${esc(x.ofL)}</span></div><div class="jfix-a">${esc(x.fix)}</div><a class="jch-go" href="#/retail/pdp/${x.tab}">${esc(PTABS.find((q) => q.id === x.tab)?.name || '')} →</a></li>`).join('')}</ol>` : '<p class="sub" style="margin-top:14px">No leaks above zero in this range.</p>');
-
-  // ---------- stage-by-stage detail (toggle) — follows the Whimsical flow ----------
-  const fmtM = (v) => (v == null ? '—' : v >= 1440 ? (v / 1440).toFixed(1) + ' d' : v >= 60 ? (v / 60).toFixed(1) + ' h' : v + ' min');
-  const pdpL = {}; t.U.filter((x) => x.pdp).forEach((x) => { pdpL[x.pdp] = (pdpL[x.pdp] || 0) + 1; });
-  const ch1 = jChapter(1, 'PDP interaction', 'Store CTA · WhatsApp · Call Store — which product pages start conversations?',
-    jk('PDP views', nf(J.views), `${pd.length} PDPs · GA4 pending`, 's') + jk('Lead CTA clicks', nf(J.clicks), `${pct(J.clicks, J.views, 2)} of views`, 's') +
-    jk('Leads with a known PDP', pct(t.pdpKnown + a.prod, U, 0), `${nf(t.pdpKnown)} WhatsApp · ${nf(a.prod)} call`, 'v'),
-    jLostRow('Views with no CTA click', J.views - J.clicks, J.views, 's') + jLostRow('WhatsApp leads with no PDP', t.unique - t.pdpKnown, t.unique, 'v') + jLostRow('Call leads with no PDP', a.unique - a.prod, a.unique, 'v'),
-    (t.pdpKnown === 0 && lastTagDate('pdp') ? `No lead in this range carries a PDP — chair PDP tags stop after <b>${dpShort(lastTagDate('pdp'))}</b>. ` : '') + 'The store widget and the call pop-up never say which page the shopper was on.',
-    Object.keys(pdpL).length ? `<div class="jtop"><span class="jl-t">WhatsApp leads by PDP tag</span>${Object.entries(pdpL).sort((x, y) => y[1] - x[1]).slice(0, 6).map(([k, n]) => `<span>${esc(k)} <b>${nf(n)}</b></span>`).join('')}</div>` : '');
-  const ch2 = jChapter(2, 'Lead capture', 'Bigin (call) · LimeChat (text) — how many shoppers leave a number?',
-    jVs(jk('Call leads', nf(a.unique), `${nf(a.raw)} records − ${nf(a.dup)} dup`, 'v') + jk('Pop-up → lead', jTxt(jPct(a.unique, J.callCta)), 'of Call Store pop-ups', 's'),
-        jk('WhatsApp leads', nf(t.unique), `${nf(t.chats)} chats − ${nf(t.svc)} order queries − ${nf(t.dup)} dup`, 'v') + jk('Chat → lead', jTxt(jPct(t.unique, t.chats)), 'Chats that are not order queries', 'v')),
-    jLostRow('Order / return queries (not leads)', t.svc, t.chats, 'v') + jLostRow('Duplicate phone (WhatsApp)', t.dup, t.raw, 'v') + jLostRow('Duplicate phone (call)', a.dup, a.raw, 'v'),
-    `${nf(t.svc)} chats are existing customers tracking orders — kept out of the funnel. Ticket Status is never used as a stage.`);
-  const ch3 = jChapter(3, 'Consumption', 'Did a backend agent pick the lead up? Call: moved past Yet to Call · WhatsApp: agent replied',
-    jVs(jk('Consumed', jTxt(jPct(a.consumed, a.unique)), `${nf(a.consumed)} of ${nf(a.unique)} calls`, 'u') + jk('Still Yet to Call', nf(a.notCalled), `${nf(a.stale)} waiting 2+ days`, 'u'),
-        jk('Consumed', jTxt(jPct(t.consumed, t.unique)), `${nf(t.consumed)} of ${nf(t.unique)} chats · agent replied`, 'v') + jk('Time to first reply', fmtM(t.replyMed), 'Median, from chat start', 'v') + jk('Call note, no reply', nf(t.noteOnly), 'Agent called; no WhatsApp reply', 'u')),
-    jLostRow('Call: still Yet to Call', a.notCalled, a.unique, 'u') + jLostRow('WhatsApp: agent never replied', t.unique - t.consumed, t.unique, 'v') + jLostRow('WhatsApp: called, no reply (note only)', t.noteOnly, t.unique, 'u'),
-    `<b>${pct(t.unique - t.consumed, t.unique, 0)}</b> of WhatsApp leads never get an agent reply.`);
-  const ch4 = jChapter(4, 'Follow-up', 'Yet to Call → RNR → Connected — does the agent reach the customer?',
-    jVs(jk('Connected', jTxt(jPct(a.connected, a.consumed)), `${nf(a.connected)} of ${nf(a.consumed)} consumed`, 'u') + jk('Ringing (RNR)', nf(a.ringing), `${pct(a.ringing, a.consumed, 0)} of consumed`, 'u'),
-        jk('Connected', jTxt(jPct(t.reached, t.consumed + t.noteOnly)), `${nf(t.reached)} reached (from the note)`, 'u') + jk('Not reached', nf(t.notReached), 'RNR / declined', 'u') + jk('Replied, outcome not logged', nf(t.messagedNoOutcome), 'No note after the reply', 'v')),
-    jLostRow('Call: RNR', a.ringing, a.consumed, 'u') + jLostRow('WhatsApp: not reached', t.notReached, t.consumed + t.noteOnly, 'u') + jLostRow('WhatsApp: outcome not logged', t.messagedNoOutcome, t.consumed, 'v'),
-    `${nf(t.closedNoAction)} WhatsApp tickets were closed with nothing logged — "closed" is not an outcome.`);
-  const ch5 = jChapter(5, 'Qualified?', 'No → lost (not interested · unreachable) · Yes → store visit or video consult',
-    jVs(jk('Qualified', jTxt(jPct(a.engaged, a.connected)), `${nf(a.engaged)} of ${nf(a.connected)} connected`, 'u') + jk('Lost', nf(a.lost), `${nf(a.lostNoReason)} with no reason`, 'u'),
-        jk('Qualified', jTxt(jPct(t.engaged, t.reached)), `${nf(t.engaged)} of ${nf(t.reached)} reached`, 'u') + jk('Lost', nf(t.lost + t.online), `${nf(t.online)} say they bought online`, 'u') + jk('Follow-up pending', nf(t.followup), 'Call back later', 'u')),
-    jLostRow('Call: Not Interested', a.lost, a.connected, 'u') + jLostRow('WhatsApp: not interested / elsewhere', t.lost, t.reached, 'u') + jLostRow('WhatsApp: bought online instead', t.online, t.reached, 'u'),
-    `WhatsApp outcomes live only in free-text Private Notes (RNR alone is written ${nf(new Set((PDATA.text?.tickets || []).flatMap((x) => x.rnr || [])).size)} ways); standardised here, raw notes on Data quality.`);
-  const col = (title, sub, body) => `<div><div class="j3-h">${title}<span>${sub}</span></div>${body}</div>`;
-  const route = jChapter(7, 'Yes → store visit or video consult', 'Not a funnel stage: the agent routes the qualified lead on the WhatsApp DSR group, or sets up a video consult with the store team',
-    jVs(jk('Store visit conversion', nf(a.buyStore), inr(a.netStore), 'v') + jk('Video call conversion', nf(a.buyVideo), inr(a.netVideo), 'v'),
-        jk('Store visit conversion', nf(t.buyStore), inr(t.netStore), 'v') + jk('Video call conversion', nf(t.buyVideo), inr(t.netVideo), 'v')),
-    g.has ? jLostRow('Routed, no bill by visit date', g.missed, g.due, 'v') + jLostRow('Routed lead not in Bigin / LimeChat', g.routed - g.linked, g.routed, 'v') + jLostRow('No visit time slot', g.noTime, g.routed, 'u') : '',
-    g.has ? `Only store routing is logged (${nf(g.routed)} leads, by ${esc(g.senders.join(', ') || '—')}). Video calls arranged: ${nf(a.vcArr + t.vcArr)} (Bigin stage / LimeChat note).` : 'Connect the routing sheet (secret ROUTING_CSV_URL).',
-    `<div class="j3 j2">` +
-      col('Store visit', 'Routing via agent on WhatsApp DSR group → bill by store staff',
-        jk('Routed to a store', g.has ? nf(g.routed) : '—', g.has ? `Routing sheet · ${nf(g.test)} test rows left out` : 'Routing sheet not connected', g.has ? 'u' : 'n') +
-        jk('Billed after routing', g.has ? nf(g.bought) : '—', g.has ? `${pct(g.bought, g.routed, 0)} of routed · ${inr(g.net)}` : '—', g.has ? 'v' : 'n') +
-        jk('Visit date passed, no bill', g.has ? nf(g.missed) : '—', g.has ? `of ${nf(g.due)} due · ${nf(g.upcoming)} still ahead` : '—', g.has ? 'v' : 'n')) +
-      col('Video consult', 'With the store team → order placed by the store team',
-        jk('Video calls arranged', nf(a.vcArr + t.vcArr), 'Bigin stage / LimeChat note', 'u') + jk('Video call conversions', nf(P2.buyVideo), `${inr(P2.netVideo)} · not routed`, 'v') + jk('Asked the bot for video', nf(t.askVideo), 'Book a video call flow', 'v')) +
-    `</div><div style="margin-top:12px">${jPaths(P2, 1, 'v')}</div>`, false, 'jside');
-  const ch6 = jChapter(6, 'Conversion outcome', 'Converted · still open → retail revenue (DevX order · phone match)',
-    jVs(jk('Converted', nf(a.purchased), `${jTxt(jPct(a.purchased, a.unique))} of leads · ${jTxt(jPct(a.purchased, a.engaged))} of qualified`, 'v') + jk('Revenue', inr(a.net), `${nf(a.orders)} orders · ${a.unique ? inr(a.net / a.unique) : '—'} per lead`, 'v') + jk('Days to first order', a.lag == null ? '—' : String(a.lag), 'Median', 'v') + jOutcome(a.purchased, a.lost, J.aOpen, 'v'),
-        jk('Converted', nf(t.purchased), `${jTxt(jPct(t.purchased, t.unique))} of leads · DevX phone match`, 'v') + jk('Revenue', inr(t.net), `${nf(t.orders)} orders · ${t.unique ? inr(t.net / t.unique) : '—'} per lead`, 'v') + jk('Days to first order', t.lag == null ? '—' : String(t.lag), 'Median', 'v') + jOutcome(t.purchased, t.lost, J.tOpen, 'v')),
-    jLostRow('Call: qualified, still open', J.aOpen, a.engaged, 'u') + jLostRow('WhatsApp: qualified / follow-up, still open', J.tOpen, t.engaged + t.followup, 'u'),
-    (a.sharedNet || t.sharedNet) ? `<b>${inr(a.sharedNet + t.sharedNet)}</b> also counts in Walk-in. ${nf(t.callOverlap)} WhatsApp leads also called in. Sign-off needed: credit both or split.` : 'A lead converts when the same phone has a DevX order on or after the chat or call date.');
-  const detail = `<details class="jdet" id="jdet"><summary>Stage-by-stage detail <span class="k-s">follows the Whimsical flow · call vs WhatsApp at every stage</span></summary>${ch1 + ch2 + ch3 + ch4 + ch5 + route + ch6}</details>`;
-
-  return story + kp + funnelC + ctaC + `<div class="wl-g2">${conv}${fix}</div>` + detail;
-}
-// Leaks ranked by leads lost, each with the next action and the page to open.
-function jLeaks(a, t, J, g){
-  return [
-    { l: 'Leads never consumed', n: (a.unique - a.consumed) + (t.unique - t.consumed), of: a.unique + t.unique, ofL: 'leads', fix: 'Call every lead the same day; reply to every WhatsApp lead within 15 min.', tab: 'follow-up' },
-    { l: 'Agent replied, outcome not logged', n: t.messagedNoOutcome, of: t.consumed, ofL: 'consumed WhatsApp leads', fix: 'Replace free-text notes with an outcome dropdown.', tab: 'quality' },
-    { l: 'Customer not reached (RNR)', n: t.notReached + a.ringing, of: t.consumed + t.noteOnly + a.consumed, ofL: 'consumed leads', fix: '3 attempts over 2 days, then a WhatsApp nudge.', tab: 'follow-up' },
-    { l: 'Reached, not interested', n: a.lost + t.lost + t.online, of: a.connected + t.reached, ofL: 'connected leads', fix: 'Make the lost reason mandatory; review reasons weekly.', tab: 'loss' },
-    { l: 'Qualified, still open', n: J.aOpen + J.tOpen, of: a.engaged + t.engaged + t.followup, ofL: 'qualified leads', fix: 'Route to the nearest store on the DSR group the same day.', tab: 'revenue' },
-    { l: 'Routed to a store, no bill by visit date', n: g.missed, of: g.due, ofL: 'routed leads due', fix: 'Store calls the customer the day before the visit.', tab: 'loss' },
-  ].filter((x) => x.n > 0).sort((x, y) => y.n - x.n);
-}
 
 /* ---- PDP · Backend agents ---- */
-function pAgents(r){
-  const a = callAgg(r), t = textAgg(r);
-  // one row per agent · text uses the LimeChat First Assignee (reassignments flagged on Data quality)
-  const build = (U, A, isText) => { const m = {}; U.filter((x) => x.ag).forEach((x) => { const k = x.ag; const o = (m[k] = m[k] || { k, u: 0, c: 0, reached: 0, e: 0, lost: 0, nc: 0, nr: 0, b: 0, bs: 0, bv: 0, ba: 0, net: 0, ma: [], rt: 0 }); o.u++;
-      if (isText ? x.am : (x.cons != null ? x.cons : CONTACTED.has(x.g))) o.c++; if (isText ? ['followup_pending', 'qualified', 'lost', 'online'].includes(x.st) : CONTACTED.has(x.g) && x.g !== 'ringing') o.reached++;
-      if (isText ? x.st === 'qualified' : ENGAGED.has(x.g)) o.e++; if (isText ? x.st === 'lost' || x.st === 'online' : x.g === 'lost') o.lost++;
-      if (isText ? !x.am : x.g === 'notCalled') o.nc++; if (isText ? x.st === 'not_reached' : x.g === 'ringing') o.nr++; if (isText && x.ma != null && x.ma >= 0) o.ma.push(x.ma); });
-    A.forEach((x) => { const o = m[x.ag]; if (!o) return; if (x.first) { o.b++; if (x.path === 'video') o.bv++; else if (x.path === 'store') o.bs++; } o.net += x.net; });
-    return Object.values(m).sort((x, y) => y.u - x.u); };
-  const ca = build(a.U, a.A, false), ta = build(t.U, t.A, true);
-  const allAgents = new Set([...ca.map((x) => x.k), ...ta.map((x) => x.k)]);
-  const kp = pkpis([
-    { l: 'Backend agents', v: nf(allAgents.size), s: `${nf(a.agents)} on calls · ${nf(t.agents)} on WhatsApp`, b: 'v' },
-    { l: 'Consumption rate', v: pct(a.consumed + t.consumed, a.unique + t.unique, 0), s: `${nf(a.unique + t.unique - a.consumed - t.consumed)} leads untouched`, b: 'v' },
-    ...(() => { const g = routeAgg(r); return g.has ? [{ l: 'Routed to store', v: nf(g.routed), s: `${nf(g.bought)} billed · by ${esc(g.senders.join(', ') || '—')}`, b: 'u' }] : []; })(),
-  ]);
-  const tbl = (rows, isText) => wtable(['Agent', 'Leads', 'Consumed', 'Reached', 'Qualified', 'Lost', isText ? 'No reply' : 'Yet to call', 'Not reached', 'Converted', 'Store · video', 'Revenue', 'Lead → convert'],
-    rows.map((o) => `<tr><td class="b">${esc(o.k)}</td><td>${nf(o.u)}</td><td class="${pctv(o.c, o.u) < 50 ? 'bad' : ''}">${pct(o.c, o.u, 0)}</td><td>${nf(o.reached)}</td><td>${nf(o.e)}</td><td>${nf(o.lost)}</td><td class="${o.nc ? 'bad' : ''}">${nf(o.nc)}</td><td>${nf(o.nr)}</td><td class="b">${nf(o.b)}</td><td>${nf(o.bs)} · ${nf(o.bv)}</td><td class="b">${inr(o.net)}</td><td>${pct(o.b, o.u, 0)}</td></tr>`));
-  const textT = pcard('WhatsApp leads by backend agent', 'Agent = LimeChat First Assignee · consumed = agent replied on WhatsApp · outcome from the note', ta.length ? tbl(ta, true) : '<p class="sub" style="margin-top:14px">No WhatsApp leads with an agent in this range.</p>', 'v');
-  const callT = pcard('Call leads by backend agent', 'Agent = Bigin owner of the Callback Requests lead', ca.length ? tbl(ca, false) : '<p class="sub" style="margin-top:14px">No call leads in this range.</p>', 'v');
-  const fn = ta.slice(0, 4).map((o) => pcard(esc(o.k), 'Personal funnel · WhatsApp leads', funnel([
-    { l: 'Leads', v: o.u, sub: `${pct(o.c, o.u, 0)} consumed (agent replied)`, b: 'v' }, { l: 'Reached', v: o.reached, sub: 'Reply or call', b: 'u', c: C.tealMid }, { l: 'Qualified', v: o.e, b: 'u', c: C.tealMid },
-    { l: 'Converted', v: o.b, sub: `${nf(o.bs)} store · ${nf(o.bv)} video`, b: 'v' }, { l: 'Revenue', v: o.net, b: 'v', money: 1 },
-  ]))).join('');
-  return kp + textT + `<div class="wl-g2">${fn}</div>` + callT;
-}
 
-/* ---- PDP · Follow-up ---- */
-const OPEN = new Set(['notCalled', 'ringing', 'engaged', 'visitPlan', 'vcPlan']);
-const GLBL = { notCalled: 'Yet to Call', ringing: 'Ringing (RNR)', engaged: 'Engaged', visitPlan: 'Visit planned', vcPlan: 'Video call arranged', visit: 'Visited', crmWon: 'Won (Bigin)', lost: 'Not Interested / lost', resolved: 'Resolved', other: 'Other', blank: 'Blank' };
-const GCOL = { notCalled: C.sand, ringing: C.sandDk, engaged: C.teal, visitPlan: C.tealMid, vcPlan: C.tealMid, visit: C.tealMid, crmWon: C.teal, lost: C.rust, resolved: C.tealLt, other: C.tealLt, blank: C.track };
 const hbar = (rows, opts = {}) => { const mx = Math.max(1, ...rows.map((x) => x[1])); return `<div class="wl-rank" style="grid-template-columns:minmax(120px,${opts.w || 180}px) minmax(0,1fr) 54px ${opts.extra ? '70px' : ''}">` + rows.map(([l, n, c, ex]) => `<span class="wl-sn">${esc(l)}</span><div class="wl-track"><div class="wl-fill" style="width:${(n / mx * 100).toFixed(1)}%;background:${c || C.teal}"></div></div><span style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${nf(n)}</span>${opts.extra ? `<span class="k-s" style="text-align:right">${ex || ''}</span>` : ''}`).join('') + `</div>`; };
-function pFollow(r){
-  const p = pPrev(r), a = callAgg(r), b = p ? callAgg(p) : null, t = textAgg(r);
-  const open = a.U.filter((x) => OPEN.has(x.g));
-  const d1 = wdelta(pctv(a.contacted, a.unique), b ? pctv(b.contacted, b.unique) : null, { pts: true, short: true });
-  const kp = pkpis([
-    { l: 'Consumed', v: pctTxt(pctv(a.consumed, a.unique), 0), d: d1.d, tone: d1.tone, s: `${nf(a.consumed)} of ${nf(a.unique)} · past Yet to Call`, b: 'u' },
-    { l: 'Yet to Call', v: nf(a.notCalled), tone: a.notCalled ? 'bad' : '', d: `${nf(a.stale)} waiting 2+ days`, s: 'Never called', b: 'u' },
-    { l: 'Ringing (RNR)', v: nf(a.ringing), s: 'Called, not reached', b: 'u' },
-    { l: 'Qualified', v: pctTxt(pctv(a.engaged, a.contacted), 0), s: `${nf(a.engaged)} of those called`, b: 'u' },
-    { l: 'Open pipeline', v: nf(open.length), s: 'Not yet won or lost', b: 'u' },
-    { l: 'Never touched', v: nf(a.untouched), tone: a.untouched ? 'bad' : '', d: 'Record unchanged', s: 'Since creation', b: 'v' },
-  ]);
-  // pipeline by stage (raw Bigin stage)
-  const st = {}; a.U.forEach((x) => { const k = x.st || '(blank)'; const o = (st[k] = st[k] || { n: 0, g: x.g, old: 0 }); o.n++; o.old = Math.max(o.old, x.ageD); });
-  const pipe = pcard('Pipeline by Bigin stage', 'Unique call leads in range · stage as recorded', wtable(['Stage', 'Group', 'Leads', 'Share', 'Oldest (days)'], Object.entries(st).sort((x, y) => y[1].n - x[1].n).map(([k, o]) => `<tr><td class="b">${esc(k)}</td><td>${GLBL[o.g] || o.g}</td><td class="b">${nf(o.n)}</td><td>${pct(o.n, a.unique, 0)}</td><td class="${OPEN.has(o.g) && o.old >= 2 ? 'bad' : ''}">${OPEN.has(o.g) ? nf(o.old) : '—'}</td></tr>`)), 'u');
-  // ageing of open leads
-  const B = [['0–1 days', 0, 1], ['2–3 days', 2, 3], ['4–7 days', 4, 7], ['8+ days', 8, 9999]];
-  const ageing = pcard('Ageing of open leads', 'Days since the lead came in · open = Yet to Call, RNR, engaged', `<div class="pt" style="height:170px">${B.map(([l, lo, hi]) => { const xs = open.filter((x) => x.ageD >= lo && x.ageD <= hi); const mx = Math.max(1, open.length); return `<div class="pt-d" title="${l}: ${xs.length}"><div class="pt-b" style="flex-direction:column;justify-content:flex-end;align-items:stretch;width:60%">${['notCalled', 'ringing', 'engaged', 'visitPlan'].map((g) => { const n = xs.filter((x) => x.g === g).length; return n ? `<i style="width:100%;max-width:none;height:${(n / mx * 100).toFixed(1)}%;background:${GCOL[g]};border-radius:0"></i>` : ''; }).join('')}</div><span><b>${nf(xs.length)}</b> · ${l}</span></div>`; }).join('')}</div><div class="wl-legend">${['notCalled', 'ringing', 'engaged', 'visitPlan'].map((g) => `<span><i class="wl-sw" style="background:${GCOL[g]}"></i>${GLBL[g]}</span>`).join('')}</div>`, 'u');
-  // RNR ladder
-  const cnt = (names) => a.U.filter((x) => names.includes(x.st)).length;
-  const lad = [['Yet to Call', cnt(['Yet to Call'])], ['RNR 1', cnt(['RNR 1'])], ['RNR 2', cnt(['RNR2', 'RNR 2'])], ['RNR 3', cnt(['RNR 3'])]];
-  const ladder = pcard('Ringing-out ladder', 'Leads stuck before a first conversation', `<div class="wl-tree">${lad.map(([l, n]) => `<div class="wl-node"><span class="n-l">${l}</span><span class="n-v">${nf(n)}</span><span class="n-s">${pct(n, a.unique, 0)} of leads</span></div>`).join('<span class="wl-arrow" aria-hidden="true">→</span>')}<span class="wl-arrow" aria-hidden="true">→</span><div class="wl-node await"><span class="n-l">Unreachable</span><span class="n-v none">—</span><span class="n-s">No auto-close after RNR 3</span></div></div>`, 'u');
-  // at-risk list (no names/phones)
-  const risk = open.filter((x) => x.ageD >= 2).sort((x, y) => y.ageD - x.ageD).slice(0, 15);
-  const atRisk = pcard('At-risk leads', 'Open 2+ days · Bigin lead ID (last 6), no customer details', risk.length ? wtable(['Lead', 'Requested store', 'Stage', 'Days open'], risk.map((x) => `<tr><td class="b">…${esc(x.i)}</td><td>${esc(pStore(x.s).name)}</td><td>${esc(x.st)}</td><td class="bad">${nf(x.ageD)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No lead open for 2+ days.</p>', 'v');
-  // by store
-  const m = {}; a.U.forEach((x) => { const o = (m[x.s] = m[x.s] || { s: x.s, u: 0, c: 0, e: 0, nc: 0, stale: 0 }); o.u++; if (CONTACTED.has(x.g)) o.c++; if (ENGAGED.has(x.g)) o.e++; if (x.g === 'notCalled') o.nc++; if (x.stale) o.stale++; });
-  const byStore = pcard('Follow-up by requested store', 'Who calls their leads, and how fast', wtable(['Store', 'Leads', 'Called', 'Interested', 'Yet to Call', '2+ days'], Object.values(m).filter((o) => o.s !== 'UNMAPPED').sort((x, y) => y.u - x.u).map((o) => `<tr><td class="b">${esc(pStore(o.s).name)}</td><td>${nf(o.u)}</td><td class="${pctv(o.c, o.u) < 50 ? 'bad' : ''}">${pct(o.c, o.u, 0)}</td><td>${pct(o.e, o.c, 0)}</td><td>${nf(o.nc)}</td><td class="${o.stale ? 'bad' : ''}">${nf(o.stale)}</td></tr>`)), 'u');
-  const SC = { bot_only: C.rust, handoff_unassigned: C.rust, assigned_no_action: C.rust, messaged_no_outcome: C.sandDk, not_reached: C.sandDk, followup_pending: C.tealMid, qualified: C.teal, lost: C.rust, online: C.tealLt };
-  const tst = {}; t.U.forEach((x) => { const k = TSTAGE_LBL[x.st] || x.st; tst[k] = (tst[k] || 0) + 1; });
-  const SCL = {}; Object.entries(TSTAGE_LBL).forEach(([k, l]) => { if (!SCL[l]) SCL[l] = SC[k]; });
-  const tKp = pkpis([
-    { l: 'Consumed', v: pct(t.consumed, t.unique, 0), tone: pctv(t.consumed, t.unique) < 60 ? 'bad' : '', d: `${nf(t.noteOnly)} call note only`, s: 'Agent replied on WhatsApp', b: 'v' },
-    { l: 'Reached', v: pct(t.reached, t.contacted, 0), s: `${nf(t.reached)} · ${nf(t.notReached)} not reached`, b: 'u' },
-    { l: 'Open, no action, 2+ days', v: nf(t.stale), tone: t.stale ? 'bad' : '', s: 'Ticket still open', b: 'v' },
-  ]);
-  const tStages = pcard('WhatsApp leads by standardised stage', 'Rebuilt from agent replies and the agent\'s note — not from Ticket Status', hbar(Object.entries(tst).sort((x, y) => y[1] - x[1]).map(([k, n]) => [k, n, SCL[k]]), { w: 260 }), 'v');
-  const tRisk = t.U.filter((x) => !x.am && !x.note && x.raw === 'open').sort((x, y) => y.ageD - x.ageD).slice(0, 15);
-  const tRiskC = pcard('WhatsApp leads with no agent reply', 'Ticket open, no reply, no note · LimeChat ticket ID', tRisk.length ? wtable(['Ticket', 'Agent', 'Entry', 'PDP', 'Days open'], tRisk.map((x) => `<tr><td class="b">#${esc(x.i)}</td><td>${esc(x.ag || '—')}</td><td>${esc(x.entry.replace('_', ' '))}</td><td>${esc(x.pdp || '—')}</td><td class="${x.ageD >= 2 ? 'bad' : ''}">${nf(x.ageD)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">None.</p>', 'v');
-  const text = `<h3 class="psec">WhatsApp (LimeChat)</h3>` + tKp + `<div class="wl-g2">${tStages}${tRiskC}</div><h3 class="psec">Calls (Bigin)</h3>`;
-  return text + kp + `<div class="wl-g2">${pipe}${ageing}</div>` + ladder + `<div class="wl-g2">${atRisk}${byStore}</div>`;
-}
 
 /* ---- PDP · Revenue (booked by order date) ---- */
 // Both routes, each DevX order counted once: an order matched to a call lead AND a WhatsApp lead is credited to the
@@ -2392,63 +2167,6 @@ function allAttributed(cta = true){
   }
   const out = [...m.values()];
   return cta ? out.filter((x) => (x.rt === 'call' ? callOn() : ctaOk(x.entry))) : out;
-}
-function pRevenue(r){
-  const p = pPrev(r); const ALL = allAttributed();
-  const A = ALL.filter((x) => inPR(x.d, r) && pStoreOk(x.cs));
-  const AP = p ? ALL.filter((x) => inPR(x.d, p) && pStoreOk(x.cs)) : null;
-  const sum = (arr, k = 'net') => (arr || []).reduce((s, x) => s + x[k], 0);
-  const net = sum(A), netP = AP ? sum(AP) : null;
-  const sales = sum((PDATA.call.salesDaily || []).filter((x) => inPR(x.d, r) && pStoreOk(x.s)));
-  const buyers = A.filter((x) => x.first).length, online = sum(A.filter((x) => x.t === 'ONLINE')), shared = sum(A.filter((x) => x.shared));
-  const t = textAgg(r);
-  const d1 = wdelta(net, netP, { short: true });
-  const kp = pkpis([
-    { l: 'PDP-attributed revenue', v: inr(net), d: d1.d, tone: d1.tone, s: `${nf(A.length)} orders`, b: 'v' },
-    { l: 'Share of store sales', v: pctTxt(pctv(net, sales)), s: `of ${inr(sales)}`, b: 'v' },
-    { l: 'Buyers', v: nf(buyers), s: `AOV ${A.length ? inr(net / A.length) : '—'}`, b: 'v' },
-    { l: 'Video call conversions', v: pctTxt(pctv(sum(A.filter((x) => x.path === 'video')), net), 0), s: 'of revenue', b: 'v' },
-  ]) + (shared || A.some((x) => x.both) ? `<p class="wl-note" style="margin:-6px 0 14px">${inr(shared)} also counts in Walk-in · ${nf(A.filter((x) => x.both).length)} orders matched both a call and a WhatsApp lead (counted once).</p>` : '');
-  // daily revenue
-  const days = []; for (let d = r[0]; d <= r[1]; d = dAdd(d, 1)) days.push(d);
-  const ser = days.map((d) => ({ d, c: sum(A.filter((x) => x.d === d && x.rt === 'call')), t: sum(A.filter((x) => x.d === d && x.rt === 'text')) }));
-  const mx = Math.max(1, ...ser.map((s) => Math.max(s.c, s.t)));
-  const trend = pcard('Revenue by order date', 'Call vs WhatsApp leads', `<div class="wl-legend"><span><i class="wl-sw" style="background:${C.teal}"></i>Call</span><span><i class="wl-sw" style="background:${C.rust}"></i>WhatsApp</span></div><div class="pt">${ser.map((s) => `<div class="pt-d" title="${s.d}: ${inr(s.c)} call · ${inr(s.t)} WhatsApp"><div class="pt-b"><i style="height:${(s.c / mx * 100).toFixed(1)}%;background:${C.teal}"></i><i style="height:${(s.t / mx * 100).toFixed(1)}%;background:${C.rust}"></i></div><span>${s.d.slice(8)}</span></div>`).join('')}</div>`);
-  // lead cohorts by lead date
-  const L = [...(PDATA.call.leads || []).filter((x) => !x.dup && inPR(x.d, r) && pStoreOk(x.s)), ...textAgg(r).U];
-  const allA = ALL;
-  const wk = (d) => { const wd = (new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7; return dAdd(d, -wd); };
-  const weeks = [...new Set(L.map((x) => wk(x.d)))].sort();
-  const coh = weeks.map((w) => { const n = L.filter((x) => wk(x.d) === w).length; const o = allA.filter((x) => wk(x.ld) === w && pStoreOk(x.cs)); const b2 = o.filter((x) => x.first); return { d: w, n, b: b2.length, net: sum(o), lag: median(b2.map((x) => x.lag)) }; }).filter((x) => x.n);
-  const cohorts = pcard('Lead cohorts', 'By lead week (Mon) · call + WhatsApp · revenue to date from each week\'s leads', wtable(['Week of', 'Leads', 'Bought', 'Conversion', 'Revenue', 'Median days'], coh.map((x) => `<tr><td class="b">${dpShort(x.d)}</td><td>${nf(x.n)}</td><td>${nf(x.b)}</td><td class="b">${pct(x.b, x.n, 1)}</td><td>${inr(x.net)}</td><td>${x.lag == null ? '—' : x.lag}</td></tr>`)), 'v');
-  const pth = (k) => A.filter((x) => x.path === k);
-  const pathRow = (l, k) => { const xs = pth(k); return `<tr><td class="b">${l}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => x.first).length)}</td><td class="b">${inr(sum(xs))}</td><td>${xs.length ? inr(sum(xs) / xs.length) : '—'}</td><td>${median(xs.filter((x) => x.first).map((x) => x.lag)) ?? '—'}</td></tr>`; };
-  const pa = pathAgg(A);
-  const path = pcard('Revenue by conversion route', 'Store visit = routed, bought on visit date · video call = not routed, VC arranged', jPaths(pa, 1, 'v') + wtable(['Route', 'Orders', 'Buyers', 'Revenue', 'AOV', 'Median days'], PATHS.map(([k, l]) => pathRow(l, k))) + `<p class="wl-note" style="margin-top:8px">Orders = unique DevX order IDs. Other = routed but bought on another day, or neither routed nor VC arranged.</p>`, 'v');
-  // ---- store visits & video consults, by store (replaces the old Stores & cities page) ----
-  // Flow: lead → backend agent → schedule a store visit (routing sheet) or arrange a video consult → bill at the store.
-  const g = routeAgg(r);
-  const sv = {}; const gs = (id) => (sv[id] = sv[id] || { s: id, sch: 0, due: 0, miss: 0, vb: 0, vbNet: 0, away: 0, so: 0, vo: 0, net: 0 });
-  g.U.forEach((x) => { const o = gs(x.s); o.sch++; if (x.vd && x.vd <= PDATA.cutoff) { o.due++; if (!x.od) o.miss++; } if (x.od) { if (x.same) { o.vb++; o.vbNet += x.net; } else o.away++; } });
-  A.forEach((x) => { const o = gs(x.s); o.net += x.net; if (x.path === 'video') o.vo++; else if (x.path === 'store') o.so++; });
-  const ss = {}; (PDATA.call.salesDaily || []).filter((x) => inPR(x.d, r)).forEach((x) => { ss[x.s] = (ss[x.s] || 0) + x.net; });
-  const srows = Object.values(sv).filter((o) => o.s && o.s !== 'UNMAPPED' && (o.sch || o.so || o.vo));
-  // grouped by city; click a city row to expand its stores
-  const grpOf = (id) => pStore(id).city;
-  const cities = [...new Set(srows.map((o) => grpOf(o.s)))].map((c) => { const xs = srows.filter((o) => grpOf(o.s) === c).sort((x, y) => y.net - x.net || y.sch - x.sch); const t2 = xs.reduce((u, o) => { for (const k of ['sch', 'due', 'miss', 'vb', 'vbNet', 'away', 'so', 'vo', 'net']) u[k] += o[k]; u.sales += ss[o.s] || 0; return u; }, { sch: 0, due: 0, miss: 0, vb: 0, vbNet: 0, away: 0, so: 0, vo: 0, net: 0, sales: 0 }); return { c, xs, t: t2 }; }).sort((x, y) => y.t.net - x.t.net || y.t.sch - x.t.sch);
-  const cell = (o, sales) => `<td>${g.has ? nf(o.sch) : '—'}</td><td class="b">${g.has ? nf(o.vb) : '—'}</td><td>${g.has ? pct(o.vb, o.sch, 0) : '—'}</td><td class="${o.miss ? 'bad' : ''}">${g.has ? nf(o.miss) : '—'}</td><td>${nf(o.so)}</td><td>${nf(o.vo)}</td><td class="b">${inr(o.net)}</td><td>${pct(o.net, sales || 0)}</td>`;
-  const vbTot = g.U.filter((x) => x.od && x.same).length, awayTot = g.U.filter((x) => x.od && !x.same).length;
-  const storeCard = pcard('Store visits & video consults by store', `Scheduled visits come from the routing sheet (WhatsApp DSR group) · orders = DevX bills from PDP leads at that store · click a city to see its stores`,
-    pkpis([
-      { l: 'Visits scheduled', v: g.has ? nf(g.routed) : '—', s: g.has ? `${nf(g.due)} visit dates passed` : 'Routing sheet not connected', b: g.has ? 'u' : 'n' },
-      { l: 'Visited & bought', v: g.has ? nf(g.bought) : '—', s: g.has ? `${pct(g.bought, g.routed, 0)} of scheduled · ${inr(g.net)}` : '—', b: g.has ? 'v' : 'n' },
-      { l: 'No-show', v: g.has ? nf(g.missed) : '—', tone: g.missed ? 'bad' : '', s: g.has ? `of ${nf(g.due)} due · no bill` : '—', b: g.has ? 'v' : 'n' },
-      { l: 'Bought at another store', v: g.has ? nf(awayTot) : '—', s: g.has ? `${nf(vbTot)} at the scheduled store` : '—', b: g.has ? 'v' : 'n' },
-      { l: 'Video calls arranged', v: nf(callAgg(r).vcArr + textAgg(r).vcArr), s: 'Bigin stage / LimeChat note', b: 'u' },
-    ]) + (srows.length ? wtable(['Store', 'Visits scheduled', 'Visited & bought', 'Visit → bill', 'No-show', 'Store-visit orders', 'Video call orders', 'Revenue', 'Share of store sales'],
-      cities.flatMap(({ c, xs, t: t2 }) => { const open = !!F.cx[c]; return [`<tr class="je-grp cx-row" data-cx="${esc(c)}" tabindex="0" role="button" aria-expanded="${open}"><td class="b"><span class="cx-chev">${open ? '▾' : '▸'}</span> ${esc(c)} <span class="k-s">${nf(xs.length)} ${xs.length === 1 ? 'store' : 'stores'}</span></td>${cell(t2, t2.sales)}</tr>`, ...(open ? xs.map((o) => `<tr class="je-sub"><td>${esc(pStore(o.s).name)}</td>${cell(o, ss[o.s])}</tr>`) : [])]; })) : '<p class="sub" style="margin-top:14px">No scheduled visits or store orders in this range.</p>') +
-    `<p class="wl-note" style="margin-top:8px">Visited & bought = scheduled lead billed at that store on/after the routing date (a visit without a purchase is not recorded anywhere). Store-visit orders = routed, bought on the visit date. Video call orders = not routed, VC arranged. Visits scheduled starts 13 Oct, when the routing sheet went live.</p>`, 'v');
-  return kp + trend + path + storeCard + cohorts;
 }
 
 /* ---- PDP · Product & category ---- */
@@ -2526,92 +2244,6 @@ function pLoss(r){
 }
 
 /* ---- Data quality & gaps ---- */
-function pQuality(r){
-  const a = callAgg(r), t = textAgg(r), q = PDATA.quality || {};
-  const chk = (l, n, of, fix) => `<tr><td class="b">${l}</td><td class="${n ? 'bad' : 'good'}">${nf(n)}</td><td>${of ? pct(n, of, 0) : '—'}</td><td>${fix}</td></tr>`;
-  const callT = wtable(['Check · call leads (Bigin)', 'Leads', 'Share', 'Fix'], [
-    chk('No product', a.unique - a.prod, a.unique, 'Pass PDP product into Product on submit'),
-    chk('No UTM / source page', a.unique - a.utm, a.unique, 'Pass UTM_* + page URL on submit'),
-    chk('Duplicate phone', a.dup, a.raw, 'Dedupe on phone; update the existing deal'),
-    chk('Likely typo phone (1 digit off)', a.near, a.unique, 'OTP already verifies; check form'),
-    chk('Not Interested, no lost reason', a.lostNoReason, a.lost, 'Make Close_Lost_Reason mandatory'),
-    chk('Routed to store, stage not qualified', a.U.filter((x) => x.rsm).length, a.unique, 'Move to Store Visit Scheduled when routed'),
-    chk('Yet to Call 2+ days', a.stale, a.unique, 'Same-day call SLA'),
-    chk('Store label not recognised', a.unmapped, a.raw, 'Add alias in src/pdp.js'),
-    chk('Visit stage never used', a.visitPlan + a.visit ? 0 : a.unique, a.unique, 'Use "Store Visit Scheduled" / "Cx Visited Store"'),
-    chk('Bigin "Sold" with no order', q.wonStageNoOrder || 0, a.unique, 'Check phone on bill'),
-    chk('Order found, stage not won', q.orderNoWonStage || 0, a.unique, 'Auto-move to Sold on match'),
-  ]);
-  const TF = { invalid_phone: ['Invalid phone number', 'Validate +91 mobile at chat start'], junk_name: ['Junk customer name ("?", ".", 9.20E+11)', 'Fix the Excel export (phones as text)'], duplicate_phone: ['Duplicate phone (repeat chat)', 'Merge into one lead per phone'], routed_stage_mismatch: ['Routed to store, stage not qualified', 'Log the visit outcome when routing'],
-    closed_without_action: ['Closed with no agent action', 'Block close without a note'], reply_time_missing: ['Agent messages but no reply time', 'LimeChat export inconsistency'], outbound: ['Outbound ticket (agent-started)', 'Keep outbound out of PDP leads'], open_stale: ['Open 2+ days, no action', 'Same-day SLA on assigned chats'], note_unclassifiable: ['Note not classifiable', 'Use an outcome dropdown'] };
-  // assignment flags are not shown — every lead is assigned to an agent (owner's rule, Oct 2026)
-  const HIDE = new Set(['assigned_without_handoff', 'handoff_without_agent', 'assigned_but_bot_status', 'reassigned']);
-  const allT = t.chatsAll.map((x) => ({ ...x, fl: (x.fl || []).filter((f) => !HIDE.has(f)) })); const fc = {}; allT.forEach((x) => (x.fl || []).forEach((f) => { fc[f] = (fc[f] || 0) + 1; }));
-  const rnrV = [...new Set(allT.flatMap((x) => x.rnr || []))];
-  const textT = wtable(['Check · WhatsApp tickets (LimeChat)', 'Tickets', 'Share', 'Fix'], [
-    ...Object.keys(TF).map((k) => chk(TF[k][0], fc[k] || 0, allT.length, TF[k][1])),
-    chk('Replied, no outcome note', t.U.filter((x) => x.am && !x.note).length, t.consumed, 'Make an outcome note mandatory'),
-    chk('No PDP on the lead', t.unique - t.pdpKnown, t.unique, 'Tag the store widget with the page'),
-    ...(lastTagDate('pdp') && lastTagDate('pdp') < PDATA.cutoff ? [`<tr><td class="b">PDP tags stopped after ${dpShort(lastTagDate('pdp'))}</td><td class="bad">—</td><td>—</td><td>Restore the chair PDP Level 1 tags in LimeChat</td></tr>`] : []),
-    ...(lastTagDate('store_inquiry') && lastTagDate('store_inquiry') < PDATA.cutoff ? [`<tr><td class="b">"storeinquiry" tag stopped after ${dpShort(lastTagDate('store_inquiry'))}</td><td class="bad">—</td><td>—</td><td>Confirm the tag rename</td></tr>`] : []),
-    chk('No store on the lead', t.unique - t.storeKnown, t.unique, 'Ask city/store in the bot flow'),
-    `<tr><td class="b">RNR written different ways</td><td class="bad">${nf(rnrV.length)}</td><td>—</td><td>${esc(rnrV.slice(0, 6).join(' · '))}</td></tr>`,
-    ...(PDATA.text?.gaps || []).map((g2) => `<tr><td class="b">Export gap ${dpShort(g2.from)} → ${dpShort(g2.to)}</td><td class="bad">${nf(g2.n)}</td><td>—</td><td>Re-export the full date range</td></tr>`),
-  ]);
-  // raw Ticket Status vs standardised stage — shows why status is not used as a stage
-  const RS = ['closed', 'open', 'bot']; const cx = {}; allT.forEach((x) => { const k = TSTAGE_LBL[x.st] || x.st; const o = (cx[k] = cx[k] || {}); o[x.raw] = (o[x.raw] || 0) + 1; });
-  const cross = wtable(['Standardised stage', ...RS.map((k) => `Status "${k}"`), 'Total'], [...new Set(Object.values(TSTAGE_LBL))].filter((k) => cx[k]).map((k) => `<tr><td class="b">${k}</td>${RS.map((rs) => `<td>${nf(cx[k][rs] || 0)}</td>`).join('')}<td class="b">${nf(RS.reduce((u, rs) => u + (cx[k][rs] || 0), 0))}</td></tr>`));
-  // note → outcome mapping (every distinct raw note)
-  const nm = {}; allT.filter((x) => x.note).forEach((x) => { const k = x.note; nm[k] = nm[k] || { n: 0, oc: x.oc }; nm[k].n++; });
-  const noteT = wtable(['Raw Private Note (as typed)', 'Tickets', 'Standardised outcome'], Object.entries(nm).sort((x, y) => y[1].n - x[1].n).map(([k, o]) => `<tr><td>${esc(k)}</td><td>${nf(o.n)}</td><td class="${o.oc === 'unclassified' ? 'bad' : ''}">${esc(OC_LBL[o.oc] || o.oc)}</td></tr>`));
-  const flagged = allT.filter((x) => (x.fl || []).length).sort((x, y) => (y.d > x.d ? 1 : -1)).slice(0, 40);
-  const audit = wtable(['Ticket', 'Flags', 'Raw status', 'Standardised stage', 'Agent replied', 'Agent', 'Raw note', 'Created'], flagged.map((x) => `<tr><td class="b">#${esc(x.i)}</td><td style="white-space:normal;min-width:180px">${(x.fl || []).map((f) => `<span class="vb vb-s" style="margin:1px 0">${esc((TF[f] || [f])[0])}</span>`).join(' ')}</td><td>${esc(x.raw)}</td><td>${esc(TSTAGE_LBL[x.st] || x.st)}</td><td>${x.am ? 'Yes' : 'No'}</td><td>${esc(x.ag || '—')}</td><td style="white-space:normal;min-width:160px">${esc(x.note || '—')}</td><td>${dpShort(x.d)}</td></tr>`));
-  // routing sheet (WhatsApp DSR groups → Google Sheet)
-  const g = routeAgg(r);
-  const RF = RTFLAG;
-  const rfc = {}; g.all.forEach((x) => (x.fl || []).forEach((f) => { rfc[f] = (rfc[f] || 0) + 1; }));
-  const routeT = wtable(['Check · routing sheet rows', 'Rows', 'Share', 'Fix'], [
-    ...Object.keys(RF).map((k) => chk(RF[k][0], rfc[k] || 0, g.rows, RF[k][1])),
-    chk('Discount offered left blank / NA', g.U.filter((x) => !x.disc).length, g.routed, 'Enter 0% when no discount'),
-    chk('Routed lead not found in Bigin / LimeChat', g.routed - g.linked, g.routed, 'Log every lead in Bigin / LimeChat first'),
-    `<tr><td class="b">Rows submitted by</td><td>${nf(g.senders.length)}</td><td>—</td><td>${esc(g.senders.join(', ') || '—')}</td></tr>`,
-    `<tr><td class="b">Date format</td><td>—</td><td>—</td><td>US M/D/YYYY in the sheet; read as such here</td></tr>`,
-  ]);
-  const VT = { slot: 'Slot', time: 'Exact time', blank: 'Blank', other: 'Unreadable' };
-  const routeAudit = wtable(['Lead ID', 'Flags', 'Routed', 'Store (as typed)', 'Category (raw)', 'Visit', 'Lead found', 'Billed'], [...g.all].sort((x, y) => (y.d > x.d ? 1 : -1)).slice(0, 40).map((x) => `<tr><td class="b">${esc(x.i)}</td><td style="white-space:normal;min-width:170px">${(x.fl || []).map((f) => `<span class="vb vb-s" style="margin:1px 0">${esc((RF[f] || [f])[0])}</span>`).join(' ') || '—'}</td><td>${dpShort(x.d)}</td><td title="${esc(x.s === 'UNMAPPED' ? 'Not recognised' : pStore(x.s).name)}">${esc(x.sr)}${x.s === 'UNMAPPED' ? ' <span class="bad">?</span>' : ''}</td><td>${esc(x.cr)}</td><td>${x.vd ? dpShort(x.vd) : '—'} · ${VT[x.vt] || '—'}</td><td>${x.src ? (x.src === 'both' ? 'Both' : x.src === 'call' ? 'Call' : 'WhatsApp') : '—'}</td><td>${x.od ? `${dpShort(x.od)}${x.same ? '' : ' · other store'}` : '—'}</td></tr>`));
-  const routingCards = g.has ? pcard('Store routing sheet hygiene', `${nf(g.rows)} rows in range (${nf(g.test)} test) · source values never changed`, routeT, 'v') + pcard('Routing audit', 'Latest 40 rows · raw values next to the standardised ones · names and phones never shown', routeAudit, 'v') : pcard('Store routing sheet', '', '<p class="sub" style="margin-top:14px">Not connected — add the Worker secret ROUTING_CSV_URL.</p>', 'n');
-  const GAPS = [
-    ['PDP view → retail CTA click', 'Website (GA4)', 'Not tracked', 'Fire GA4 event per CTA with product handle'],
-    ['PDP → Experience page hand-off', 'Website', 'Lost', 'Carry ?pdp=&utm_ into /pages/experience'],
-    ['Floating store widget on phone PDP', 'Website', 'Missing', 'Widget is desktop-only'],
-    ['Call Store pop-up → Bigin', 'Website → Bigin', 'Partial', 'Store passed; product + UTM empty'],
-    ['WhatsApp chat → agent', 'LimeChat', 'Partial', 'Only 1 in 3 chats is handed to an agent'],
-    ['LimeChat → Bigin PDP Inventories', 'LimeChat → Bigin', 'Partial', 'Live 21 Oct; owner, store and Converted not set'],
-    ['LimeChat lead stage', 'LimeChat', 'No field', 'Add an outcome dropdown; Ticket Status is ticket state only'],
-    ['Store widget chat → PDP', 'LimeChat', 'Untagged', 'Pass the page handle into the widget chat'],
-    ['"Find Nearby Stores" → WhatsApp (Home)', 'Website', 'Untagged', 'Same number as Chat With Store'],
-    ['Footer city links (?city=)', 'Website', 'Broken', 'Page ignores city filter'],
-    ['Store routing (WhatsApp DSR group)', 'Routing sheet', 'Partial', 'Live since 13 Oct; no link to the Bigin / LimeChat lead ID'],
-    ['Store visit without purchase', 'Store / routing sheet', 'Not tracked', 'Store marks "visited" on the routing row'],
-    ['Video call arranged', 'Bigin stage / LimeChat note', 'Partial', 'Current stage only; no arranged date'],
-    ['Conversion route on the order', 'DevX / BigQuery', 'Employee + order type', 'Tag DevX orders: store visit · video · agent'],
-    ['Order ↔ lead match', 'DevX / BigQuery', 'Phone only', 'New POS: order source tag'],
-  ];
-  const gapT = wtable(['Journey step', 'System', 'Status', 'Fix'], GAPS.map((g2) => `<tr><td class="b">${g2[0]}</td><td>${g2[1]}</td><td><span class="vb ${g2[2] === 'Partial' || g2[2] === 'Phone only' ? 'vb-u' : 'vb-s'}">${g2[2]}</span></td><td>${g2[3]}</td></tr>`));
-  const PI = PDATA.pinv;
-  const HYG = { no_phone: 'No valid phone', dup_phone: 'Repeat phone', no_owner: 'No owner', no_store: 'No store', no_tag: 'No conversation tag', unknown_stage: 'Stage not in flow', new_over_24h: 'New Enquiry > 24 h', new_over_15m: 'New Enquiry, no call in 15 min', rnr1_over_3h: 'RNR 1 attempt overdue (3 h)', rnr2_over_3h: 'RNR 2 final attempt overdue', callback_over_24h: 'Callback scheduled > 24 h', connected_over_24h: 'Connected, not routed in 24 h', visit_date_passed: 'Visit date passed, still scheduled', video_over_48h: 'Video call scheduled > 48 h', lost_no_reason: 'Not Interested, no reason', converted_no_order: 'Converted, no DevX order', order_not_converted: 'Bought, stage not Converted', visit_not_routed: 'Visit scheduled, not in routing sheet' };
-  const owners = PI ? Object.keys(PI.byOwner || {}) : [];
-  const pinvCards = PI ? pcard('Bigin PDP Inventories hygiene', `All ${nf(PI.total)} tickets now in Bigin · read ${PI.meta?.refreshedAt ? new Date(PI.meta.refreshedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : '—'} · stages as recorded`,
-      `<div>${wtable(['Stage', 'Tickets', 'Share'], Object.entries(PI.byStage).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td class="b">${esc(k)}</td><td>${nf(v)}</td><td>${pct(v, PI.total, 0)}</td></tr>`))}</div>` +
-      `<div style="margin-top:14px">${wtable(['Check', 'Tickets', 'Share'], Object.keys(HYG).filter((k) => PI.flags[k]).sort((a, b) => PI.flags[b] - PI.flags[a]).map((k) => `<tr><td class="b">${HYG[k]}</td><td class="bad">${nf(PI.flags[k])}</td><td>${pct(PI.flags[k], PI.total, 0)}</td></tr>`))}</div>` +
-      `<p class="wl-note" style="margin-top:8px">Owner: ${owners.length === 1 ? `all tickets on ${esc(owners[0])}` : `${nf(owners.length)} owners`}. Figures use Bigin from ${PDATA.text?.cutover ? dpShort(PDATA.text.cutover) : '—'}; revenue comes from DevX, not the stage.</p>`, 'u') +
-    (PI.recon ? pcard('LimeChat → Bigin coverage', 'Every LimeChat lead should be in Bigin (matched by conversation ID)', wtable(['Date', 'LimeChat leads', 'In Bigin', 'Missing', 'Bigin tickets', 'Not in export'], PI.recon.days.map((x) => `<tr><td class="b">${dpShort(x.d)}</td><td>${nf(x.lcLeads)}</td><td>${nf(x.inBigin)}</td><td class="${x.missing ? 'bad' : ''}">${nf(x.missing)}</td><td>${nf(x.bigin)}</td><td>${nf(x.notInExport)}</td></tr>`)) + `<p class="wl-note" style="margin-top:8px">LimeChat export covers to ${PI.recon.lcEnd ? dpShort(PI.recon.lcEnd) : '—'}; later days show Bigin only until the export catches up.</p>`, 'v') : '') : '';
-  return pinvCards + routingCards + pcard('LimeChat hygiene', `All ${nf(allT.length)} WhatsApp tickets in range · source values never changed`, textT, 'v') +
-    pcard('Ticket Status is not a lead stage', 'Raw status vs the stage rebuilt from agent replies and notes', cross, 'v') + pcard('How notes were standardised', 'Every distinct Private Note and the outcome it maps to', `<div style="max-height:420px;overflow:auto">${noteT}</div>`, 'u') +
-    pcard('Ticket audit — flagged tickets', 'Latest 40 · raw values next to the standardised stage', audit, 'v') +
-    pcard('Call leads hygiene', 'Real Bigin records in range', callT, 'v') + pcard('Missing tracking & attribution gaps', 'From the D2C → Retail CTA flow audit and the LimeChat export', gapT) +
-    pcard('What is verified vs not', '', `<div class="wl-list" style="margin-top:6px"><div class="row"><span>${VB.v} Call & WhatsApp leads, phone dedupe, consumption (agent reply / past Yet to Call), DevX order match, revenue</span><span class="wl-note">Bigin × LimeChat × BigQuery</span></div><div class="row"><span>${VB.u} Reached, qualified, lost, routed to a store</span><span class="wl-note">Bigin stages · LimeChat notes · routing sheet (as entered by the agent)</span></div><div class="row"><span>${VB.u} Conversion route (store visit / video / agent-punched)</span><span class="wl-note">Read from DevX employee + order type · pending sign-off</span></div><div class="row"><span>${VB.s} PDP views, CTA clicks, Call Store pop-up opens</span><span class="wl-note">Until GA4 connects</span></div><div class="row"><span>${VB.n} PDP of a call lead or store-widget chat, store visits without a purchase, video consults booked</span><span class="wl-note">No source exists</span></div></div>`);
-}
 
 /* ---- Journey & definitions ---- */
 function pDefs(){
