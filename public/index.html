@@ -1814,7 +1814,8 @@ function tatStats(T){
   return {
     first: { n: first.length, ok: first.filter((x) => x <= 0.25).length, open: openNew, med: median(first) },
     rnr: { n: rnr.length, ok: rnr.filter((x) => x <= 3).length, open: openRnr, med: median(rnr) },
-    form: { n: form.length, ok: form.filter((x) => x <= 0.5).length, open: 0, med: median(form.map((x) => Math.max(0, x))) },
+    // form before the Connected stage by > 30 min = Bigin updated late, not a same-call form: shown apart, not counted as on time
+    form: { n: form.filter((x) => x >= -0.5).length, ok: form.filter((x) => x >= -0.5 && x <= 0.5).length, open: 0, late: form.filter((x) => x < -0.5).length, med: median(form.filter((x) => x >= -0.5).map((x) => Math.max(0, x))) },
     upd: { n: upd.length, ok: upd.filter((x) => x <= 0).length, open: openUpd, med: median(upd) },
   };
 }
@@ -1822,7 +1823,7 @@ function pTat(r){
   if (!hasPinv()) return wcard('Bigin PDP Inventories not connected', 'Turnaround times come from the Bigin stage history.', '');
   const T = bTickets(r), S = tatStats(T);
   const meter = (o, good) => { const den = o.n + o.open; const p = pctv(o.ok, den); const col = p == null ? C.track : p >= 80 ? C.teal : p >= 50 ? C.sand : C.rust;
-    return `<div style="display:flex;flex-direction:column;gap:6px;min-width:180px"><div class="wl-track" style="height:12px"><div class="wl-fill" style="height:12px;width:${p == null ? 0 : p.toFixed(1)}%;background:${col}"></div></div><span class="k-s">${den ? `${pct(o.ok, den, 0)} · ${nf(o.ok)} of ${nf(den)}${o.open ? ` · ${nf(o.open)} still open past target` : ''}` : 'No measured tickets yet'}</span></div>`; };
+    return `<div style="display:flex;flex-direction:column;gap:6px;min-width:180px"><div class="wl-track" style="height:12px"><div class="wl-fill" style="height:12px;width:${p == null ? 0 : p.toFixed(1)}%;background:${col}"></div></div><span class="k-s">${den ? `${pct(o.ok, den, 0)} · ${nf(o.ok)} of ${nf(den)}${o.open ? ` · ${nf(o.open)} still open past target` : ''}${o.late ? ` · ${nf(o.late)} with Bigin updated after the form` : ''}` : 'No measured tickets yet'}</span></div>`; };
   const row = (l, sub, target, o, med, b) => `<tr><td style="white-space:normal"><b>${l}</b><br><span class="k-s">${sub}</span></td><td>${target}</td><td class="b">${med}</td><td>${o ? meter(o) : '<span class="k-s">—</span>'}</td><td style="text-align:left">${VB[b]}</td></tr>`;
   const sla = pcard('Turnaround targets', 'SOP 02 · section 13 · share of tickets inside the target (open tickets already past it count as missed) · median actual time',
     wtable(['Turnaround', 'Target', 'Median', 'Within target', 'Source'], [
