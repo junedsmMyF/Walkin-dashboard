@@ -80,3 +80,12 @@ test('cutover: LimeChat export before 22 Oct, Bigin from 22 Oct; one lead per ph
   assert.deepEqual([day.lcLeads, day.inBigin, day.missing, day.bigin, day.notInExport], [2, 1, 1, 5, 4]);
   const s = JSON.stringify(m); assert.ok(!s.includes('9000000009') && !s.includes('Real Person'));
 });
+
+test('turnaround times from stage history: first call, RNR gap, connected → lead form, visit date → stage update', () => {
+  const recs = [rec('9', '90009', 'Converted', '2026-10-22T10:00:00+05:30', { p: '9000000009' })];
+  const hist = { 9: [['New Enquiry', '2026-10-22T10:00:00+05:30'], ['RNR 1', '2026-10-22T10:10:00+05:30'], ['Connected - In Discussion', '2026-10-22T14:10:00+05:30'], ['Store Visit Scheduled', '2026-10-22T14:20:00+05:30'], ['Converted', '2026-10-24T11:00:00+05:30']] };
+  const routedAt = () => Date.parse('2026-10-22T14:40:00+05:30');
+  const r = computePdpInv({ recs, hist, cutoff: '2026-10-24', now: NOW, routedOn: () => '2026-10-22', visitOn: () => '2026-10-23', routedAt, storeOf: () => 'FRIDO_0010' });
+  const t = r.tickets[0];
+  assert.deepEqual([t.tFirst, t.rnrGap, t.tForm, t.visitUpd, t.cHour], [0.2, 4, 0.5, 1, 10]);
+});

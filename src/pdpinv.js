@@ -1,7 +1,7 @@
 // Bigin "PDP Inventories" pipeline (LimeChat → Bigin integration, live 21 Oct 2026) → PII-free tickets + stage hygiene.
 // Read-only analysis: raw stages are kept as recorded; issues are flagged, never fixed in place. Phones, names and remarks
 // are used on the server only (matching), never returned.
-import { biginDate, phone10 } from './dates.js';
+import { biginDate, phone10, daysBetween } from './dates.js';
 import { LC_STORE_TAGS, LC_PDP_TAGS } from './limechat.js';
 
 // Stages seen on the pipeline (21 Oct 2026), in flow order → group. Matching ignores case and spacing.
@@ -34,7 +34,7 @@ export const HYGIENE = {
 
 // recs: from bigin.js refreshPdpInventories · hist: id → [[stage, firstSeen, approx?]] · ordersByPhone: phone → orders (date-sorted)
 // routedOn(phone) → first routing date or null · lcFirst(phone) → first LimeChat-export date or null · storeOf(label) → store id
-export function computePdpInv({ recs, hist = {}, meta = null, cutoff, now = new Date().toISOString(), ordersByPhone = new Map(), routedOn = () => null, visitOn = () => null, lcFirst = () => null, storeOf = () => null }) {
+export function computePdpInv({ recs, hist = {}, meta = null, cutoff, now = new Date().toISOString(), ordersByPhone = new Map(), routedOn = () => null, visitOn = () => null, routedAt = () => null, lcFirst = () => null, storeOf = () => null }) {
   if (!recs) return null;
   const sorted = [...recs].sort((a, b) => String(a.tc || a.ct).localeCompare(String(b.tc || b.ct)) || (a.i < b.i ? -1 : 1));
   const seen = new Set();
@@ -50,8 +50,18 @@ export function computePdpInv({ recs, hist = {}, meta = null, cutoff, now = new 
     const k1 = h.findIndex(([s]) => stageGroupOf(s) !== 'new'); // first time the ticket left New Enquiry
     const tFirst = k1 > 0 && h[k1][2] !== 'approx' ? H(created, h[k1][1]) : null;
     const sk = key(x.st);
+    // SOP 02 turnaround times from the recorded stage history (null when a move came before the first read)
+    const at = (k) => (h[k] && h[k][2] !== 'approx' ? h[k][1] : null);
+    const kR = h.findIndex(([s]) => key(s) === 'rnr1');
+    const rnrGap = kR >= 0 && at(kR) && at(kR + 1) ? H(at(kR), at(kR + 1)) : null; // RNR 1 → next attempt
+    const kC = h.findIndex(([s]) => ['connected', 'visit', 'video', 'converted'].includes(stageGroupOf(s)));
+    const kV = h.findIndex(([s]) => stageGroupOf(s) === 'visit');
+    const cHour = Number(new Date(Date.parse(created) + 5.5 * 36e5).toISOString().slice(11, 13));
     const os = okPhone && d ? (ordersByPhone.get(p) || []).filter((o) => o.date >= d && o.date <= cutoff) : [];
-    const rd = okPhone ? routedOn(p) : null; const vd = okPhone ? visitOn(p) || '' : ''; const lc = okPhone ? lcFirst(p) : null;
+    const rd = okPhone ? routedOn(p) : null; const vd = okPhone ? visitOn(p) || '' : ''; const ra = okPhone ? routedAt(p) : null;
+    const tForm = kC >= 0 && at(kC) && ra ? Math.round((ra - Date.parse(at(kC))) / 36e5 * 10) / 10 : null; // connected → lead form (routing sheet)
+    const visitUpd = vd && kV >= 0 && at(kV + 1) ? daysBetween(vd, biginDate(at(kV + 1))) : null; // visit date → stage updated
+    const lc = okPhone ? lcFirst(p) : null;
     const history = (x.tags || []).some((t) => /limechat history/i.test(t)) ? 1 : 0;
     const fl = [];
     if (!okPhone) fl.push('no_phone'); if (dup) fl.push('dup_phone');
@@ -71,7 +81,7 @@ export function computePdpInv({ recs, hist = {}, meta = null, cutoff, now = new 
     if (os.length && g !== 'converted') fl.push('order_not_converted');
     if (g === 'visit' && !rd) fl.push('visit_not_routed');
     return {
-      i: x.cid, d, st: x.st, g, ag: x.own || '', s, entry, pdp, hist: history, dup, ageH, dwellH, tFirst, vd, moves: h.length - 1,
+      i: x.cid, d, st: x.st, g, ag: x.own || '', s, entry, pdp, hist: history, dup, ageH, dwellH, tFirst, rnrGap, tForm, visitUpd, cHour, vd, moves: h.length - 1,
       ord: os.length, net: Math.round(os.reduce((u, o) => u + (o.net || 0), 0)), od: os[0]?.date || '', rt: rd ? 1 : 0, lc: lc ? 1 : 0, lcBefore: lc && d && lc < d ? 1 : 0,
       lr: x.lr ? 1 : 0, rem: x.rem ? 1 : 0, fl,
     };
