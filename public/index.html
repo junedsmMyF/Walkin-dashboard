@@ -2261,37 +2261,44 @@ function pDefs(){
   const ar = '<span class="wl-arrow" aria-hidden="true">→</span>';
   const lane = (label, nodes) => `<div class="jl"><span class="wl-track-lbl">${label}</span><div class="jr">${nodes.join(ar)}</div></div>`;
   const map = `<div class="jm">
-    ${lane('CALL', [box('PDP interaction', 'Widget · desktop only', 'gap'), box('Lead capture', 'Bigin Callback Requests', 'ok'), box('Consumed', 'Past Yet to Call', 'ok'), box('Follow-up', 'RNR → Connected'), box('Qualified', 'Interested in Bigin'), box('Outcome', 'Converted · lost · open', 'ok'), box('Revenue', 'DevX phone match', 'ok')])}
-    ${lane('TEXT', [box('PDP interaction', 'Level 1 tag (chair PDPs only)', 'ok'), box('Lead capture', 'LimeChat chat · bot flow', 'ok'), box('Consumed', 'Agent replied on WhatsApp', 'ok'), box('Follow-up', 'Call note: RNR → Connected', 'gap'), box('Qualified', 'Free-text note → standardised', 'gap'), box('Outcome', 'Converted · lost · open', 'ok'), box('Revenue', 'DevX phone match', 'ok')])}
-    ${lane('STORE VISIT', [box('Qualified', 'Yes'), box('Routing via agent', 'WhatsApp DSR group → routing sheet', 'ok'), box('Store visit', 'Bill by store staff', 'ok'), box('Outcome', 'Converted · still open', 'ok'), box('Retail revenue', 'DevX order · phone match', 'ok')])}
-    ${lane('VIDEO', [box('Qualified', 'Yes'), box('Video call', 'Bigin "Video call arrange" / note', 'ok'), box('Order placed', 'Not routed · on/after lead date', 'ok'), box('Retail revenue', 'DevX order · phone match', 'ok')])}
-    ${lane('NOT QUALIFIED', [box('Qualified', 'No'), box('Lost', 'Not interested · unreachable', 'ok')])}
-  </div><div class="wl-legend"><span><i class="wl-sw" style="background:#DCE9EF"></i>Tracked</span><span><i class="wl-sw" style="background:#F6E1D1"></i>Gap</span><span><i class="wl-sw" style="background:#FBEFD5"></i>Sample until connected</span></div>`;
-  const defs = [
-    ['Call lead', 'Website Call Store pop-up → Bigin Callback Requests. One per phone (first record).'],
-    ['WhatsApp lead', 'LimeChat ticket that is not an order / return query. One per phone (first chat).'],
-    ['WhatsApp stage', 'Rebuilt per ticket: not picked up → agent replied (consumed) → note outcome. Ticket Status (closed / bot / open) is kept as raw, never used as a stage.'],
-    ['WhatsApp note outcome', 'Private Note matched to: not reached, follow-up pending, store visit, video, interested, not interested, bought elsewhere, bought online. Unmatched notes are flagged.'],
-    ['Order counted once', 'If a DevX order matches both a call and a WhatsApp lead, the earlier lead gets it.'],
-    ['Backend agent', 'Bigin owner of the lead. Works it from first call to purchase.'],
-    ['Contacted', 'Unique lead past "Yet to Call". Bigin stage, unverified.'],
-    ['Qualified', 'Lead the agent marked interested (Bigin stage).'],
-    ['Conversion outcome', 'Converted (DevX order), lost (Not Interested) or still open.'],
-    ['Routing (not a funnel stage)', 'After "Qualified?", the agent routes the lead to a store on the WhatsApp DSR group (auto-logged in the routing sheet), sets up a video consult with the store team, or punches the order.'],
-    ['Routed lead', 'Routing sheet row, one per phone. Test rows (name "test", or a phone used on a test row) are left out.'],
-    ['Routed → billed', 'DevX order on/after the routing date, same phone, any store. "At the routed store" and "by the expected visit date" are shown separately.'],
-    ['Conversion route', 'Store visit = in the routing sheet (remark not about video) and bought on the expected visit date. Video call = routing remark mentions video (bought on/after the visit date), or Bigin video call stage (bought on/after the lead date). Else other.'],
-    ['Orders', 'Unique DevX order IDs; products and quantity do not add orders.'],
-    ['Consumed', 'Call: Bigin stage moved past Yet to Call (connected or not). WhatsApp: a backend agent replied (First Agent Message Time or Agent Message Blocks > 0).'],
-    ['Purchased', 'Any DevX order, any store, on/after the lead date, same phone (last 10 digits).'],
-    ['PDP-attributed revenue', 'Total Revenue (gross − discount) of those orders. Lead-date cohort.'],
-    ['Shared with walk-in', 'Buyer was a walk-in lead first. Shown, not double-counted.'],
-    ['Sample', 'Illustrative PDP views and CTA clicks until GA4 connects.'],
-  ];
-  const rules = `<div class="wl-list" style="margin-top:6px">${defs.map(([k, v]) => `<div class="row" style="flex-direction:column;gap:2px"><span style="font-weight:600">${k}</span><span class="wl-note">${v}</span></div>`).join('')}</div>`;
-  const open = `<div class="wl-list" style="margin-top:6px">${['Same-day orders count for call leads (walk-in uses strictly after).', 'No attribution window yet (walk-in has none).', 'Revenue on lead-date cohort, not order date.', 'Shared walk-in buyers: credit both or split?', 'Conversion route from the DevX order: online punch-in → video consult; else store visit.', 'Consumption: a call note without a WhatsApp reply does not count as consumed.', 'Routed lead → bill: any store, any date on/after routing (no window).', 'WhatsApp lead = any non-service chat, incl. bot-only chats that never reached an agent.', 'Order matched to both routes → credited to the earlier lead.'].map((x) => `<div class="row"><span>${x}</span><span class="vb vb-u">Needs sign-off</span></div>`).join('')}</div>`;
-  const wh = pcard('Funnel flowchart', 'Whimsical · Frido PDP lead funnel and store routing (final)', `<div class="wh"><iframe src="https://whimsical.com/embed/K8YnGdgbNtixDZnFj3vHtF?color-mode=light" title="Frido PDP to retail revenue journey (Whimsical)" loading="lazy" allowfullscreen></iframe></div><p class="wl-note" style="margin-top:8px"><a href="https://whimsical.com/saiyed-abdal-frido/frido-pdp-lead-funnel-and-store-routing-K8YnGdgbNtixDZnFj3vHtF" target="_blank" rel="noopener">Open funnel board ↗</a> · <a href="https://whimsical.com/frido-d2c-retail-cta-flow-VzWDTwaeCci9GWbWcRd38d" target="_blank" rel="noopener">Website CTA flow ↗</a></p>`);
-  return pcard('Customer journey', 'Lead funnel: PDP → capture → agent → follow-up → qualified? → outcome · after qualification: store visit, video consult or agent-punched order', map) + wh + `<div class="wl-g2">${pcard('Definitions', '', rules)}${pcard('Rules to sign off', 'Proposed for v1', open)}</div>`;
+    ${lane('CALL STORE', [box('Store card CTA', 'Pop-up · name + mobile + OTP', 'ok'), box('Lead', 'Bigin Callback Requests', 'ok'), box('Called', 'Past Yet to Call', 'ok'), box('Connected', 'Reached the customer', 'ok'), box('Qualified', 'Interested · store or video', 'ok')])}
+    ${lane('WHATSAPP', [box('Website CTA', 'Conversation tag = CTA', 'ok'), box('Lead', 'LimeChat before 22 Oct · Bigin PDP Inventories from 22 Oct', 'ok'), box('Called', 'Agent replied / past New Enquiry', 'ok'), box('Connected', 'Reached the customer', 'ok'), box('Qualified', 'Interested · store or video', 'ok')])}
+    ${lane('STORE VISIT', [box('Qualified', 'Store within 15 km'), box('Routed', 'WhatsApp DSR group → routing sheet', 'ok'), box('Store acknowledged', 'Not recorded', 'gap'), box('Store visit conversion', 'DevX order on the expected visit date', 'ok')])}
+    ${lane('VIDEO CALL', [box('Qualified', 'Store beyond 15 km'), box('Video call arranged', 'Routing remark "video" · Bigin stage · LimeChat note', 'ok'), box('Demo held', 'Not recorded', 'gap'), box('Video call conversion', 'DevX order placed by the store team', 'ok')])}
+    ${lane('NOT CONVERTED', [box('Not interested', 'Loss reason in Bigin', 'ok'), box('Unreachable', 'RNR · never connected', 'ok'), box('Still open', 'No order yet', 'ok')])}
+  </div><div class="wl-legend"><span><i class="wl-sw" style="background:#DCE9EF"></i>Tracked</span><span><i class="wl-sw" style="background:#F6E1D1"></i>Not recorded anywhere yet</span></div>`;
+  const sec = (title, rows) => `<h3 class="psec" style="margin:14px 0 4px">${title}</h3><div class="wl-list">${rows.map(([k, v]) => `<div class="row" style="flex-direction:column;gap:2px"><span style="font-weight:600">${k}</span><span class="wl-note">${v}</span></div>`).join('')}</div>`;
+  const defs = sec('Leads', [
+    ['Lead', 'One phone across Call Store and WhatsApp. A contact within 30 days of the lead\'s first contact is a repeat of the same lead; after 30 days it is a fresh lead, unless the phone bought in between.'],
+    ['Sources', 'Call Store = Bigin Callback Requests (read daily 06:00 IST). WhatsApp = LimeChat export for chats before 22 Oct 2026, Bigin PDP Inventories from 22 Oct (read every 15 min).'],
+    ['Left out', 'Mobility leads (routed to the mobility team, not counted) and order / return / service queries. A contact with no valid phone is a lead of its own.'],
+    ['CTA', 'Today\'s conversation tag: Call Store, Chat With Store, Store widget, Generic WhatsApp, PDP chat, Store inquiry. Tags changed in Sep–Oct 2026, so CTA counts are not compared across that change.'],
+  ]) + sec('Funnel', [
+    ['Called (consumed)', 'Call Store: Bigin stage past Yet to Call. WhatsApp: agent replied (LimeChat) or past New Enquiry (Bigin).'],
+    ['Connected', 'Connected - In Discussion, Store Visit Scheduled, Video Call Scheduled, Converted or Not Interested.'],
+    ['Qualified', 'Connected, not Not Interested. A lead in the routing sheet counts as qualified whatever its stage; the stage mismatch is flagged.'],
+    ['Not interested · unreachable', 'Not Interested stage with its loss reason (Bigin Close Lost Reason, else the LimeChat outcome). Unreachable = called, never connected.'],
+  ]) + sec('Routing and conversion', [
+    ['Store visit', 'Routing sheet row (WhatsApp DSR group), test rows left out, joined to the latest lead of that phone that started on or before the routing date.'],
+    ['Video call', 'Routing remark mentions "video", or not routed with a video call arranged (Bigin "Video call arrange", PDP Inventories "Video Call Scheduled", LimeChat video note).'],
+    ['Converted', 'A DevX order on or after the lead date, within 60 days, credited to the latest lead of that phone before the order. Every order is punched on DevX.'],
+    ['Conversion route', 'Store visit conversion = routed and bought on the expected visit date. Video call conversion = video remark and bought on or after the visit date, or not routed with a video call arranged. Anything else = other.'],
+    ['Orders and revenue', 'Unique DevX order IDs (products and quantity do not add orders). Revenue = Total Revenue (gross − discount), or Gross from the filter.'],
+  ]) + sec('Turnaround (SOP 02)', [
+    ['Targets', 'First call 15 min · RNR attempts 3 h apart · lead form on the connecting call · stage updated on the visit date · video demo within 48 h · DSR acknowledged in 10 min.'],
+    ['How it is timed', 'From the stage history read every 15 min (from 22–23 Oct 2026). A move made before tracking started has no time and is left out. Callback time and DSR reactions are not recorded.'],
+  ]) + sec('Data honesty', [
+    ['Verified', 'Matched against a second source (DevX orders, routing sheet).'],
+    ['As recorded', 'Bigin stage or LimeChat note as the agent left it, not checked against another source.'],
+    ['Sample', 'PDP views and CTA clicks: illustrative until GA4 / Shopify is connected.'],
+    ['Not tracked', 'No source records it yet. The card stays, empty.'],
+  ]);
+  const agreed = ['One lead per phone · 30-day repeat rule · fresh lead after 30 days unless bought', 'Mobility and service queries not counted', 'CTA by today\'s conversation tag', 'Converted = DevX order within 60 days · latest lead before the order · unique order IDs', 'Routed (routing sheet) = qualified', 'Store visit = bought on the expected visit date · video call = video remark or video call arranged', 'WhatsApp from Bigin PDP Inventories from 22 Oct 2026'];
+  const pending = ['Routed without a "video" remark while Bigin says Video Call Scheduled: which wins?', '"Test Lead" and "Customer Success Lead" closures still count as leads', 'Monthly targets for the KPIs (Compare to → Target)', 'Orders also counted on Walk-in / Retail retention are kept on both dashboards'];
+  const list = (xs, b) => `<div class="wl-list" style="margin-top:6px">${xs.map((x) => `<div class="row"><span>${x}</span>${b}</div>`).join('')}</div>`;
+  const wh = pcard('Funnel flowchart', 'Whimsical · Final PDP routing mechanism', `<div class="wh"><iframe src="https://whimsical.com/embed/K8YnGdgbNtixDZnFj3vHtF?color-mode=light" title="Frido PDP to retail revenue journey (Whimsical)" loading="lazy" allowfullscreen></iframe></div><p class="wl-note" style="margin-top:8px"><a href="https://whimsical.com/saiyed-abdal-frido/frido-pdp-lead-funnel-and-store-routing-K8YnGdgbNtixDZnFj3vHtF" target="_blank" rel="noopener">Open funnel board ↗</a> · <a href="https://whimsical.com/frido-d2c-retail-cta-flow-VzWDTwaeCci9GWbWcRd38d" target="_blank" rel="noopener">Website CTA flow ↗</a></p>`);
+  return pcard('How a PDP lead flows', 'SOP 02 · lead → called → connected → qualified → store visit or video call → DevX order', map) + wh +
+    `<div class="wl-g2">${pcard('Definitions', 'The rules every tab uses', defs)}<div>${pcard('Agreed rules', 'Signed off by the owner, Oct 2026', list(agreed, '<span class="vb vb-v">Agreed</span>'))}${pcard('Open questions', 'Not changed until the owner decides', list(pending, '<span class="vb vb-u">Needs sign-off</span>'))}</div></div>`;
 }
 function pdpAllNet(){ return allAttributed(false).filter((x) => x.d >= PDATA.startDate && x.d <= PDATA.cutoff).reduce((u, x) => u + x.net, 0); }
 function pdpStatsLine(){ if (!PDATA) return 'Loading'; const keep = [F.city, F.store, F.cta, F.format, F.day]; F.city = 'all'; F.store = 'all'; F.cta = 'all'; F.format = 'all'; F.day = 'all'; const R = [PDATA.startDate, PDATA.cutoff]; const a = callAgg(R), t = textAgg(R); [F.city, F.store, F.cta, F.format, F.day] = keep; return `Leads <b>${nf(a.unique + t.unique)}</b> (call ${nf(a.unique)} · WhatsApp ${nf(t.unique)}) · Bought <b>${nf(a.purchased + t.purchased)}</b> · Revenue <b>${inr(pdpAllNet())}</b>`; }
