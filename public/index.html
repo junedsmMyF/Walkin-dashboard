@@ -132,6 +132,7 @@ td.strong{font-weight:600}
 
 .stage{border:1px solid var(--line);background:#F6F8FB;border-radius:var(--radius);padding:12px 14px;display:flex;flex-direction:column;gap:2px;flex:1 1 0;min-width:130px}
 .stage.hot{background:var(--warn-soft);border-color:#FFB3B5}
+.pst .stage{background:#F8F7F3;border-color:#E3DFD4}.pst .stage.hot{background:#F6E1D1;border-color:#E9B999}.pst .stage.win{background:#DCE9EF;border-color:#9BB8C6}
 .stage .s-n{font-size:21px;font-weight:600}
 .stage .s-l{font-size:12px;font-weight:500;color:var(--muted)}
 .stage .s-v{font-size:12px;color:var(--muted)}
@@ -1453,7 +1454,7 @@ function wDefs(){
    Call route = Bigin "Callback Requests" (real) × BigQuery sales (real).
    Text route (LimeChat) and the PDP layer (views, CTA clicks) are SAMPLE until their exports are connected. */
 const PTABS = [
-  { id: 'overview', name: 'Overview' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
+  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
   { id: 'product', name: 'Product & category' }, { id: 'loss', name: 'Loss analysis' },
   { id: 'quality', name: 'Data quality' }, { id: 'definitions', name: 'Definitions' },
 ];
@@ -1615,7 +1616,7 @@ function pFilters(tab){
     <div class="wl-fl">DATE RANGE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
     ${sf.city}${sf.store}${sf.rest}
     <span class="wl-note" style="align-self:center">${r ? `${dpShort(r[0])} → ${dpShort(r[1])}` : 'No PDP data in this range'}${full[0] < PDATA.startDate ? ` · call leads start ${dpShort(PDATA.startDate)}` : ''}</span>
-  </div>${r ? (tab === 'overview' ? lCtaBar(r) : ctaBar(r)) : ''}`;
+  </div>${r ? (['overview', 'pipeline'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
 }
 // CTA toggle: one pill per entry point with leads in range (lead counts ignore the toggle itself)
 function ctaBar(r){
@@ -1729,6 +1730,79 @@ function pOverview(r){
     `<p class="wl-note">Lead = one phone across Call Store + WhatsApp (a repeat within 30 days is the same lead) · converted = DevX order on/after the lead date within 60 days · ${nf(a.rep)} repeat contacts folded in.</p>`;
 }
 
+/* ---- Bigin pipeline (PDP Inventories · SOP 02 stages): live queue, time in stage, stage hygiene, by agent ---- */
+const BSTAGES = [
+  ['New Enquiry', 'Call the customer'], ['RNR 1', 'WhatsApp nudge, call again in 3 h'], ['RNR 2', 'Final attempt in 3 h'], ['Callback scheduled', 'Call at the agreed time'],
+  ['Connected - In Discussion', 'Qualify and route'], ['Store Visit Scheduled', 'Outcome after the visit date'], ['Video Call Scheduled', 'Run the demo'], ['Converted', 'Closed won'], ['Not Interested', 'Closed · note the reason'],
+];
+const BRULES = [
+  ['new_over_15m', 'New Enquiry, no call in 15 min', 'First call within 15 minutes'],
+  ['rnr1_over_3h', 'RNR 1, next attempt overdue', 'Call again after 3 hours'],
+  ['rnr2_over_3h', 'RNR 2, final attempt overdue', 'Final attempt after 3 hours, then Not Interested · Unreachable'],
+  ['callback_over_24h', 'Callback scheduled for over 24 h', 'Call at the time the customer asked'],
+  ['connected_over_24h', 'Connected, not routed in 24 h', 'Qualify and route on the same call'],
+  ['visit_date_passed', 'Store Visit Scheduled, visit date passed', 'Never leave a scheduled stage after the date'],
+  ['video_over_48h', 'Video Call Scheduled for over 48 h', 'Run the demo, then Converted or Not Interested'],
+  ['lost_no_reason', 'Not Interested, no reason', 'Note the reason'],
+  ['order_not_converted', 'Bought on DevX, stage not Converted', 'Move to Converted when the customer buys'],
+  ['converted_no_order', 'Converted, no DevX order found', 'Converted = purchased'],
+  ['unknown_stage', 'Stage not in SOP 02', 'Use only the 9 SOP stages'],
+];
+const SOP_BREACH = new Set(BRULES.map((x) => x[0]));
+const bKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const hasPinv = () => !!(PDATA && PDATA.pinv && PDATA.pinv.tickets);
+const bTickets = (r) => (hasPinv() && r ? PDATA.pinv.tickets.filter((t) => t.d && inPR(t.d, r) && pStoreOk(t.s) && (F.cta === 'all' || t.entry === F.cta)) : []);
+const isOpen = (t) => !['converted', 'lost'].includes(t.g);
+function pPipeline(r){
+  if (!hasPinv()) return wcard('Bigin PDP Inventories not connected', 'The pipeline is read every 15 minutes; it appears after the first read.', '');
+  const T = bTickets(r); const open = T.filter(isOpen);
+  const breach = (t) => t.fl.some((f) => SOP_BREACH.has(f));
+  const newest = open.filter((t) => t.g === 'new'); const oldest = newest.length ? Math.max(...newest.map((t) => t.ageH || 0)) : null;
+  const sched = T.filter((t) => t.fl.includes('visit_date_passed') || t.fl.includes('video_over_48h'));
+  const ageTxt = (h) => (h == null ? '—' : h >= 48 ? Math.round(h / 24) + ' days' : h >= 1 ? Math.round(h) + ' h' : Math.round(h * 60) + ' min');
+  const kp = pkpis([
+    { l: 'Open tickets', v: nf(open.length), s: `of ${nf(T.length)} · not Converted or Not Interested`, b: 'u' },
+    { l: 'Oldest New Enquiry', v: ageTxt(oldest), tone: oldest > 24 ? 'bad' : '', s: `${nf(newest.length)} waiting for a first call`, b: 'u' },
+    { l: 'Scheduled, date passed', v: nf(sched.length), s: `Store visit ${nf(T.filter((t) => t.fl.includes('visit_date_passed')).length)} · video call ${nf(T.filter((t) => t.fl.includes('video_over_48h')).length)}`, b: 'u' },
+    { l: 'Stage hygiene', v: pct(T.filter((t) => !breach(t)).length, T.length, 0), s: 'Tickets with no SOP 02 breach', b: 'u' },
+  ]);
+
+  // stage board: SOP order, then any stage not in the SOP
+  const known = new Set(BSTAGES.map((s) => bKey(s[0])));
+  const extra = [...new Set(T.map((t) => t.st).filter((s) => s && !known.has(bKey(s))))].map((s) => [s, 'Not an SOP stage']);
+  const buck = (xs) => { const n = xs.length || 1; const a = xs.filter((t) => t.dwellH != null && t.dwellH < 24).length, b = xs.filter((t) => t.dwellH != null && t.dwellH >= 24 && t.dwellH < 72).length, c = xs.filter((t) => t.dwellH != null && t.dwellH >= 72).length; return [a, b, c, xs.length - a - b - c].map((v) => (v / n * 100).toFixed(1)); };
+  const stage = ([name, next]) => {
+    const xs = T.filter((t) => bKey(t.st) === bKey(name)); const g = xs[0]?.g; const closed = /^(converted|notinterested)$/.test(bKey(name));
+    const [a, b, c, u] = buck(xs);
+    const cls = bKey(name) === 'newenquiry' && xs.length ? 'hot' : bKey(name) === 'converted' ? 'win' : !known.has(bKey(name)) ? 'hot' : '';
+    return `<div class="stage ${cls}" style="min-width:150px"><span class="s-l">${esc(name)}</span><span class="s-n">${nf(xs.length)}</span>${closed ? '' : `<div class="wl-track" style="height:8px" title="Time in stage: under 1 day · 1–3 days · over 3 days · not known">${[[a, C.tealMid], [b, C.sand], [c, C.rust], [u, C.track]].map(([w, col]) => +w ? `<div class="wl-fill" style="height:8px;width:${w}%;background:${col};border-radius:0"></div>` : '').join('')}</div>`}<span class="s-v">${esc(next)}${g === 'lost' ? ` · ${nf(xs.filter((t) => t.fl.includes('lost_no_reason')).length)} with no reason` : ''}</span></div>`;
+  };
+  const board = pcard('Where tickets are now', 'The 9 Bigin stages from SOP 02, with the next action · bar = time in the current stage',
+    `<div class="pst" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:16px">${[...BSTAGES, ...extra].map(stage).join('')}</div>
+    <div class="wl-legend"><span><i class="wl-sw" style="background:${C.tealMid}"></i>Under 1 day</span><span><i class="wl-sw" style="background:${C.sand}"></i>1–3 days</span><span><i class="wl-sw" style="background:${C.rust}"></i>Over 3 days</span><span><i class="wl-sw" style="background:${C.track}"></i>Not known (moved before tracking started)</span></div>`, 'u');
+
+  // hygiene against SOP 02
+  const rows = BRULES.map(([k, l, rule]) => { const n = T.filter((t) => t.fl.includes(k)).length; return `<tr><td>${l}</td><td class="${n ? 'bad' : ''}">${nf(n)}</td><td>${pct(n, T.length, 0)}</td><td style="text-align:left;white-space:normal">${rule}</td></tr>`; });
+  const hyg = pcard('Stage hygiene against SOP 02', 'One rule per row · stages are flagged, never edited · open breaches on the tickets in range',
+    wtable(['Check', 'Tickets', 'Share', 'SOP rule'], rows) + `<p class="wl-note" style="margin-top:8px">Lead ID on the ticket and callback time are not Bigin fields yet, so those two SOP checks are not tracked.</p>`, 'u');
+
+  // by agent (Bigin owner)
+  const byA = {}; T.forEach((t) => { (byA[t.ag || '(no owner)'] = byA[t.ag || '(no owner)'] || []).push(t); });
+  const arow = ([ag, xs]) => { const called = xs.filter((t) => t.g !== 'new'), conn = xs.filter((t) => ['connected', 'visit', 'video', 'converted', 'lost'].includes(t.g)); const tf = median(xs.map((t) => t.tFirst).filter((v) => v != null));
+    return `<tr><td class="b">${esc(ag)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter(isOpen).length)}</td><td>${pct(called.length, xs.length, 0)}</td><td>${nf(conn.length)}</td><td>${nf(xs.filter((t) => t.rt).length)}</td><td>${nf(xs.filter((t) => t.ord).length)}</td><td class="b">${inr(xs.reduce((u, t) => u + t.net, 0))}</td><td>${tf == null ? '—' : ageTxt(tf)}</td><td class="bad">${nf(xs.filter(breach).length)}</td></tr>`; };
+  const agents = pcard('By agent', 'Bigin ticket owner · first call = median time to leave New Enquiry (tracked since 23 Oct)',
+    wtable(['Agent', 'Tickets', 'Open', 'Called', 'Connected', 'Routed', 'Bought', 'Revenue', 'First call', 'SOP breaches'], Object.entries(byA).sort((x, y) => y[1].length - x[1].length).map(arow)), 'v');
+
+  // Call Store (Bigin Callback Requests) — its own stage list
+  const CL = (PDATA.call.leads || []).filter((x) => !x.dup && inPR(x.d, r) && pStoreOk(x.s) && (F.cta === 'all' || F.cta === 'call_popup'));
+  const cs = {}; CL.forEach((x) => { cs[x.st || '(blank)'] = (cs[x.st || '(blank)'] || 0) + 1; });
+  const call = CL.length ? pcard('Call Store pipeline', 'Bigin Callback Requests · its own stage list',
+    `<div class="pst" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px">${Object.entries(cs).sort((x, y) => y[1] - x[1]).map(([s, n]) => `<div class="stage ${s === 'Yet to Call' ? 'hot' : ''}"><span class="s-l">${esc(s)}</span><span class="s-n">${nf(n)}</span><span class="s-v">${pct(n, CL.length, 0)}</span></div>`).join('')}</div>`, 'u') : '';
+
+  return kp + board + hyg + agents + call +
+    `<p class="wl-note">Tickets created in the selected range · WhatsApp leads from Bigin PDP Inventories (read every 15 min) · Bigin ${PDATA.pinv.meta?.refreshedAt ? 'read ' + new Date(PDATA.pinv.meta.refreshedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : ''}.</p>`;
+}
+
 function pagePdp(tab){
   if (PDATA) applyRev([PDATA.call?.attributed, PDATA.call?.lines, PDATA.call?.salesDaily, PDATA.call?.products, PDATA.text?.attributed, PDATA.routing?.routes]);
   if (!PTABS.find((t) => t.id === tab)) tab = 'overview';
@@ -1737,7 +1811,7 @@ function pagePdp(tab){
   let body;
   if (tab === 'definitions') body = pDefs();
   else if (!PDATA || !DATA) body = PDATA_ERR || DATA_ERR ? wcard('Live data could not be loaded', esc(PDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="pRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin Callback Requests (T-1) and BigQuery sales.', '');
-  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
+  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
   const i = PTABS.findIndex((t) => t.id === tab);
   const prev = i > 0 ? `<a href="#/retail/pdp/${PTABS[i - 1].id}"><span class="p-dir">← Previous</span><span class="p-name">${PTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
   const next = i < PTABS.length - 1 ? `<a class="next" href="#/retail/pdp/${PTABS[i + 1].id}"><span class="p-dir">Next →</span><span class="p-name">${PTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
@@ -2248,7 +2322,7 @@ function pQuality(r){
   ];
   const gapT = wtable(['Journey step', 'System', 'Status', 'Fix'], GAPS.map((g2) => `<tr><td class="b">${g2[0]}</td><td>${g2[1]}</td><td><span class="vb ${g2[2] === 'Partial' || g2[2] === 'Phone only' ? 'vb-u' : 'vb-s'}">${g2[2]}</span></td><td>${g2[3]}</td></tr>`));
   const PI = PDATA.pinv;
-  const HYG = { no_phone: 'No valid phone', dup_phone: 'Repeat phone', no_owner: 'No owner', no_store: 'No store', no_tag: 'No conversation tag', unknown_stage: 'Stage not in flow', new_over_24h: 'New Enquiry > 24 h', rnr_over_48h: 'RNR / callback > 48 h', lost_no_reason: 'Not Interested, no reason', converted_no_order: 'Converted, no DevX order', order_not_converted: 'Bought, stage not Converted', visit_not_routed: 'Visit scheduled, not in routing sheet' };
+  const HYG = { no_phone: 'No valid phone', dup_phone: 'Repeat phone', no_owner: 'No owner', no_store: 'No store', no_tag: 'No conversation tag', unknown_stage: 'Stage not in flow', new_over_24h: 'New Enquiry > 24 h', new_over_15m: 'New Enquiry, no call in 15 min', rnr1_over_3h: 'RNR 1 attempt overdue (3 h)', rnr2_over_3h: 'RNR 2 final attempt overdue', callback_over_24h: 'Callback scheduled > 24 h', connected_over_24h: 'Connected, not routed in 24 h', visit_date_passed: 'Visit date passed, still scheduled', video_over_48h: 'Video call scheduled > 48 h', lost_no_reason: 'Not Interested, no reason', converted_no_order: 'Converted, no DevX order', order_not_converted: 'Bought, stage not Converted', visit_not_routed: 'Visit scheduled, not in routing sheet' };
   const owners = PI ? Object.keys(PI.byOwner || {}) : [];
   const pinvCards = PI ? pcard('Bigin PDP Inventories hygiene', `All ${nf(PI.total)} tickets now in Bigin · read ${PI.meta?.refreshedAt ? new Date(PI.meta.refreshedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : '—'} · stages as recorded`,
       `<div>${wtable(['Stage', 'Tickets', 'Share'], Object.entries(PI.byStage).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td class="b">${esc(k)}</td><td>${nf(v)}</td><td>${pct(v, PI.total, 0)}</td></tr>`))}</div>` +
