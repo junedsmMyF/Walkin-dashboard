@@ -1482,7 +1482,7 @@ const PTIP = {
   'Contacted': ['Unique leads moved past "Yet to Call".', 'Bigin stage · unverified'],
   'Purchased': ['Leads with a DevX order on/after lead date.', 'Bigin × BigQuery'],
   'PDP-attributed revenue': ['Orders from these leads. Total Revenue.', 'Bigin × BigQuery'],
-  'Revenue': ['Orders from leads whose first contact is in the range (lead date). Sub-text: PDP orders billed in the range (order date), as order-date reports count them.', 'DevX (BigQuery)'],
+  'Revenue': ['PDP orders billed in the range (order date), from leads of any date. Sub-text: revenue from leads whose first contact is in the range (lead date).', 'DevX (BigQuery)'],
   'Share of store sales': ['PDP orders billed in the range ÷ all store sales in the range.', 'DevX (BigQuery)'],
   'Lead → purchase': ['Purchased ÷ unique leads.', 'Bigin × BigQuery'],
   'Shared with walk-in': ['Buyers who were also walk-in leads.', 'Bigin × BigQuery'],
@@ -1634,6 +1634,12 @@ function lCtaBar(r){
   const keys = ['all', ...Object.keys(LCTA).filter((k) => n[k] || F.cta === k)];
   return `<div class="ctabar" role="group" aria-label="CTA"><span class="wl-fl" style="margin:0">CTA</span><div class="wl-seg">${keys.map((k) => `<button type="button" data-cta="${k}" class="${F.cta === k ? 'on' : ''}" aria-pressed="${F.cta === k}">${k === 'all' ? 'All CTAs' : LCTA[k][0]} <span>${nf(k === 'all' ? R.length : n[k] || 0)}</span></button>`).join('')}</div></div>`;
 }
+// Orders billed in the range (order date, owner 24 Oct 2026) from any PDP lead · CTA filter on the lead's CTA, store filters on the billing store
+function oAgg(r){
+  const O = []; (PDATA.leadList.rows || []).forEach((x) => { if (F.cta !== 'all' && x.e !== F.cta) return; x.o.forEach((o) => { if (inPR(o.d, r) && pStoreOk(o.s)) O.push({ ...o, x }); }); });
+  const sum = (os) => ({ orders: os.length, buyers: new Set(os.map((o) => o.x)).size, net: os.reduce((u, o) => u + o.net, 0) });
+  return { ...sum(O), byRoute: { store: sum(O.filter((o) => o.r === 'store')), video: sum(O.filter((o) => o.r === 'video')), other: sum(O.filter((o) => o.r === 'other')) }, sameDay: O.filter((o) => o.lag === 0).length };
+}
 function pOverview(r){
   if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
   const R = lRows(r), a = lAgg(R);
@@ -1641,16 +1647,16 @@ function pOverview(r){
   const dl = (cur, prev, o) => wdelta(cur, prev, { short: true, ...o });
   const rate = (x, y) => pctv(x, y);
   const k = (l, v, d, s, b) => ({ l, v, d: d.d, tone: d.tone, s, b });
-  // share of store sales: PDP-credited orders billed in the range (any lead date, store filters on the billing store) ÷ all store sales in the range
-  const billed = (PDATA.leadList.rows || []).filter((x) => F.cta === 'all' || x.e === F.cta).reduce((u, x) => u + x.o.filter((o) => inPR(o.d, r) && pStoreOk(o.s)).reduce((v, o) => v + o.net, 0), 0);
+  // revenue and orders by order date (billed in the range); leads, funnel and conversion rate by lead date
+  const B = oAgg(r), BP = p ? oAgg(p) : null, billed = B.net;
   const sales = (PDATA.call.salesDaily || []).filter((x) => inPR(x.d, r) && pStoreOk(x.s)).reduce((u, x) => u + x.net, 0);
   const kp = pkpis([
     k('Leads', nf(a.leads), dl(a.leads, P && P.leads), `Call Store ${nf(a.call)} · WhatsApp ${nf(a.wa)}`, 'v'),
     k('Consumption rate', pct(a.cons, a.leads, 0), dl(rate(a.cons, a.leads), P && rate(P.cons, P.leads), { pts: 1 }), `${nf(a.cons)} called · ${nf(a.leads - a.cons)} untouched`, 'v'),
     k('Connected', nf(a.conn), dl(a.conn, P && P.conn), `${pct(a.conn, a.cons, 0)} of leads called`, 'u'),
     k('Routed', nf(a.st + a.vid), dl(a.st + a.vid, P && P.st + P.vid), `Store visit ${nf(a.st)} · Video call ${nf(a.vid)}`, 'v'),
-    k('Conversion rate', pct(a.buyers, a.leads, 1), dl(rate(a.buyers, a.leads), P && rate(P.buyers, P.leads), { pts: 1 }), `${nf(a.buyers)} buyers · ${nf(a.orders)} DevX orders`, 'v'),
-    k('Revenue', inr(a.net), dl(a.net, P && P.net), `From leads in range · ${inr(billed)} billed in range (order date) · AOV ${a.orders ? inr(a.net / a.orders) : '—'}`, 'v'),
+    k('Conversion rate', pct(a.buyers, a.leads, 1), dl(rate(a.buyers, a.leads), P && rate(P.buyers, P.leads), { pts: 1 }), `${nf(a.buyers)} of these leads bought · ${nf(a.orders)} order${a.orders === 1 ? '' : 's'}`, 'v'),
+    k('Revenue', inr(B.net), dl(B.net, BP && BP.net), `${nf(B.orders)} order${B.orders === 1 ? '' : 's'} billed in range · AOV ${B.orders ? inr(B.net / B.orders) : '—'} · ${inr(a.net)} from leads in range`, 'v'),
     { l: 'Share of store sales', v: pct(billed, sales, 1), s: `${inr(billed)} PDP orders billed in range · of ${inr(sales)}`, b: 'v' },
   ]);
 
@@ -1678,16 +1684,16 @@ function pOverview(r){
     return [row(A, `<span class="cx-chev">${open ? '▾' : '▸'}</span> <b>${LCTA[e][0]}</b> <span class="k-s">${LCTA[e][1]} · ${nf(subs.length)} ${subs.length === 1 ? 'store' : 'stores'}</span>`, `cx-row ${F.cta === e ? 'je-on' : ''}`, `data-ex="l:${e}" tabindex="0" role="button" aria-expanded="${open}"`),
       ...(open ? subs.map(([s, xs]) => row(lAgg(xs), esc(s === 'UNMAPPED' ? 'Store not known' : pStore(s).name), 'je-sub')) : [])];
   });
-  const cta = pcard('CTA performance', 'Every CTA through the same flow · bars: share of leads (teal) vs share of revenue (rust) · click a CTA to see it by store',
+  const cta = pcard('CTA performance', 'Leads in range and what they bought (lead date) · bars: share of leads (teal) vs share of revenue (rust) · click a CTA to see it by store',
     `<div class="wl-tw"><table><thead><tr><th>CTA</th><th>Leads</th><th>Consumption</th><th>Connected</th><th>Store visits</th><th>Video calls</th><th>Bought</th><th>Conversion</th><th>Revenue</th><th>Per lead</th><th>Leads · revenue</th></tr></thead><tbody>${body.join('')}<tr class="je-grp">${row(tot, '<b>All CTAs</b>').replace(/^<tr[^>]*>|<\/tr>$/g, '')}</tr><tr><td><b>Get Direction</b> <span class="k-s">Store card · Google Maps</span></td><td colspan="10" style="text-align:left">${VB.n} <span class="k-s">creates no lead</span></td></tr></tbody></table></div>`, 'v');
 
   // revenue by conversion route + fix first
-  const rt = a.byRoute, c = PCOL();
-  const rev = pcard('Revenue by conversion', 'Unique DevX orders · latest lead before the order · within 60 days',
-    `<div class="wl-track" style="height:18px;margin-top:16px">${a.net ? ['store', 'video', 'other'].map((x) => rt[x].net ? `<div class="wl-fill" style="height:18px;width:${(rt[x].net / a.net * 100).toFixed(1)}%;background:${c[x]};border-radius:0"></div>` : '').join('') : ''}</div>
-    <div class="wl-legend">${PATHS.map(([x, l]) => `<span><i class="wl-sw" style="background:${c[x]}"></i>${l} ${inr(rt[x].net)} (${pct(rt[x].net, a.net, 0)})</span>`).join('')}</div>
+  const rt = B.byRoute, c = PCOL();
+  const rev = pcard('Revenue by conversion', 'Orders billed in the range (order date) · unique DevX orders · latest lead before the order · within 60 days',
+    `<div class="wl-track" style="height:18px;margin-top:16px">${B.net ? ['store', 'video', 'other'].map((x) => rt[x].net ? `<div class="wl-fill" style="height:18px;width:${(rt[x].net / B.net * 100).toFixed(1)}%;background:${c[x]};border-radius:0"></div>` : '').join('') : ''}</div>
+    <div class="wl-legend">${PATHS.map(([x, l]) => `<span><i class="wl-sw" style="background:${c[x]}"></i>${l} ${inr(rt[x].net)} (${pct(rt[x].net, B.net, 0)})</span>`).join('')}</div>
     ${wtable(['Route', 'Orders', 'Buyers', 'Revenue', 'AOV'], PATHS.map(([x, l]) => `<tr><td class="b">${l}</td><td>${nf(rt[x].orders)}</td><td>${nf(rt[x].buyers)}</td><td class="b">${inr(rt[x].net)}</td><td>${rt[x].orders ? inr(rt[x].net / rt[x].orders) : '—'}</td></tr>`))}
-    <p class="wl-note" style="margin-top:8px">${nf(a.sameDay)} of ${nf(a.buyers)} buyers bought on the day of their first contact.</p>`, 'v');
+    <p class="wl-note" style="margin-top:8px">${nf(B.sameDay)} of ${nf(B.orders)} orders were placed on the day of the lead's first contact.</p>`, 'v');
   const fl = PDATA.pinv?.flags || {};
   const fix = pcard('Fix first', 'Biggest leaks against SOP 02',
     `<div class="wl-list" style="margin-top:6px">
