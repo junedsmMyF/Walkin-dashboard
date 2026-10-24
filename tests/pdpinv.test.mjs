@@ -88,4 +88,12 @@ test('turnaround times from stage history: first call, RNR gap, connected → le
   const r = computePdpInv({ recs, hist, cutoff: '2026-10-24', now: NOW, routedOn: () => '2026-10-22', visitOn: () => '2026-10-23', routedAt, storeOf: () => 'FRIDO_0010' });
   const t = r.tickets[0];
   assert.deepEqual([t.tFirst, t.rnrGap, t.tForm, t.visitUpd, t.cHour], [0.2, 4, 0.5, 1, 10]);
+  assert.deepEqual([t.vcEver, t.vcH, t.vcTo], [0, null, '']);
+});
+
+test('video call: time in Video Call Scheduled and the stage it moved to', () => {
+  const recs = [rec('8', '90008', 'Not Interested', '2026-10-22T10:00:00+05:30', { p: '9000000008' })];
+  const hist = { 8: [['New Enquiry', '2026-10-22T10:00:00+05:30'], ['Video Call Scheduled', '2026-10-22T11:00:00+05:30'], ['Not Interested', '2026-10-23T17:00:00+05:30']] };
+  const t = computePdpInv({ recs, hist, cutoff: '2026-10-24', now: NOW, storeOf: () => 'FRIDO_0010' }).tickets[0];
+  assert.deepEqual([t.vcEver, t.vcH, t.vcTo], [1, 30, 'lost']);
 });

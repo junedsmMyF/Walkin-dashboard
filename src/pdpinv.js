@@ -56,6 +56,8 @@ export function computePdpInv({ recs, hist = {}, meta = null, cutoff, now = new 
     const rnrGap = kR >= 0 && at(kR) && at(kR + 1) ? H(at(kR), at(kR + 1)) : null; // RNR 1 → next attempt
     const kC = h.findIndex(([s]) => ['connected', 'visit', 'video', 'converted'].includes(stageGroupOf(s)));
     const kV = h.findIndex(([s]) => stageGroupOf(s) === 'visit');
+    const kD = h.findIndex(([s]) => stageGroupOf(s) === 'video'); // Video Call Scheduled: ever · hours until the next stage · next stage group
+    const vcH = kD >= 0 && at(kD) && at(kD + 1) ? H(at(kD), at(kD + 1)) : null; const vcTo = kD >= 0 && h[kD + 1] ? stageGroupOf(h[kD + 1][0]) : '';
     const cHour = Number(new Date(Date.parse(created) + 5.5 * 36e5).toISOString().slice(11, 13));
     const os = okPhone && d ? (ordersByPhone.get(p) || []).filter((o) => o.date >= d && o.date <= cutoff) : [];
     const rd = okPhone ? routedOn(p) : null; const vd = okPhone ? visitOn(p) || '' : ''; const ra = okPhone ? routedAt(p) : null;
@@ -81,7 +83,7 @@ export function computePdpInv({ recs, hist = {}, meta = null, cutoff, now = new 
     if (os.length && g !== 'converted') fl.push('order_not_converted');
     if (g === 'visit' && !rd) fl.push('visit_not_routed');
     return {
-      i: x.cid, d, st: x.st, g, ag: x.own || '', s, entry, pdp, hist: history, dup, ageH, dwellH, tFirst, rnrGap, tForm, visitUpd, cHour, vd, moves: h.length - 1,
+      i: x.cid, d, st: x.st, g, ag: x.own || '', s, entry, pdp, hist: history, dup, ageH, dwellH, tFirst, rnrGap, tForm, visitUpd, cHour, vcEver: kD >= 0 ? 1 : 0, vcH, vcTo, vd, moves: h.length - 1,
       ord: os.length, net: Math.round(os.reduce((u, o) => u + (o.net || 0), 0)), od: os[0]?.date || '', rt: rd ? 1 : 0, lc: lc ? 1 : 0, lcBefore: lc && d && lc < d ? 1 : 0,
       lr: x.lr ? 1 : 0, rem: x.rem ? 1 : 0, fl,
     };
