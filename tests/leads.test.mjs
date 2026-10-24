@@ -37,3 +37,27 @@ test('routing rows join the latest lead that started on/before the routing date;
   const s = JSON.stringify(summariseLeads(LL, { from: '2026-10-01', to: '2026-10-31' }));
   assert.ok(!s.includes('9000000'));
 });
+
+test('orders: latest lead before the order, within 60 days, each order once; store / video / other routes', async () => {
+  const { attributeOrders } = await import('../src/leads.js');
+  const contacts = [
+    C('limechat', '1', '2026-08-01', '9000000001'),
+    C('bigin', '2', '2026-10-05', '9000000001'),                    // fresh lead (65 days later, no purchase between)
+    C('call', 'c', '2026-10-01', '9000000003', { vc: true }),      // video call arranged, not routed
+    C('limechat', '4', '2026-10-02', '9000000004'),                 // routed, video remark
+    C('limechat', '5', '2026-08-01', '9000000005'),                 // order 70 days later → outside the window
+  ];
+  const routes = [{ d: '2026-10-06', phone: '9000000001', vd: '2026-10-08', s: 'FRIDO_0010', test: 0 }, { d: '2026-10-03', phone: '9000000004', vd: '2026-10-04', s: 'FRIDO_0010', test: 0, video: 1 }];
+  const ordersByPhone = new Map([
+    ['9000000001', [{ id: 'A', date: '2026-10-08', net: 3000 }, { id: 'B', date: '2026-10-12', net: 500 }]],
+    ['9000000003', [{ id: 'C', date: '2026-10-03', net: 9000 }]],
+    ['9000000004', [{ id: 'D', date: '2026-10-05', net: 7000 }]],
+    ['9000000005', [{ id: 'E', date: '2026-10-10', net: 100 }]],
+  ]);
+  const LL = attributeOrders(buildLeadList({ contacts, routes, ordersByPhone }), ordersByPhone, { cutoff: '2026-10-20' });
+  const got = Object.fromEntries(LL.leads.filter((l) => l.orders.length).map((l) => [l.id, l.orders.map((o) => [o.id, o.route])]));
+  assert.deepEqual(got, { 2: [['A', 'store'], ['B', 'other']], c: [['C', 'video']], 4: [['D', 'video']] });
+  assert.deepEqual(LL.orderStats, { beyondWindow: 1, beforeLead: 0 });
+  const s = summariseLeads(LL, { from: '2026-10-01', to: '2026-10-31' });
+  assert.deepEqual([s.buyers, s.orders, s.revenue, s.byRoute.store.buyers, s.byRoute.video.buyers, s.byRoute.other.orders], [3, 4, 19500, 1, 2, 1]);
+});
