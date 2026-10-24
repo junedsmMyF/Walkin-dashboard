@@ -1455,7 +1455,7 @@ function wDefs(){
    Text route (LimeChat) and the PDP layer (views, CTA clicks) are SAMPLE until their exports are connected. */
 const PTABS = [
   { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'routing', name: 'Store routing' }, { id: 'video', name: 'Video calls' }, { id: 'sources', name: 'Sources & gaps' },
-  { id: 'product', name: 'Product & category' }, { id: 'loss', name: 'Loss analysis' },
+  { id: 'product', name: 'Products' }, { id: 'loss', name: 'Lost leads' },
   { id: 'definitions', name: 'Definitions' },
 ];
 let PDATA = null, PDATA_ERR = null, PLOADING = false;
@@ -1535,28 +1535,10 @@ function callAgg(r){
 // Rule (owner, 22 Oct): store = routed + bought on the expected visit date · video = not routed + video call arranged · else other.
 const PATHS = [['store', 'Store visit', 'Routed · bought on visit date'], ['video', 'Video call', 'Not routed · VC arranged'], ['other', 'Other', 'Other day / no VC']];
 const PCOL = () => ({ store: C.teal, video: C.tealMid, other: C.sand });
-// ---------- aggregation: store routing = "Lead routing backend" sheet (WhatsApp DSR groups) ----------
-const hasRouting = () => !!(PDATA && PDATA.routing && PDATA.routing.routes);
-function routeAgg(r){
-  const all = (hasRouting() ? PDATA.routing.routes : []).filter((x) => inPR(x.d, r) && pStoreOk(x.s) && (F.cta === 'all' || x.en === F.cta));
-  const real = all.filter((x) => !x.test), U = real.filter((x) => !x.dup), B = U.filter((x) => x.od);
-  const due = U.filter((x) => x.vd && x.vd <= PDATA.cutoff);
-  return {
-    has: hasRouting(), rows: all.length, test: all.length - real.length, repeat: real.length - U.length, routed: U.length,
-    linked: U.filter((x) => x.src).length, fromCall: U.filter((x) => x.src === 'call' || x.src === 'both').length, fromText: U.filter((x) => x.src === 'text' || x.src === 'both').length,
-    bought: B.length, net: B.reduce((u, x) => u + x.net, 0), sameStore: B.filter((x) => x.same).length, onTime: B.filter((x) => x.onTime).length,
-    due: due.length, dueBought: due.filter((x) => x.od).length, missed: due.filter((x) => !x.od).length, upcoming: U.filter((x) => !x.od && x.vd && x.vd > PDATA.cutoff).length,
-    noTime: U.filter((x) => x.vt === 'blank').length, noDate: U.filter((x) => !x.vd).length, disc: U.filter((x) => x.disc).length, unmapped: U.filter((x) => x.s === 'UNMAPPED').length,
-    lag: median(U.filter((x) => x.lag != null).map((x) => x.lag)), senders: [...new Set(real.map((x) => x.by).filter(Boolean))],
-    U, all,
-  };
-}
 // ---------- aggregation: text route = real LimeChat tickets (standardised in src/limechat.js) ----------
 // Stage map → call-style groups so shared views (agents, follow-up) work for both routes.
 const TSTAGE_G = { bot_only: 'botOnly', handoff_unassigned: 'botOnly', assigned_no_action: 'notCalled', messaged_no_outcome: 'messaged', not_reached: 'ringing', followup_pending: 'engaged', qualified: 'engaged', lost: 'lost', online: 'other', service: 'svc' };
-const OC_LBL = { lost_not_interested: 'Not interested', lost_bought_elsewhere: 'Bought elsewhere', bought_online_d2c: 'Bought / will buy online', purchased_stated: 'Says purchased', routed_store: 'Store visit / store team', routed_video: 'Video consultation', qualified_other: 'Interested', followup_pending: 'Follow-up pending', not_reached: 'Not reached (RNR / declined)', unclassified: 'Not classifiable' };
 const hasText = () => !!(PDATA && PDATA.text && PDATA.text.tickets);
-const lastTagDate = (entry) => { const xs = hasText() ? PDATA.text.tickets.filter((x) => x.entry === entry) : []; return xs.length ? xs[xs.length - 1].d : null; };
 function textAgg(r){
   const T0 = hasText() ? PDATA.text.tickets : [];
   const chats = T0.filter((x) => inPR(x.d, r) && pStoreOk(x.s) && ctaOk(x.entry));
@@ -1610,7 +1592,7 @@ function pFilters(tab){
     <div class="wl-fl">DATE RANGE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
     ${sf.city}${sf.store}${sf.rest}
     <span class="wl-note" style="align-self:center">${r ? `${dpShort(r[0])} → ${dpShort(r[1])}` : 'No PDP data in this range'}${full[0] < PDATA.startDate ? ` · call leads start ${dpShort(PDATA.startDate)}` : ''}</span>
-  </div>${r && tab !== 'sources' ? (['overview', 'pipeline', 'tat', 'routing', 'video'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
+  </div>${r && tab !== 'sources' ? (['overview', 'pipeline', 'tat', 'routing', 'video', 'product', 'loss'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
 }
 // CTA toggle: one pill per entry point with leads in range (lead counts ignore the toggle itself)
 function ctaBar(r){
@@ -2170,78 +2152,106 @@ function allAttributed(cta = true){
 }
 
 /* ---- PDP · Product & category ---- */
+/* ---- Products (lead list): category of interest → purchase, product pages, what was bought ---- */
+// Lead rows carry ci (category of interest: Bigin field, product page tag or routing sheet), pp (product page tag) and
+// order lines o[].i = [product index into leadList.pnames, category, qty, net].
+const lNet = (x) => x.o.reduce((u, o) => u + o.net, 0);
+// interest categories (routing sheet / Bigin) → DevX product categories that count as the same thing
+const CI_BUY = { 'pillows & cushions': ['Pillows', 'Cushions'], 'ergonomic furniture': ['Chairs', 'Workspace'], footwear: ['Footwear', 'Barefoot', 'Socks'], insoles: ['Insoles'], orthotics: ['Orthotics'], mattress: ['Mattress'], chairs: ['Chairs'], 'car seat': ['Cushions'] };
+const ciMatch = (ci, cat) => { const k = String(ci || '').toLowerCase(); return (CI_BUY[k] || []).includes(cat) || k === String(cat || '').toLowerCase(); };
 function pProduct(r){
-  // order lines, each order once (route chosen by allAttributed first-touch rule)
-  const routeOf = new Map(allAttributed().map((x) => [x.o, x.rt === 'text' ? 't' : 'c']));
-  const Ln = (PDATA.call.lines || []).filter((x) => inPR(x.d, r) && pStoreOk(x.cs) && (!x.o || routeOf.get(x.o) === (x.r || 'c')));
-  const names = PDATA.call.pnames || [];
-  const sum = (arr, k = 'net') => arr.reduce((s, x) => s + x[k], 0);
-  const a = callAgg(r), t = textAgg(r);
-  const cats = {}; Ln.forEach((x) => { const o = (cats[x.c] = cats[x.c] || { c: x.c, net: 0, qty: 0, n: 0, cn: 0, tn: 0 }); o.net += x.net; o.qty += x.qty; o.n++; if (x.r === 't') o.tn += x.net; else o.cn += x.net; });
-  const net = sum(Ln), qty = sum(Ln, 'qty');
-  // LimeChat entry point / PDP tag → funnel (real)
-  const ENT = { store_widget: 'Store widget (page not tagged)', store_card: 'Store card "Chat with store"', store_inquiry: 'Store inquiry', generic: 'Generic chat' };
-  const rows = {}; const key = (x) => x.pdp || ENT[x.entry] || x.entry;
-  t.U.forEach((x) => { const k = key(x); const o = (rows[k] = rows[k] || { k, pdp: !!x.pdp, u: 0, as: 0, act: 0, q: 0, lost: 0, b: 0, net: 0 }); o.u++; if (x.am) o.as++; if (x.st === 'qualified') o.q++; if (x.st === 'lost' || x.st === 'online') o.lost++; });
-  const tick = new Map(t.U.map((x) => [x.i, x]));
-  t.A.forEach((x) => { const u = tick.get(x.i); if (!u) return; const o = rows[key(u)]; if (!o) return; if (x.first) o.b++; o.net += x.net; });
-  const rl = Object.values(rows).filter((o) => o.pdp).sort((x, y) => y.u - x.u);
-  const pdpTbl = pcard('Which product pages generate leads', 'PDP chat CTA only · other CTAs do not record the page (see CTA performance on Customer journey)', rl.length ? wtable(['Product page', 'Leads', 'Consumed', 'Qualified', 'Lost', 'Converted', 'Revenue', 'Lead → convert'], rl.map((o) => `<tr><td class="b">${esc(o.k)}</td><td class="b">${nf(o.u)}</td><td>${pct(o.as, o.u, 0)}</td><td>${nf(o.q)}</td><td>${nf(o.lost)}</td><td class="b">${nf(o.b)}</td><td class="b">${inr(o.net)}</td><td>${pct(o.b, o.u, 1)}</td></tr>`)) : `<p class="sub" style="margin-top:14px">No PDP-tagged chats in this range${lastTagDate('pdp') ? ` — PDP tags stop after ${dpShort(lastTagDate('pdp'))}` : ''}.</p>`, 'v');
-  const topCat = Object.values(cats).sort((x, y) => y.net - x.net)[0];
+  if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
+  const R = lRows(r); const names = PDATA.leadList.pnames || [];
+  if (!R.some((x) => 'ci' in x)) return wcard('Product data arrives with the next data refresh', 'The lead list does not carry products yet; reload in 15 minutes.', '');
+  const B = R.filter((x) => x.o.length);
+  const lines = R.flatMap((x) => x.o.flatMap((o) => (o.i || []).map(([p, c, q, net]) => ({ p, c: c || 'Other', q, net, s: o.s }))));
+  const known = R.filter((x) => x.ci);
+  const by = (xs, k) => xs.reduce((m, x) => { const v = k(x); (m[v] = m[v] || []).push(x); return m; }, {});
+  const ciG = by(R, (x) => x.ci || 'Not known');
+  const topCi = Object.entries(ciG).filter(([k]) => k !== 'Not known').sort((a, b) => b[1].length - a[1].length)[0];
+  const catNet = by(lines, (x) => x.c); const topBuy = Object.entries(catNet).map(([c, xs]) => [c, xs.reduce((u, x) => u + x.net, 0)]).sort((a, b) => b[1] - a[1])[0];
+  const PP = R.filter((x) => x.pp), ppB = PP.filter((x) => x.o.length);
   const kp = pkpis([
-    { l: 'Revenue', v: inr(net), s: `${nf(qty)} units`, b: 'v' },
-    { l: 'Top category', v: topCat ? esc(topCat.c) : '—', s: topCat ? `${inr(topCat.net)} · ${pct(topCat.net, net, 0)}` : 'No orders yet', b: 'v' },
-    { l: 'PDP chat → purchase', v: pct(rl.reduce((s2, o) => s2 + o.b, 0), rl.reduce((s2, o) => s2 + o.u, 0), 1), s: 'Chair PDP chats that bought', b: 'v' },
+    { l: 'Leads with a known interest', v: pct(known.length, R.length, 0), s: `${nf(known.length)} of ${nf(R.length)} · product or category on the lead`, b: 'v' },
+    { l: 'Top interest', v: topCi ? esc(topCi[0]) : '—', s: topCi ? `${nf(topCi[1].length)} leads` : 'No product on leads', b: 'u' },
+    { l: 'Top category bought', v: topBuy ? esc(topBuy[0]) : '—', s: topBuy ? `${inr(topBuy[1])} · ${pct(topBuy[1], lines.reduce((u, x) => u + x.net, 0), 0)} of revenue` : 'No orders yet', b: 'v' },
+    { l: 'Units bought', v: nf(lines.reduce((u, x) => u + x.q, 0)), s: `${nf(B.length)} buyers · ${nf(R.reduce((u, x) => u + x.o.length, 0))} orders`, b: 'v' },
+    { l: 'Product page chat → purchase', v: pct(ppB.length, PP.length, 1), s: `${nf(ppB.length)} of ${nf(PP.length)} PDP-tagged chats bought`, b: 'v' },
   ]);
-  const cl = Object.values(cats).sort((x, y) => y.net - x.net);
+
+  // interest → purchase
+  const same = (x, c) => x.o.some((o) => (o.i || []).some((ln) => ciMatch(c, ln[1])));
+  const irow = ([c, xs]) => { const b = xs.filter((x) => x.o.length); return `<tr><td class="b">${esc(c)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => x.q).length)}</td><td>${nf(xs.filter((x) => x.rt).length)}</td><td>${nf(b.length)}</td><td class="b">${pct(b.length, xs.length, 1)}</td><td class="b">${inr(xs.reduce((u, x) => u + lNet(x), 0))}</td><td>${c === 'Not known' ? '—' : pct(b.filter((x) => same(x, c)).length, b.length, 0)}</td></tr>`; };
+  const interest = pcard('Interest → purchase by category', 'Category the lead asked about (Bigin product, product page tag or routing sheet) · bought same = buyers whose order has that category (Pillows & Cushions = pillows or cushions, Ergonomic Furniture = chairs or workspace)',
+    wtable(['Category of interest', 'Leads', 'Qualified', 'Routed', 'Bought', 'Conversion', 'Revenue', 'Bought same category'], Object.entries(ciG).sort((a, b) => (a[0] === 'Not known') - (b[0] === 'Not known') || b[1].length - a[1].length).map(irow)), 'v');
+
+  // product pages (PDP chat tag)
+  const ppG = Object.entries(by(PP, (x) => x.pp)).sort((a, b) => b[1].length - a[1].length);
+  const pages = pcard('Which product pages generate leads', 'WhatsApp chats tagged with a product page · other CTAs do not record the page',
+    ppG.length ? wtable(['Product page', 'Leads', 'Called', 'Qualified', 'Bought', 'Conversion', 'Revenue'], ppG.map(([p, xs]) => { const b = xs.filter((x) => x.o.length); return `<tr><td class="b">${esc(p)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => x.c).length)}</td><td>${nf(xs.filter((x) => x.q).length)}</td><td>${nf(b.length)}</td><td class="b">${pct(b.length, xs.length, 1)}</td><td>${inr(xs.reduce((u, x) => u + lNet(x), 0))}</td></tr>`; }))
+      : `<p class="sub" style="margin-top:14px">No product-page chats in this range.${PDATA.leadList.rows.some((x) => x.pp) ? ` The PDP chat tag was last used on ${dpShort(PDATA.leadList.rows.filter((x) => x.pp).map((x) => x.d).sort().pop())}.` : ''}</p>`, 'v');
+
+  // what was bought
+  const tot = lines.reduce((u, x) => u + x.net, 0);
+  const cl = Object.entries(catNet).map(([c, xs]) => ({ c, net: xs.reduce((u, x) => u + x.net, 0), q: xs.reduce((u, x) => u + x.q, 0) })).sort((a, b) => b.net - a.net);
   const mxc = Math.max(1, ...cl.map((x) => x.net));
-  const rank = pcard('Category ranking', 'Revenue from PDP leads, by product category bought', cl.length ? wtable(['Category', 'Revenue', '', 'Units', 'From call', 'From WhatsApp'], cl.map((o) => `<tr><td class="b">${esc(o.c)}</td><td class="b">${inr(o.net)}</td><td style="width:30%"><div class="wl-track"><div class="wl-fill" style="width:${(o.net / mxc * 100).toFixed(1)}%;background:${C.teal}"></div></div></td><td>${nf(o.qty)}</td><td>${inr(o.cn)}</td><td>${inr(o.tn)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No matched orders in this range.</p>', 'v');
-  const sc = {}; Ln.forEach((x) => { const k = x.s; sc[k] = sc[k] || {}; sc[k][x.c] = (sc[k][x.c] || 0) + x.net; });
-  const topC = cl.filter((x) => x.net).slice(0, 6).map((x) => x.c); const tot = (s2) => Object.values(sc[s2]).reduce((u, v) => u + v, 0); const storesL = Object.keys(sc).sort((x, y) => tot(y) - tot(x)).slice(0, 10);
-  const mxh = Math.max(1, ...storesL.flatMap((s2) => topC.map((c) => sc[s2][c] || 0)));
-  const heat = pcard('Store × category', 'Attributed revenue by billing store', topC.length ? `<div class="wl-heat" style="grid-template-columns:minmax(110px,160px) repeat(${topC.length},minmax(0,1fr))"><span></span>${topC.map((c) => `<span class="wl-hh" title="${esc(c)}">${esc(c)}</span>`).join('')}${storesL.map((s2) => `<span class="wl-hn">${esc(pStore(s2).name)}</span>` + topC.map((c) => `<div class="wl-cell" style="${heatBg(sc[s2][c] || 0, mxh)}">${sc[s2][c] ? inr(sc[s2][c]) : '—'}</div>`).join('')).join('')}</div>` : '<p class="sub" style="margin-top:14px">No attributed orders in this range.</p>', 'v');
-  const pm = {}; Ln.forEach((x) => { const o = (pm[x.p] = pm[x.p] || { p: names[x.p] || '?', c: x.c, net: 0, qty: 0, n: 0, rt: new Set() }); o.net += x.net; o.qty += x.qty; o.n++; o.rt.add(x.r === 't' ? 'WhatsApp' : 'Call'); });
-  const prods = pcard('Products bought by PDP leads', 'Order lines matched to call or WhatsApp leads', Object.keys(pm).length ? wtable(['Product', 'Category', 'Route', 'Units', 'Revenue'], Object.values(pm).sort((x, y) => y.net - x.net).slice(0, 15).map((o) => `<tr><td class="b">${esc(o.p)}</td><td>${esc(o.c)}</td><td>${[...o.rt].join(' · ')}</td><td>${nf(o.qty)}</td><td class="b">${inr(o.net)}</td></tr>`)) : `<div class="wl-await"><span class="wl-tag">No matched orders yet</span><b>No lead has a DevX order in this range.</b><span>Fills in once BigQuery sales match a lead's phone.</span></div>`, 'v');
-  const m = pdpAgg(r).sort((x, y) => y.views - x.views);
+  const rank = pcard('Category ranking', 'What PDP leads bought · DevX order lines', cl.length ? wtable(['Category', 'Revenue', '', 'Units', 'Share'], cl.map((o) => `<tr><td class="b">${esc(o.c)}</td><td class="b">${inr(o.net)}</td><td style="width:30%"><div class="wl-track"><div class="wl-fill" style="width:${(o.net / mxc * 100).toFixed(1)}%;background:${C.teal}"></div></div></td><td>${nf(o.q)}</td><td>${pct(o.net, tot, 0)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
+
+  const sc = {}; lines.forEach((x) => { (sc[x.s] = sc[x.s] || {})[x.c] = (sc[x.s]?.[x.c] || 0) + x.net; });
+  const topC = cl.slice(0, 6).map((x) => x.c); const stot = (s) => Object.values(sc[s]).reduce((u, v) => u + v, 0);
+  const storesL = Object.keys(sc).sort((a, b) => stot(b) - stot(a)).slice(0, 10); const mxh = Math.max(1, ...storesL.flatMap((s) => topC.map((c) => sc[s][c] || 0)));
+  const heat = pcard('Store × category', 'Revenue by billing store · top 10 stores', topC.length ? `<div class="wl-heat" style="grid-template-columns:minmax(110px,160px) repeat(${topC.length},minmax(0,1fr))"><span></span>${topC.map((c) => `<span class="wl-hh" title="${esc(c)}">${esc(c)}</span>`).join('')}${storesL.map((s) => `<span class="wl-hn">${esc(pStore(s).name)}</span>` + topC.map((c) => `<div class="wl-cell" style="${heatBg(sc[s][c] || 0, mxh)}">${sc[s][c] ? inr(sc[s][c]) : '—'}</div>`).join('')).join('')}</div>` : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
+
+  const pm = {}; lines.forEach((x) => { const o = (pm[x.p] = pm[x.p] || { p: names[x.p] || '?', c: x.c, q: 0, net: 0 }); o.q += x.q; o.net += x.net; });
+  const prods = pcard('Products bought', 'Top 15 by revenue', Object.keys(pm).length ? wtable(['Product', 'Category', 'Units', 'Revenue'], Object.values(pm).sort((a, b) => b.net - a.net).slice(0, 15).map((o) => `<tr><td class="b" style="white-space:normal">${esc(o.p)}</td><td>${esc(o.c)}</td><td>${nf(o.q)}</td><td class="b">${inr(o.net)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
+
+  const m = pdpAgg(r).sort((a, b) => b.views - a.views);
   const ga = pcard('PDP views and store CTA clicks', 'Illustrative until GA4 / Shopify page events are connected', wtable(['PDP', 'Views', 'Lead CTA clicks', 'CTR', 'WhatsApp', 'Call'], m.map((x) => `<tr><td class="b">${esc(x.n)}</td><td>${nf(x.views)}</td><td>${nf(x.clicks)}</td><td>${pct(x.clicks, x.views, 2)}</td><td>${nf(x.wa)}</td><td>${nf(x.call)}</td></tr>`)), 's');
-  return kp + pdpTbl + rank + `<div class="wl-g2">${heat}${prods}</div>` + ga;
+
+  return kp + interest + pages + `<div class="wl-g2">${rank}${heat}</div>` + prods + ga +
+    `<p class="wl-note">Leads whose first contact is in the selected range · orders = DevX orders credited to those leads (60 days, latest lead before the order).</p>`;
+}
+
+/* ---- Lost leads (lead list): where leads stop, loss reasons by source, store, category and agent ---- */
+// lr = Bigin Close Lost Reason, else the standardised LimeChat outcome; a note / remark about distance = "Store too far".
+function pLoss(r){
+  if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
+  const R = lRows(r);
+  if (!R.some((x) => 'lr' in x)) return wcard('Loss reasons arrive with the next data refresh', 'The lead list does not carry loss reasons yet; reload in 15 minutes.', '');
+  const bought = (x) => x.o.length > 0;
+  const lost = R.filter((x) => x.x && !bought(x)), noCall = R.filter((x) => !x.c && !bought(x)), unr = R.filter((x) => x.c && !x.n && !bought(x));
+  const connNoQ = R.filter((x) => x.n && !x.q && !x.x && !bought(x)), qualNo = R.filter((x) => x.q && !x.x && !bought(x)), B = R.filter(bought);
+  const noR = lost.filter((x) => !x.lr), far = lost.filter((x) => /store too far|no store near|too far|distance/i.test(x.lr));
+  const kp = pkpis([
+    { l: 'Not interested', v: nf(lost.length), s: `${pct(lost.length, R.filter((x) => x.n).length, 0)} of connected leads`, b: 'u' },
+    { l: 'Called, never connected', v: nf(unr.length), s: `${pct(unr.length, R.filter((x) => x.c).length, 0)} of called leads · RNR / not reached`, b: 'u' },
+    { l: 'Never called', v: nf(noCall.length), tone: noCall.length ? 'bad' : '', s: `${pct(noCall.length, R.length, 0)} of leads`, b: 'v' },
+    { l: 'Lost with no reason', v: nf(noR.length), tone: noR.length ? 'bad' : '', s: `${pct(noR.length, lost.length, 0)} of not interested`, b: 'v' },
+    { l: 'Store too far', v: nf(far.length), s: 'Includes "No store near cx location"', b: 'u' },
+  ]);
+
+  const stop = pcard('Where leads stop', 'Every lead in range ends in one bucket · bought wins over any stage',
+    hbar([['Never called', noCall.length, C.rust], ['Called, never connected', unr.length, C.sandDk], ['Connected, not qualified', connNoQ.length, C.sand], ['Qualified, no order yet', qualNo.length, C.tealMid], ['Not interested', lost.length, C.rust], ['Bought', B.length, C.teal]], { w: 200 }), 'u');
+
+  // loss reasons, by source
+  const srcOf = (x) => (x.src === 'call' ? 'call' : 'wa');
+  const rs = {}; lost.forEach((x) => { const k = x.lr || 'No reason recorded'; const o = (rs[k] = rs[k] || { n: 0, call: 0, wa: 0 }); o.n++; o[srcOf(x)]++; });
+  const rl = Object.entries(rs).sort((a, b) => b[1].n - a[1].n); let cum = 0;
+  const reasons = pcard('Loss reasons', 'Bigin Close Lost Reason (Call Store, PDP Inventories) · LimeChat outcome before 22 Oct',
+    rl.length ? wtable(['Reason', 'Leads', 'Share', 'Cumulative', 'Call Store', 'WhatsApp'], rl.map(([k, o]) => { cum += o.n; return `<tr><td class="b ${k === 'No reason recorded' ? 'bad' : ''}">${esc(k)}</td><td>${nf(o.n)}</td><td class="b">${pct(o.n, lost.length, 0)}</td><td>${pct(cum, lost.length, 0)}</td><td>${nf(o.call)}</td><td>${nf(o.wa)}</td></tr>`; })) : '<p class="sub" style="margin-top:14px">No lost leads in this range.</p>', 'u');
+
+  // by store / category / agent
+  const grp = (k, label, fmt) => { const g = {}; R.forEach((x) => { const v = k(x); if (v == null) return; const o = (g[v] = g[v] || { n: 0, conn: 0, lost: 0, nr: 0, unr: 0 }); o.n++; if (x.n) o.conn++; if (x.x && !bought(x)) { o.lost++; if (!x.lr) o.nr++; } if (x.c && !x.n && !bought(x)) o.unr++; });
+    return wtable([label, 'Leads', 'Connected', 'Not interested', 'Lost rate', 'No reason', 'Never connected'], Object.entries(g).sort((a, b) => b[1].lost - a[1].lost || b[1].n - a[1].n).slice(0, 15).map(([v, o]) => `<tr><td class="b">${esc(fmt(v))}</td><td>${nf(o.n)}</td><td>${nf(o.conn)}</td><td class="b">${nf(o.lost)}</td><td>${o.conn >= 3 ? pct(o.lost, o.conn, 0) : '<span class="k-s">—</span>'}</td><td class="${o.nr ? 'bad' : ''}">${nf(o.nr)}</td><td>${nf(o.unr)}</td></tr>`)); };
+  const byStore = pcard('Loss by store', 'Store the lead asked about · lost rate shown from 3 connected leads', grp((x) => (x.s === 'UNMAPPED' ? null : x.s), 'Store', (v) => pStore(v).name), 'u');
+  const byCat = pcard('Loss by category of interest', 'Most leads carry no product yet', grp((x) => x.ci || 'Not known', 'Category', (v) => v), 'u');
+  const byAg = pcard('Loss by agent', 'Bigin owner / LimeChat first assignee', grp((x) => x.ag || '(no owner)', 'Agent', (v) => v), 'u');
+
+  return kp + `<div class="wl-g2">${stop}${reasons}</div>` + byStore + `<div class="wl-g2">${byCat}${byAg}</div>` +
+    `<p class="wl-note">Leads whose first contact is in the selected range. Routed leads that did not buy are on Store routing ("No order yet"). A lead that bought is never counted as lost.</p>`;
 }
 
 /* ---- PDP · Loss analysis ---- */
-function pLoss(r){
-  const p = pPrev(r), a = callAgg(r), b = p ? callAgg(p) : null, t = textAgg(r);
-  const lost = a.U.filter((x) => x.g === 'lost'), rnr3 = a.U.filter((x) => x.st === 'RNR 3');
-  const noR = lost.filter((x) => !x.lr).length;
-  const d1 = wdelta(lost.length, b ? b.lost : null, { short: true, invert: true });
-  const kp = pkpis([
-    { l: 'Closed-lost leads', v: nf(lost.length), d: d1.d, tone: d1.tone, s: `${pct(lost.length, a.unique, 0)} of call leads`, b: 'u' },
-    { l: 'Unreachable', v: nf(rnr3.length), s: 'At RNR 3 · no auto-close', b: 'u' },
-    { l: 'Reached, then lost', v: pctTxt(pctv(lost.length, a.contacted), 0), s: `${nf(lost.length)} of ${nf(a.contacted)} called`, b: 'u' },
-    { l: 'Lost with no reason', v: nf(noR), tone: noR ? 'bad' : '', d: pct(noR, lost.length, 0) + ' of lost', s: 'Empty lost reason', b: 'v' },
-  ]);
-  const ur = pcard('Unreachable vs reached-but-lost', 'Unreachable = calling discipline · reached-but-lost = pitch, price, product or store', hbar([['Not called yet', a.notCalled, C.sand], ['Ringing (RNR 1–3)', a.ringing, C.sandDk], ['Reached, then lost', lost.length, C.rust]]), 'u');
-  const rs = {}; lost.forEach((x) => { const k = x.lr || 'No reason recorded'; rs[k] = (rs[k] || 0) + 1; });
-  const rl = Object.entries(rs).sort((x, y) => y[1] - x[1]); let cum = 0;
-  const reasons = pcard('Loss reasons', 'Bigin Close_Lost_Reason on Not Interested call leads', rl.length ? `<div class="wl-rank" style="grid-template-columns:minmax(140px,200px) minmax(0,1fr) 50px 80px">` + rl.map(([k, n]) => { cum += n; return `<span class="wl-sn">${esc(k)}</span><div class="wl-track"><div class="wl-fill" style="width:${(n / rl[0][1] * 100).toFixed(1)}%;background:${k === 'No reason recorded' ? C.rust : C.teal}"></div></div><span style="text-align:right;font-weight:600">${pct(n, lost.length, 0)}</span><span class="k-s" style="text-align:right">${pct(cum, lost.length, 0)} cum.</span>`; }).join('') + `</div>` + (noR === lost.length ? `<p class="wl-note" style="margin-top:10px">Every lost call lead is missing a reason. Make Close_Lost_Reason mandatory on Not Interested.</p>` : '') : '<p class="sub" style="margin-top:14px">No lost leads in this range.</p>', 'v');
-  const sm = {}; a.U.forEach((x) => { const o = (sm[x.s] = sm[x.s] || { s: x.s, u: 0, c: 0, l: 0, nr: 0 }); o.u++; if (CONTACTED.has(x.g)) o.c++; if (x.g === 'lost') { o.l++; if (!x.lr) o.nr++; } });
-  const byStore = pcard('Loss by requested store', 'Sorted by leads lost · rates greyed under 3 calls', wtable(['Store', 'Called', 'Lost', 'Lost rate', 'No reason'], Object.values(sm).filter((o) => o.s !== 'UNMAPPED' && o.c).sort((x, y) => y.l - x.l || y.c - x.c).map((o) => `<tr><td class="b">${esc(pStore(o.s).name)}</td><td>${nf(o.c)}</td><td>${nf(o.l)}</td><td class="${o.c >= 3 && pctv(o.l, o.c) >= 50 ? 'bad' : ''} b" ${o.c < 3 ? 'title="Fewer than 3 called — not comparable" style="color:#A7A39A"' : ''}>${pct(o.l, o.c, 0)}</td><td>${nf(o.nr)}</td></tr>`)), 'u');
-  const cat = {}; lost.forEach((x) => { const k = x.cat || 'Unknown (no product on lead)'; cat[k] = (cat[k] || 0) + 1; });
-  const byCat = pcard('Loss by product category', 'Needs product on the lead to be useful', hbar(Object.entries(cat).sort((x, y) => y[1] - x[1]).map(([k, n]) => [k, n, k.startsWith('Unknown') ? C.sandDk : C.rust])), 'u');
-  const tLostU = t.U.filter((x) => x.st === 'lost' || x.st === 'online');
-  const why = {}; tLostU.forEach((x) => { const k = OC_LBL[x.oc] || x.oc; why[k] = (why[k] || 0) + 1; });
-  const far = tLostU.filter((x) => /far|location/i.test(x.note)).length;
-  const tKp = pkpis([
-    { l: 'WhatsApp leads lost', v: nf(t.lost + t.online), s: `${pct(t.lost + t.online, t.reached, 0)} of reached leads`, b: 'u' },
-    { l: 'Never consumed', v: nf(t.unique - t.consumed), tone: 'bad', s: `${pct(t.unique - t.consumed, t.unique, 0)} of WhatsApp leads · no agent reply`, b: 'v' },
-    { l: 'Store too far', v: nf(far), s: 'Mentioned in the lost note', b: 'u' },
-  ]);
-  const leak = pcard('Where WhatsApp leads drop', 'Every unique WhatsApp lead ends in one standardised stage', hbar([['Not picked up (no reply, no note)', t.botOnly + t.handoffNoAgent + t.noAction, C.rust], ['Replied, outcome not logged', t.messagedNoOutcome, C.sandDk], ['Not reached', t.notReached, C.sandDk], ['Lost / bought online', t.lost + t.online, C.rust], ['Follow-up pending', t.followup, C.tealMid], ['Qualified', t.engaged, C.teal]], { w: 220 }), 'v');
-  const whyC = pcard('Why WhatsApp leads were lost', 'Standardised from the agent\'s note · raw text below', hbar(Object.entries(why).sort((x, y) => y[1] - x[1]).map(([k, n]) => [k, n, C.rust]), { w: 200 }) + `<div class="wl-list" style="margin-top:12px">${tLostU.slice(0, 12).map((x) => `<div class="row" style="font-size:12px"><span>"${esc(x.note)}"</span><span class="wl-note" style="white-space:nowrap">${esc(OC_LBL[x.oc] || x.oc)}</span></div>`).join('')}</div>`, 'u');
-  const text = `<h3 class="psec">WhatsApp (LimeChat)</h3>` + tKp + `<div class="wl-g2">${leak}${whyC}</div>` + `<h3 class="psec">Calls (Bigin)</h3>`;
-  const g = routeAgg(r); const miss = g.U.filter((x) => !x.od && x.vd && x.vd <= PDATA.cutoff);
-  const routeLoss = g.has ? pcard('Routed to a store, never billed', `Visit date passed (data to ${dpShort(PDATA.cutoff)}) and no DevX order on that phone · routing sheet`, miss.length ? wtable(['Lead ID', 'Routed', 'Store', 'Expected visit', 'Days overdue', 'Category', 'Lead found'], miss.sort((x, y) => (x.vd < y.vd ? -1 : 1)).map((x) => `<tr><td class="b">${esc(x.i)}</td><td>${dpShort(x.d)}</td><td>${esc(pStore(x.s).name)}</td><td>${dpShort(x.vd)}</td><td class="bad">${nf(dDiff(x.vd, PDATA.cutoff))}</td><td>${esc(x.c || '—')}</td><td>${x.src ? (x.src === 'text' ? 'WhatsApp' : x.src === 'call' ? 'Call' : 'Both') : '—'}</td></tr>`)) + `<p class="wl-note" style="margin-top:8px">${nf(g.upcoming)} routed leads still have a visit date ahead. No "visited, didn't buy" field exists yet.</p>` : `<p class="sub" style="margin-top:14px">None yet — ${nf(g.upcoming)} routed leads have a visit date ahead.</p>`, 'v') : '';
-  return text + kp + routeLoss + `<div class="wl-g2">${ur}${reasons}</div><div class="wl-g2">${byStore}${byCat}</div>`;
-}
 
 /* ---- Data quality & gaps ---- */
 
