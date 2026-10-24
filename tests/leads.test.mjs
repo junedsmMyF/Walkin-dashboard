@@ -61,3 +61,17 @@ test('orders: latest lead before the order, within 60 days, each order once; sto
   const s = summariseLeads(LL, { from: '2026-10-01', to: '2026-10-31' });
   assert.deepEqual([s.buyers, s.orders, s.revenue, s.byRoute.store.buyers, s.byRoute.video.buyers, s.byRoute.other.orders], [3, 4, 19500, 1, 2, 1]);
 });
+
+test('lead rows for the browser: furthest progress across contacts, routed = qualified, no phone or ticket id', async () => {
+  const { leadRows } = await import('../src/leads.js');
+  const contacts = [
+    C('bigin', '77001', '2026-10-05', '9000000001', { cons: true }),
+    C('call', 'c1', '2026-10-06', '9000000001', { cons: true, conn: true, qual: true }),   // repeat moves the lead forward
+    C('bigin', '77002', '2026-10-07', '9000000002'),                                        // untouched, but routed
+  ];
+  const routes = [{ d: '2026-10-08', phone: '9000000002', vd: '2026-10-09', s: 'FRIDO_0010', test: 0 }];
+  const LL = buildLeadList({ contacts, routes });
+  const rows = leadRows(LL, { from: '2026-10-01', to: '2026-10-31' });
+  assert.deepEqual(rows.map((r) => [r.c, r.n, r.q, r.rt ? 1 : 0, r.rep]), [[1, 1, 1, 0, 1], [1, 1, 1, 1, 0]]);
+  const s = JSON.stringify(rows); assert.ok(!s.includes('900000000') && !s.includes('77001') && !s.includes('c1'));
+});

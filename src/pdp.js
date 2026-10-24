@@ -23,7 +23,7 @@ import { salesDate, biginDate, daysBetween, phone10, addDays } from './dates.js'
 import { standardiseLimechat, coverageGaps } from './limechat.js';
 import { standardiseRouting } from './routing.js';
 import { computePdpInv, pinvAsTextTickets, mergeTextSources, reconcile } from './pdpinv.js';
-import { buildLeadList, summariseLeads, attributeOrders, REPEAT_DAYS, ORDER_DAYS } from './leads.js';
+import { buildLeadList, summariseLeads, attributeOrders, leadRows, REPEAT_DAYS, ORDER_DAYS } from './leads.js';
 
 // Website store labels (Store_Name1, set by the Call Store pop-up) that the store master does not already know.
 export const WEB_STORE_ALIASES = {
@@ -225,14 +225,19 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
   // Step 3 of the PDP rebuild: one lead list across Call Store + WhatsApp (LimeChat before the cutover, Bigin from it). Summary only.
   {
     const ok = (ph) => !!(ph && /^[6-9]/.test(ph));
+    // funnel flags per contact (owner, 22 Oct 2026: call rule) — call: Bigin stage group · WhatsApp: standardised stage
+    const CONN_G = new Set(['engaged', 'visitPlan', 'vcPlan', 'visit', 'crmWon', 'lost', 'resolved', 'other']), QUAL_G2 = new Set(['engaged', 'visitPlan', 'vcPlan', 'visit', 'crmWon']);
+    const callF = (x) => ({ cons: !!(x.st && x.st !== 'Yet to Call'), conn: CONN_G.has(x.g), qual: QUAL_G2.has(x.g), lost: x.g === 'lost' });
+    const textF = (x) => ({ cons: !!x.am, conn: ['followup_pending', 'qualified', 'lost', 'online'].includes(x.stage), qual: x.stage === 'qualified', lost: x.stage === 'lost' || x.stage === 'online' });
     const contacts = [
-      ...raw.map((x) => ({ src: 'call', id: x.id, ts: x.ts, d: x.d, phone: x.p || null, valid: ok(x.p), entry: 'call_popup', store: x.s, vc: isVcStage(x.st) })),
-      ...(LC0 ? LC0.tickets.filter((x) => !x.svc && (!cut || x.d < cut)).map((x) => ({ src: 'limechat', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store, vc: x.oc === 'routed_video' })) : []),
-      ...(cut ? pinvAsTextTickets(pdpInv.recs.filter((r) => !(r.tags || []).some((t) => /limechat history/i.test(t))), { from: cut, storeOf: (l) => storeFromWeb(l) }).map((x) => ({ src: 'bigin', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store, vc: x.oc === 'routed_video' })) : []),
+      ...raw.map((x) => ({ src: 'call', id: x.id, ts: x.ts, d: x.d, phone: x.p || null, valid: ok(x.p), entry: 'call_popup', store: x.s, vc: isVcStage(x.st), ag: x.ag, ...callF(x) })),
+      ...(LC0 ? LC0.tickets.filter((x) => !x.svc && (!cut || x.d < cut)).map((x) => ({ src: 'limechat', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store, vc: x.oc === 'routed_video', ag: x.fa, ...textF(x) })) : []),
+      ...(cut ? pinvAsTextTickets(pdpInv.recs.filter((r) => !(r.tags || []).some((t) => /limechat history/i.test(t))), { from: cut, storeOf: (l) => storeFromWeb(l) }).map((x) => ({ src: 'bigin', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store, vc: x.oc === 'routed_video', ag: x.fa, ...textF(x) })) : []),
     ];
     const LL = attributeOrders(buildLeadList({ contacts, routes: RT ? RT.routes.filter((r) => r.d <= cutoff) : [], ordersByPhone }), ordersByPhone, { cutoff });
     out.leadList = { rules: { repeatDays: REPEAT_DAYS, orderDays: ORDER_DAYS, cutover: cut, sources: 'Call Store (Bigin Callback Requests) · LimeChat export before the cutover · Bigin PDP Inventories from it' },
-      mtd: summariseLeads(LL, { from: cutoff.slice(0, 8) + '01', to: cutoff }), all: summariseLeads(LL, { from: startDate, to: cutoff }) };
+      mtd: summariseLeads(LL, { from: cutoff.slice(0, 8) + '01', to: cutoff }), all: summariseLeads(LL, { from: startDate, to: cutoff }),
+      rows: leadRows(LL, { from: startDate, to: cutoff }) };
   }
   if (sample) out.sample = buildSample({ startDate, cutoff, stores: STORE_MASTER });
   return out;
