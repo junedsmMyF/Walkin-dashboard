@@ -92,3 +92,13 @@ test('interest, loss reason and order lines: first known interest, latest loss r
   assert.equal(rows[1].o[0].r, 'store');
   assert.deepEqual(names, ['Frido Mattress']);
 });
+
+test('routed lead without a video remark counts as a video call when Bigin shows a video-call stage (owner, 24 Oct 2026)', () => {
+  const contacts = [C('limechat', '1', '2026-10-19', '9000000001'), C('bigin', '2', '2026-10-22', '9000000002')];
+  const routes = [
+    { d: '2026-10-20', phone: '9000000001', vd: '2026-10-21', s: 'FRIDO_0010', video: 0, test: 0 },  // Bigin says video → video
+    { d: '2026-10-23', phone: '9000000002', vd: '2026-10-24', s: 'FRIDO_0010', video: 0, test: 0 },  // no video anywhere → store visit
+  ];
+  const LL = buildLeadList({ contacts, routes, videoPhones: new Set(['9000000001']) });
+  assert.deepEqual(LL.leads.map((l) => [l.id, l.rv]), [['1', 1], ['2', 0]]);
+});

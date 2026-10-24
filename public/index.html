@@ -1928,7 +1928,7 @@ function pRouting(r){
     `<p class="wl-note">Leads whose first contact is in the selected range and that are in the Lead routing backend sheet (filled from the WhatsApp DSR groups). The DSR group reaction (store acknowledged in 10 min) is not recorded anywhere yet.</p>`;
 }
 /* ---- Video calls (Whimsical: store beyond 15 km → video consult with the store team → order placed by the store team): arranged, outcome, Bigin queue ---- */
-const VBASIS = [['routed', 'Routing sheet', 'Remark mentions video · store team'], ['call', 'Call Store', 'Bigin stage Video call arrange'], ['bigin', 'WhatsApp · Bigin', 'PDP Inventories Video Call Scheduled'], ['limechat', 'WhatsApp · LimeChat', 'Video outcome note (before 22 Oct)']];
+const VBASIS = [['routed', 'Routing sheet', 'Routed · remark mentions video or Bigin shows a video-call stage'], ['call', 'Call Store', 'Bigin stage Video call arrange'], ['bigin', 'WhatsApp · Bigin', 'PDP Inventories Video Call Scheduled'], ['limechat', 'WhatsApp · LimeChat', 'Video outcome note (before 22 Oct)']];
 function pVideo(r){
   if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
   const V = lRows(r).filter((x) => (x.rt && x.rv) || (!x.rt && x.vc));
@@ -2280,7 +2280,7 @@ function pDefs(){
     ['Not interested · unreachable', 'Not Interested stage with its loss reason (Bigin Close Lost Reason, else the LimeChat outcome). Unreachable = called, never connected.'],
   ]) + sec('Routing and conversion', [
     ['Store visit', 'Routing sheet row (WhatsApp DSR group), test rows left out, joined to the latest lead of that phone that started on or before the routing date.'],
-    ['Video call', 'Routing remark mentions "video", or not routed with a video call arranged (Bigin "Video call arrange", PDP Inventories "Video Call Scheduled", LimeChat video note).'],
+    ['Video call', 'Routed with a remark that mentions "video" or with Bigin in a video-call stage ("Video call arrange" / "Video Call Scheduled"; Bigin wins over a missing remark), or not routed with a video call arranged (Bigin stage or LimeChat video note).'],
     ['Converted', 'A DevX order on or after the lead date, within 60 days, credited to the latest lead of that phone before the order. Every order is punched on DevX.'],
     ['Conversion route', 'Store visit conversion = routed and bought on the expected visit date. Video call conversion = video remark and bought on or after the visit date, or not routed with a video call arranged. Anything else = other.'],
     ['Orders and revenue', 'Unique DevX order IDs (products and quantity do not add orders). Revenue = Total Revenue (gross − discount), or Gross from the filter.'],
@@ -2293,8 +2293,8 @@ function pDefs(){
     ['Sample', 'PDP views and CTA clicks: illustrative until GA4 / Shopify is connected.'],
     ['Not tracked', 'No source records it yet. The card stays, empty.'],
   ]);
-  const agreed = ['One lead per phone · 30-day repeat rule · fresh lead after 30 days unless bought', 'Mobility and service queries not counted', 'CTA by today\'s conversation tag', 'Converted = DevX order within 60 days · latest lead before the order · unique order IDs', 'Routed (routing sheet) = qualified', 'Store visit = bought on the expected visit date · video call = video remark or video call arranged', 'WhatsApp from Bigin PDP Inventories from 22 Oct 2026'];
-  const pending = ['Routed without a "video" remark while Bigin says Video Call Scheduled: which wins?', '"Test Lead" and "Customer Success Lead" closures still count as leads', 'Monthly targets for the KPIs (Compare to → Target)', 'Orders also counted on Walk-in / Retail retention are kept on both dashboards'];
+  const agreed = ['One lead per phone · 30-day repeat rule · fresh lead after 30 days unless bought', 'Mobility and service queries not counted', 'CTA by today\'s conversation tag', 'Converted = DevX order within 60 days · latest lead before the order · unique order IDs', 'Routed (routing sheet) = qualified', 'Store visit = bought on the expected visit date · video call = video remark or video call arranged', 'Routed without a "video" remark but Bigin shows a video-call stage = video call', 'WhatsApp from Bigin PDP Inventories from 22 Oct 2026'];
+  const pending = ['"Test Lead" and "Customer Success Lead" closures still count as leads', 'Monthly targets for the KPIs (Compare to → Target)', 'Orders also counted on Walk-in / Retail retention are kept on both dashboards'];
   const list = (xs, b) => `<div class="wl-list" style="margin-top:6px">${xs.map((x) => `<div class="row"><span>${x}</span>${b}</div>`).join('')}</div>`;
   const wh = pcard('Funnel flowchart', 'Whimsical · Final PDP routing mechanism', `<div class="wh"><iframe src="https://whimsical.com/embed/K8YnGdgbNtixDZnFj3vHtF?color-mode=light" title="Frido PDP to retail revenue journey (Whimsical)" loading="lazy" allowfullscreen></iframe></div><p class="wl-note" style="margin-top:8px"><a href="https://whimsical.com/saiyed-abdal-frido/frido-pdp-lead-funnel-and-store-routing-K8YnGdgbNtixDZnFj3vHtF" target="_blank" rel="noopener">Open funnel board ↗</a> · <a href="https://whimsical.com/frido-d2c-retail-cta-flow-VzWDTwaeCci9GWbWcRd38d" target="_blank" rel="noopener">Website CTA flow ↗</a></p>`);
   return pcard('How a PDP lead flows', 'SOP 02 · lead → called → connected → qualified → store visit or video call → DevX order', map) + wh +

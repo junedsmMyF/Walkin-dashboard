@@ -22,7 +22,7 @@ import { categoryOf } from './categories.js';
 import { salesDate, biginDate, daysBetween, phone10, addDays } from './dates.js';
 import { standardiseLimechat, coverageGaps } from './limechat.js';
 import { standardiseRouting } from './routing.js';
-import { computePdpInv, pinvAsTextTickets, mergeTextSources, reconcile } from './pdpinv.js';
+import { computePdpInv, pinvAsTextTickets, mergeTextSources, reconcile, stageGroupOf } from './pdpinv.js';
 import { buildLeadList, summariseLeads, attributeOrders, leadRows, REPEAT_DAYS, ORDER_DAYS } from './leads.js';
 
 // Website store labels (Store_Name1, set by the Call Store pop-up) that the store master does not already know.
@@ -99,7 +99,10 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
   // In the routing sheet (routed by the cutoff) = store visit scheduled = qualified, whatever the recorded stage (owner, 22 Oct 2026).
   // The raw stage is kept; the mismatch is flagged on Data quality.
   const routedBy = (p) => !!(p && RT && RT.firstByPhone.has(p) && RT.firstByPhone.get(p).d <= cutoff);
-  const routedVideo = (p) => routedBy(p) && !!RT.firstByPhone.get(p).video; // routing remark asks for a video consultation
+  // A routed lead is a video call when the routing remark mentions video (owner, 23 Oct 2026) or Bigin says video:
+  // PDP Inventories "Video Call Scheduled" / Callback Requests "Video call arrange", any ticket date (owner, 24 Oct 2026).
+  const biginVideo = new Set([...((pdpInv && pdpInv.recs) || []).filter((r) => stageGroupOf(r.st) === 'video').map((r) => phone10(r.p)), ...callbacks.filter((c) => isVcStage(c.st)).map((c) => phone10(c.p))].filter(Boolean));
+  const routedVideo = (p) => routedBy(p) && (!!RT.firstByPhone.get(p).video || biginVideo.has(p));
   const QUAL_G = new Set(['engaged', 'visitPlan', 'vcPlan', 'visit', 'crmWon']);
   if (LC) for (const x of LC.tickets) if (!x.svc && x.stage !== 'qualified' && routedBy(x.phone)) { x.stageRaw = x.stage; x.stage = 'qualified'; x.am = 1; x.oc = 'routed_store'; x.flags.push('routed_stage_mismatch'); }
 
@@ -241,7 +244,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
       ...(cut ? pinvAsTextTickets(pdpInv.recs.filter((r) => !(r.tags || []).some((t) => /limechat history/i.test(t))), { from: cut, storeOf: (l) => storeFromWeb(l) }).map((x) => ({ src: 'bigin', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store, vc: x.oc === 'routed_video', ag: x.fa, ...textF(x), ...textI(x) })) : []),
     ];
     const llIdx = new Map(), llNames = []; const llPid = (n) => { if (!llIdx.has(n)) { llIdx.set(n, llNames.length); llNames.push(n); } return llIdx.get(n); };
-    const LL = attributeOrders(buildLeadList({ contacts, routes: RT ? RT.routes.filter((r) => r.d <= cutoff) : [], ordersByPhone }), ordersByPhone, { cutoff });
+    const LL = attributeOrders(buildLeadList({ contacts, routes: RT ? RT.routes.filter((r) => r.d <= cutoff) : [], ordersByPhone, videoPhones: biginVideo }), ordersByPhone, { cutoff });
     out.leadList = { rules: { repeatDays: REPEAT_DAYS, orderDays: ORDER_DAYS, cutover: cut, sources: 'Call Store (Bigin Callback Requests) · LimeChat export before the cutover · Bigin PDP Inventories from it' },
       mtd: summariseLeads(LL, { from: cutoff.slice(0, 8) + '01', to: cutoff }), all: summariseLeads(LL, { from: startDate, to: cutoff }),
       rows: leadRows(LL, { from: startDate, to: cutoff, pid: llPid, catOf: categoryOf }), pnames: llNames };

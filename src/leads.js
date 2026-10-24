@@ -15,7 +15,8 @@ export const ORDER_DAYS = 60;
 
 // contacts: [{ src: 'call'|'limechat'|'bigin', id, ts, d, phone, valid, entry, store }]
 // routes: standardised routing rows ({ d, phone, test, vd, s }) · ordersByPhone: phone → date-sorted orders
-export function buildLeadList({ contacts = [], routes = [], ordersByPhone = new Map(), repeatDays = REPEAT_DAYS }) {
+// videoPhones: phones Bigin shows in a video-call stage — a routed lead with one counts as a video call even without a "video" remark
+export function buildLeadList({ contacts = [], routes = [], ordersByPhone = new Map(), repeatDays = REPEAT_DAYS, videoPhones = new Set() }) {
   const sorted = contacts.filter((c) => c.d).sort((a, b) => a.ts - b.ts || (String(a.id) < String(b.id) ? -1 : 1));
   const leads = []; const open = new Map();
   const boughtBetween = (p, from, to) => (ordersByPhone.get(p) || []).some((o) => o.date >= from && o.date <= to);
@@ -45,7 +46,7 @@ export function buildLeadList({ contacts = [], routes = [], ordersByPhone = new 
     const l = [...ls].reverse().find((x) => x.d <= r.d);
     if (!l) { if (ls.length) routing.beforeLead++; else routing.unmatched++; continue; }
     if (l.rt) { routing.repeatRows++; continue; }
-    l.rt = r.d; l.vd = r.vd || ''; l.rs = r.s || ''; l.rv = r.video ? 1 : 0; routing.matched++;
+    l.rt = r.d; l.vd = r.vd || ''; l.rs = r.s || ''; l.rv = r.video || (l.phone && videoPhones.has(l.phone)) ? 1 : 0; routing.matched++;
     if (!l.ci && r.cat) l.ci = r.cat; // category from the routing sheet when the lead had none
   }
   return { leads, routing };
