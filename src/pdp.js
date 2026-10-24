@@ -228,16 +228,23 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
     // funnel flags per contact (owner, 22 Oct 2026: call rule) — call: Bigin stage group · WhatsApp: standardised stage
     const CONN_G = new Set(['engaged', 'visitPlan', 'vcPlan', 'visit', 'crmWon', 'lost', 'resolved', 'other']), QUAL_G2 = new Set(['engaged', 'visitPlan', 'vcPlan', 'visit', 'crmWon']);
     const callF = (x) => ({ cons: !!(x.st && x.st !== 'Yet to Call'), conn: CONN_G.has(x.g), qual: QUAL_G2.has(x.g), lost: x.g === 'lost' });
+    // interest and loss reason per contact (product category: Bigin field, else the product page tag) · loss: Bigin Close Lost Reason,
+    // else the standardised LimeChat outcome; a note / remark mentioning distance = store too far
+    const FAR = /(far|distance|location|too away|nearby store)/i;
+    const OC_LOST = { lost_not_interested: 'Not interested', lost_bought_elsewhere: 'Bought elsewhere', bought_online_d2c: 'Bought / will buy online' };
+    const lossOf = (lr, text, oc) => (lr ? String(lr).trim() : FAR.test(text || '') ? 'Store too far' : OC_LOST[oc] || '');
+    const textI = (x) => ({ ci: x.cat || (x.pdp ? categoryOf(x.pdp) : ''), pp: x.pdp || '', lr: x.stage === 'lost' || x.stage === 'online' ? lossOf(x.lr, x.note || x.rem, x.oc) : '' });
     const textF = (x) => ({ cons: !!x.am, conn: ['followup_pending', 'qualified', 'lost', 'online'].includes(x.stage), qual: x.stage === 'qualified', lost: x.stage === 'lost' || x.stage === 'online' });
     const contacts = [
-      ...raw.map((x) => ({ src: 'call', id: x.id, ts: x.ts, d: x.d, phone: x.p || null, valid: ok(x.p), entry: 'call_popup', store: x.s, vc: isVcStage(x.st), ag: x.ag, ...callF(x) })),
-      ...(LC0 ? LC0.tickets.filter((x) => !x.svc && (!cut || x.d < cut)).map((x) => ({ src: 'limechat', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store, vc: x.oc === 'routed_video', ag: x.fa, ...textF(x) })) : []),
-      ...(cut ? pinvAsTextTickets(pdpInv.recs.filter((r) => !(r.tags || []).some((t) => /limechat history/i.test(t))), { from: cut, storeOf: (l) => storeFromWeb(l) }).map((x) => ({ src: 'bigin', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store, vc: x.oc === 'routed_video', ag: x.fa, ...textF(x) })) : []),
+      ...raw.map((x) => ({ src: 'call', id: x.id, ts: x.ts, d: x.d, phone: x.p || null, valid: ok(x.p), entry: 'call_popup', store: x.s, vc: isVcStage(x.st), ag: x.ag, ...callF(x), ci: x.cat || (x.prod ? categoryOf(x.prod.split(' || ')[0]) : ''), pp: '', lr: x.g === 'lost' ? lossOf(x.lr, '', '') : '' })),
+      ...(LC0 ? LC0.tickets.filter((x) => !x.svc && (!cut || x.d < cut)).map((x) => ({ src: 'limechat', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store, vc: x.oc === 'routed_video', ag: x.fa, ...textF(x), ...textI(x) })) : []),
+      ...(cut ? pinvAsTextTickets(pdpInv.recs.filter((r) => !(r.tags || []).some((t) => /limechat history/i.test(t))), { from: cut, storeOf: (l) => storeFromWeb(l) }).map((x) => ({ src: 'bigin', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store, vc: x.oc === 'routed_video', ag: x.fa, ...textF(x), ...textI(x) })) : []),
     ];
+    const llIdx = new Map(), llNames = []; const llPid = (n) => { if (!llIdx.has(n)) { llIdx.set(n, llNames.length); llNames.push(n); } return llIdx.get(n); };
     const LL = attributeOrders(buildLeadList({ contacts, routes: RT ? RT.routes.filter((r) => r.d <= cutoff) : [], ordersByPhone }), ordersByPhone, { cutoff });
     out.leadList = { rules: { repeatDays: REPEAT_DAYS, orderDays: ORDER_DAYS, cutover: cut, sources: 'Call Store (Bigin Callback Requests) · LimeChat export before the cutover · Bigin PDP Inventories from it' },
       mtd: summariseLeads(LL, { from: cutoff.slice(0, 8) + '01', to: cutoff }), all: summariseLeads(LL, { from: startDate, to: cutoff }),
-      rows: leadRows(LL, { from: startDate, to: cutoff }) };
+      rows: leadRows(LL, { from: startDate, to: cutoff, pid: llPid, catOf: categoryOf }), pnames: llNames };
   }
   if (sample) out.sample = buildSample({ startDate, cutoff, stores: STORE_MASTER });
   return out;

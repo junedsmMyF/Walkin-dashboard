@@ -1,6 +1,6 @@
 // Synthetic data only — never commit real customer rows.
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { buildLeadList, summariseLeads } from '../src/leads.js';
+import { buildLeadList, summariseLeads, attributeOrders, leadRows } from '../src/leads.js';
 
 const C = (src, id, d, phone, extra = {}) => ({ src, id, ts: Date.parse(d + 'T10:00:00Z'), d, phone, valid: !!phone, entry: src === 'call' ? 'call_popup' : 'store_widget', store: '', ...extra });
 
@@ -74,4 +74,21 @@ test('lead rows for the browser: furthest progress across contacts, routed = qua
   const rows = leadRows(LL, { from: '2026-10-01', to: '2026-10-31' });
   assert.deepEqual(rows.map((r) => [r.c, r.n, r.q, r.rt ? 1 : 0, r.rep]), [[1, 1, 1, 0, 1], [1, 1, 1, 1, 0]]);
   const s = JSON.stringify(rows); assert.ok(!s.includes('900000000') && !s.includes('77001') && !s.includes('c1'));
+});
+
+test('interest, loss reason and order lines: first known interest, latest loss reason, routing category as fallback', () => {
+  const contacts = [
+    C('limechat', '1', '2026-10-01', '9000000001', { pp: 'Frido Ultimate Car Seat', ci: 'Car seat', lost: 1, lr: 'Not interested' }),
+    C('bigin', '2', '2026-10-05', '9000000001', { ci: 'Chair', lost: 1, lr: 'Store too far' }), // repeat: keeps the first interest, takes the latest reason
+    C('call', 'c', '2026-10-10', '9000000003'),
+  ];
+  const routes = [{ d: '2026-10-11', phone: '9000000003', vd: '2026-10-12', s: 'FRIDO_0010', cat: 'Mattress', test: 0 }];
+  const orders = new Map([['9000000003', [{ id: 'A', date: '2026-10-12', net: 5000, store: 'FRIDO_0010', lines: [{ p: 'Frido Mattress', qty: 1, net: 5000 }] }]]]);
+  const LL = attributeOrders(buildLeadList({ contacts, routes, ordersByPhone: orders }), orders, { cutoff: '2026-10-20' });
+  const names = []; const pid = (n) => (names.includes(n) ? names.indexOf(n) : names.push(n) - 1);
+  const rows = leadRows(LL, { from: '2026-10-01', to: '2026-10-31', pid, catOf: () => 'Mattress' });
+  assert.deepEqual(rows.map((x) => [x.ci, x.pp, x.lr]), [['Car seat', 'Frido Ultimate Car Seat', 'Store too far'], ['Mattress', '', '']]);
+  assert.deepEqual(rows[1].o[0].i, [[0, 'Mattress', 1, 5000]]);
+  assert.equal(rows[1].o[0].r, 'store');
+  assert.deepEqual(names, ['Frido Mattress']);
 });

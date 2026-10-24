@@ -26,6 +26,7 @@ export function buildLeadList({ contacts = [], routes = [], ordersByPhone = new 
       const gap = daysBetween(cur.d, c.d);
       if (gap < repeatDays || boughtBetween(c.phone, cur.d, c.d)) {
         cur.repeats++; cur.srcs.add(c.src); cur.lastD = c.d; if (c.vc) cur.vc = 1;
+        if (!cur.ci && c.ci) cur.ci = c.ci; if (!cur.pp && c.pp) cur.pp = c.pp; if (c.lr) cur.lr = c.lr; // interest: first known · loss reason: latest
         for (const k of ['cons', 'conn', 'qual', 'lost']) if (c[k]) cur[k] = 1; // furthest progress across the lead's contacts
         if (gap >= repeatDays) cur.boughtRepeat++;
         continue;
@@ -45,12 +46,13 @@ export function buildLeadList({ contacts = [], routes = [], ordersByPhone = new 
     if (!l) { if (ls.length) routing.beforeLead++; else routing.unmatched++; continue; }
     if (l.rt) { routing.repeatRows++; continue; }
     l.rt = r.d; l.vd = r.vd || ''; l.rs = r.s || ''; l.rv = r.video ? 1 : 0; routing.matched++;
+    if (!l.ci && r.cat) l.ci = r.cat; // category from the routing sheet when the lead had none
   }
   return { leads, routing };
 }
 
 function newLead(c, again) {
-  return { phone: c.phone || null, d: c.d, ts: c.ts, src: c.src, id: c.id, entry: c.entry || 'generic', store: c.store || '', vc: c.vc ? 1 : 0, rv: 0, ag: c.ag || '', cons: c.cons ? 1 : 0, conn: c.conn ? 1 : 0, qual: c.qual ? 1 : 0, lost: c.lost ? 1 : 0, again, repeats: 0, boughtRepeat: 0, srcs: new Set([c.src]), lastD: c.d, rt: '', vd: '', rs: '' };
+  return { phone: c.phone || null, d: c.d, ts: c.ts, src: c.src, id: c.id, entry: c.entry || 'generic', store: c.store || '', vc: c.vc ? 1 : 0, rv: 0, ag: c.ag || '', cons: c.cons ? 1 : 0, conn: c.conn ? 1 : 0, qual: c.qual ? 1 : 0, lost: c.lost ? 1 : 0, again, repeats: 0, boughtRepeat: 0, srcs: new Set([c.src]), lastD: c.d, rt: '', vd: '', rs: '', ci: c.ci || '', pp: c.pp || '', lr: c.lr || '' };
 }
 
 export const routeOf = (l, o) => {
@@ -69,7 +71,7 @@ export function attributeOrders(LL, ordersByPhone, { cutoff, orderDays = ORDER_D
       const l = [...ls].reverse().find((x) => x.d <= o.date);
       if (!l) { stats.beforeLead++; continue; }
       if (daysBetween(l.d, o.date) > orderDays) { stats.beyondWindow++; continue; }
-      seen.add(o.id); l.orders.push({ id: o.id, date: o.date, net: o.net, store: o.store, route: routeOf(l, o), lag: daysBetween(l.d, o.date) });
+      seen.add(o.id); l.orders.push({ id: o.id, date: o.date, net: o.net, store: o.store, route: routeOf(l, o), lag: daysBetween(l.d, o.date), lines: o.lines || [] });
     }
   }
   LL.orderStats = stats;
@@ -77,11 +79,12 @@ export function attributeOrders(LL, ordersByPhone, { cutoff, orderDays = ORDER_D
 }
 
 // PII-free lead rows for the browser (no phone, name or ticket id). A routed lead counts as consumed, connected and qualified.
-export const leadRows = (LL, { from, to }) => LL.leads.filter((l) => l.d >= from && l.d <= to).map((l) => {
+// ci / pp = category / product page of interest · lr = loss reason · order lines i: [product index (pid), category, qty, net]
+export const leadRows = (LL, { from, to, pid = null, catOf = () => '' }) => LL.leads.filter((l) => l.d >= from && l.d <= to).map((l) => {
   const r = l.rt ? 1 : 0;
   return { d: l.d, src: l.src, e: l.entry, s: l.store || l.rs || 'UNMAPPED', ag: l.ag, c: l.cons || r, n: l.conn || r, q: l.qual || r, x: l.lost && !r ? 1 : 0,
-    rt: l.rt, vd: l.vd, rv: l.rv, vc: l.vc, rs: l.rs, rep: l.repeats, again: l.again, np: l.phone ? 0 : 1,
-    o: (l.orders || []).map((o) => ({ d: o.date, net: Math.round(o.net), r: o.route, s: o.store, lag: o.lag })) };
+    rt: l.rt, vd: l.vd, rv: l.rv, vc: l.vc, rs: l.rs, rep: l.repeats, again: l.again, np: l.phone ? 0 : 1, ci: l.ci || '', pp: l.pp || '', lr: l.lr || '',
+    o: (l.orders || []).map((o) => ({ d: o.date, net: Math.round(o.net), r: o.route, s: o.store, lag: o.lag, ...(pid ? { i: (o.lines || []).map((x) => [pid(x.p), catOf(x.p), x.qty, Math.round(x.net)]) } : {}) })) };
 });
 
 // PII-free summary for a date window (lead start date within [from, to]).

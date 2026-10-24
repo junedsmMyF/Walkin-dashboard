@@ -127,7 +127,7 @@ export function pinvAsTextTickets(recs, { from, storeOf = () => null } = {}) {
     if (!x.own) flags.push('bigin_no_owner');
     return {
       id: x.cid || 'bigin:' + x.i, src: 'bigin', ts: Date.parse(created) || 0, d, phone: p, validPhone: !!(p && /^[6-9]/.test(p)),
-      status: 'bigin', ho: 1, fa: x.own || '', ca: x.own || '', am, oc, note: '', stage, bst: x.st, entry, pdp,
+      status: 'bigin', ho: 1, fa: x.own || '', ca: x.own || '', am, oc, note: '', stage, bst: x.st, entry, pdp, lr: x.lr || '', rem: x.rem || '', cat: x.cat || '',
       store: storeOf(x.loc) || tagStore || '', intent: '', svc: false, l1: [], ooh: false, out: false,
       minsToAssign: null, minsToAgentMsg: null, minsToReply: null, lastBy: '', rnrVariant: [], flags, dup: 0,
     };
