@@ -1454,7 +1454,7 @@ function wDefs(){
    Call route = Bigin "Callback Requests" (real) × BigQuery sales (real).
    Text route (LimeChat) and the PDP layer (views, CTA clicks) are SAMPLE until their exports are connected. */
 const PTABS = [
-  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
+  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
   { id: 'product', name: 'Product & category' }, { id: 'loss', name: 'Loss analysis' },
   { id: 'quality', name: 'Data quality' }, { id: 'definitions', name: 'Definitions' },
 ];
@@ -1616,7 +1616,7 @@ function pFilters(tab){
     <div class="wl-fl">DATE RANGE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
     ${sf.city}${sf.store}${sf.rest}
     <span class="wl-note" style="align-self:center">${r ? `${dpShort(r[0])} → ${dpShort(r[1])}` : 'No PDP data in this range'}${full[0] < PDATA.startDate ? ` · call leads start ${dpShort(PDATA.startDate)}` : ''}</span>
-  </div>${r ? (['overview', 'pipeline'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
+  </div>${r ? (['overview', 'pipeline', 'tat'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
 }
 // CTA toggle: one pill per entry point with leads in range (lead counts ignore the toggle itself)
 function ctaBar(r){
@@ -1803,6 +1803,63 @@ function pPipeline(r){
     `<p class="wl-note">Tickets created in the selected range · WhatsApp leads from Bigin PDP Inventories (read every 15 min) · Bigin ${PDATA.pinv.meta?.refreshedAt ? 'read ' + new Date(PDATA.pinv.meta.refreshedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : ''}.</p>`;
 }
 
+/* ---- TAT & SLAs (SOP 02 · section 13): turnaround targets on Bigin PDP Inventories tickets, from the 15-min stage history ---- */
+const hTxt = (h) => (h == null ? '—' : h >= 48 ? (h / 24).toFixed(1) + ' days' : h >= 1 ? h.toFixed(1) + ' h' : Math.round(h * 60) + ' min');
+function tatStats(T){
+  const v = (k) => T.map((t) => t[k]).filter((x) => x != null);
+  const first = v('tFirst'), openNew = T.filter((t) => t.g === 'new' && t.ageH > 0.25).length;
+  const rnr = v('rnrGap'), openRnr = T.filter((t) => t.fl.includes('rnr1_over_3h')).length;
+  const form = v('tForm');
+  const upd = v('visitUpd'), openUpd = T.filter((t) => t.fl.includes('visit_date_passed')).length;
+  return {
+    first: { n: first.length, ok: first.filter((x) => x <= 0.25).length, open: openNew, med: median(first) },
+    rnr: { n: rnr.length, ok: rnr.filter((x) => x <= 3).length, open: openRnr, med: median(rnr) },
+    form: { n: form.length, ok: form.filter((x) => x <= 0.5).length, open: 0, med: median(form.map((x) => Math.max(0, x))) },
+    upd: { n: upd.length, ok: upd.filter((x) => x <= 0).length, open: openUpd, med: median(upd) },
+  };
+}
+function pTat(r){
+  if (!hasPinv()) return wcard('Bigin PDP Inventories not connected', 'Turnaround times come from the Bigin stage history.', '');
+  const T = bTickets(r), S = tatStats(T);
+  const meter = (o, good) => { const den = o.n + o.open; const p = pctv(o.ok, den); const col = p == null ? C.track : p >= 80 ? C.teal : p >= 50 ? C.sand : C.rust;
+    return `<div style="display:flex;flex-direction:column;gap:6px;min-width:180px"><div class="wl-track" style="height:12px"><div class="wl-fill" style="height:12px;width:${p == null ? 0 : p.toFixed(1)}%;background:${col}"></div></div><span class="k-s">${den ? `${pct(o.ok, den, 0)} · ${nf(o.ok)} of ${nf(den)}${o.open ? ` · ${nf(o.open)} still open past target` : ''}` : 'No measured tickets yet'}</span></div>`; };
+  const row = (l, sub, target, o, med, b) => `<tr><td style="white-space:normal"><b>${l}</b><br><span class="k-s">${sub}</span></td><td>${target}</td><td class="b">${med}</td><td>${o ? meter(o) : '<span class="k-s">—</span>'}</td><td style="text-align:left">${VB[b]}</td></tr>`;
+  const sla = pcard('Turnaround targets', 'SOP 02 · section 13 · share of tickets inside the target (open tickets already past it count as missed) · median actual time',
+    wtable(['Turnaround', 'Target', 'Median', 'Within target', 'Source'], [
+      row('New Enquiry → first call', 'Ticket leaves New Enquiry', '15 min', S.first, hTxt(S.first.med), 'u'),
+      row('Callback request → call', 'At the time the customer asked', 'On time', null, '—', 'n'),
+      row('Gap between RNR attempts', 'RNR 1 → next attempt', '3 h', S.rnr, hTxt(S.rnr.med), 'u'),
+      row('Connected → lead form submitted', 'Connected stage → routing sheet row', 'Same call', S.form, hTxt(S.form.med), 'v'),
+      row('DSR post → store acknowledges', 'Store reacts in the DSR group', '10 min', null, '—', 'n'),
+      row('Visit date → Bigin stage updated', 'Store Visit Scheduled → next stage', 'Same day', S.upd, S.upd.med == null ? '—' : `${S.upd.med} day${S.upd.med === 1 ? '' : 's'}`, 'u'),
+    ]) + `<p class="wl-note" style="margin-top:8px">Stage times are read every 15 minutes (tracked from 22–23 Oct); a move made before tracking started has no time and is left out. Callback time and DSR reactions are not recorded anywhere.</p>`, 'u');
+
+  // time to first call distribution
+  const B = [['≤ 15 min', 0, 0.25], ['15–30 min', 0.25, 0.5], ['30–60 min', 0.5, 1], ['1–4 h', 1, 4], ['4–24 h', 4, 24], ['> 1 day', 24, 1e9]];
+  const fv = T.map((t) => t.tFirst).filter((x) => x != null); const cnt = B.map(([, a, b]) => fv.filter((x) => x > a - 1e-9 && x <= b).length); cnt[0] = fv.filter((x) => x <= 0.25).length;
+  const mx = Math.max(1, ...cnt); const colr = (i) => (i === 0 ? C.teal : i <= 2 ? C.tealMid : C.rust);
+  const dist = pcard('Time to first call', `${nf(fv.length)} tickets with a measured first call · ${nf(S.first.open)} still waiting past 15 min`,
+    `<div style="display:flex;align-items:flex-end;gap:10px;height:170px;margin-top:16px">${cnt.map((n, i) => `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;align-items:center;gap:4px"><span class="k-s">${nf(n)}</span><div style="width:100%;height:${(n / mx * 85).toFixed(1)}%;background:${colr(i)};border-radius:3px 3px 0 0"></div></div>`).join('')}</div>
+    <div style="display:flex;gap:10px;margin-top:6px">${B.map(([l]) => `<span class="k-s" style="flex:1;text-align:center">${l}</span>`).join('')}</div>`, 'u');
+
+  // median first call by hour of arrival (IST)
+  const hrs = Array.from({ length: 24 }, (_, h) => { const xs = T.filter((t) => t.cHour === h && t.tFirst != null).map((t) => t.tFirst); return { h, n: T.filter((t) => t.cHour === h).length, m: median(xs) }; });
+  const mm = Math.max(0.25, ...hrs.map((x) => x.m || 0));
+  const byHour = pcard('First call by hour of arrival', 'Median time to first call · bar height = median · leads arriving after hours wait longest',
+    `<div style="display:flex;align-items:flex-end;gap:3px;height:170px;margin-top:16px">${hrs.map((x) => `<div title="${x.h}:00 · ${nf(x.n)} tickets · median ${hTxt(x.m)}" style="flex:1;height:${x.m == null ? 0 : Math.max(2, x.m / mm * 100).toFixed(1)}%;background:${x.m != null && x.m <= 0.25 ? C.teal : x.m != null && x.m <= 1 ? C.tealMid : C.rust};border-radius:2px 2px 0 0"></div>`).join('')}</div>
+    <div class="wl-axis"><span>12 am</span><span>6 am</span><span>12 pm</span><span>6 pm</span><span>11 pm</span></div>`, 'u');
+
+  // by agent
+  const byA = {}; T.forEach((t) => { (byA[t.ag || '(no owner)'] = byA[t.ag || '(no owner)'] || []).push(t); });
+  const arow = ([ag, xs]) => { const s = tatStats(xs); const p = (o) => pct(o.ok, o.n + o.open, 0);
+    return `<tr><td class="b">${esc(ag)}</td><td>${nf(xs.length)}</td><td>${hTxt(s.first.med)}</td><td>${p(s.first)}</td><td>${hTxt(s.rnr.med)}</td><td>${p(s.rnr)}</td><td>${hTxt(s.form.med)}</td><td>${s.upd.n + s.upd.open ? p(s.upd) : '—'}</td></tr>`; };
+  const agents = pcard('By agent', 'Bigin ticket owner · median and share within target',
+    wtable(['Agent', 'Tickets', 'First call', 'Within 15 min', 'RNR gap', 'Within 3 h', 'Connected → form', 'Visit → stage same day'], Object.entries(byA).sort((x, y) => y[1].length - x[1].length).map(arow)), 'u');
+
+  return sla + `<div class="wl-g2">${dist}${byHour}</div>` + agents +
+    `<p class="wl-note">WhatsApp leads from Bigin PDP Inventories created in the selected range. Call Store leads are read once a day, so their turnaround cannot be timed yet.</p>`;
+}
+
 function pagePdp(tab){
   if (PDATA) applyRev([PDATA.call?.attributed, PDATA.call?.lines, PDATA.call?.salesDaily, PDATA.call?.products, PDATA.text?.attributed, PDATA.routing?.routes]);
   if (!PTABS.find((t) => t.id === tab)) tab = 'overview';
@@ -1811,7 +1868,7 @@ function pagePdp(tab){
   let body;
   if (tab === 'definitions') body = pDefs();
   else if (!PDATA || !DATA) body = PDATA_ERR || DATA_ERR ? wcard('Live data could not be loaded', esc(PDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="pRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin Callback Requests (T-1) and BigQuery sales.', '');
-  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
+  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, tat: pTat, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
   const i = PTABS.findIndex((t) => t.id === tab);
   const prev = i > 0 ? `<a href="#/retail/pdp/${PTABS[i - 1].id}"><span class="p-dir">← Previous</span><span class="p-name">${PTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
   const next = i < PTABS.length - 1 ? `<a class="next" href="#/retail/pdp/${PTABS[i + 1].id}"><span class="p-dir">Next →</span><span class="p-name">${PTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
