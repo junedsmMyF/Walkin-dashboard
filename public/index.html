@@ -1454,7 +1454,7 @@ function wDefs(){
    Call route = Bigin "Callback Requests" (real) × BigQuery sales (real).
    Text route (LimeChat) and the PDP layer (views, CTA clicks) are SAMPLE until their exports are connected. */
 const PTABS = [
-  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'routing', name: 'Store routing' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
+  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'routing', name: 'Store routing' }, { id: 'video', name: 'Video calls' }, { id: 'journey', name: 'Customer journey' }, { id: 'agents', name: 'Backend agents' }, { id: 'follow-up', name: 'Follow-up' }, { id: 'revenue', name: 'Revenue' },
   { id: 'product', name: 'Product & category' }, { id: 'loss', name: 'Loss analysis' },
   { id: 'quality', name: 'Data quality' }, { id: 'definitions', name: 'Definitions' },
 ];
@@ -1616,7 +1616,7 @@ function pFilters(tab){
     <div class="wl-fl">DATE RANGE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
     ${sf.city}${sf.store}${sf.rest}
     <span class="wl-note" style="align-self:center">${r ? `${dpShort(r[0])} → ${dpShort(r[1])}` : 'No PDP data in this range'}${full[0] < PDATA.startDate ? ` · call leads start ${dpShort(PDATA.startDate)}` : ''}</span>
-  </div>${r ? (['overview', 'pipeline', 'tat', 'routing'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
+  </div>${r ? (['overview', 'pipeline', 'tat', 'routing', 'video'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
 }
 // CTA toggle: one pill per entry point with leads in range (lead counts ignore the toggle itself)
 function ctaBar(r){
@@ -1933,6 +1933,65 @@ function pRouting(r){
   return kp + flow + stores + plan + agents + hyg +
     `<p class="wl-note">Leads whose first contact is in the selected range and that are in the Lead routing backend sheet (filled from the WhatsApp DSR groups). The DSR group reaction (store acknowledged in 10 min) is not recorded anywhere yet.</p>`;
 }
+/* ---- Video calls (Whimsical: store beyond 15 km → video consult with the store team → order placed by the store team): arranged, outcome, Bigin queue ---- */
+const VBASIS = [['routed', 'Routing sheet', 'Remark mentions video · store team'], ['call', 'Call Store', 'Bigin stage Video call arrange'], ['bigin', 'WhatsApp · Bigin', 'PDP Inventories Video Call Scheduled'], ['limechat', 'WhatsApp · LimeChat', 'Video outcome note (before 22 Oct)']];
+function pVideo(r){
+  if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
+  const V = lRows(r).filter((x) => (x.rt && x.rv) || (!x.rt && x.vc));
+  const basis = (x) => (x.rt && x.rv ? 'routed' : x.src);
+  const out = (xs) => { const vo = xs.flatMap((x) => x.o.filter((o) => o.r === 'video')); const buy = xs.filter((x) => x.o.some((o) => o.r === 'video'));
+    return { n: xs.length, buy: buy.length, net: vo.reduce((u, o) => u + o.net, 0), orders: vo.length, other: xs.filter((x) => x.o.length && !x.o.some((o) => o.r === 'video')).length,
+      lost: xs.filter((x) => x.x && !x.o.length).length, open: xs.filter((x) => !x.x && !x.o.length).length, lag: median(buy.map((x) => x.o.find((o) => o.r === 'video').lag)), vo }; };
+  const A = out(V);
+  const kp = pkpis([
+    { l: 'Video calls arranged', v: nf(A.n), s: `${nf(V.filter((x) => x.rt).length)} via routing sheet · ${nf(V.filter((x) => !x.rt).length)} Bigin / LimeChat`, b: 'u' },
+    { l: 'Video call conversion', v: nf(A.buy), s: `${pct(A.buy, A.n, 0)} of arranged · ${inr(A.net)}`, b: 'v' },
+    { l: 'Not interested', v: nf(A.lost), s: 'after the video call was arranged', b: 'u' },
+    { l: 'Still open', v: nf(A.open), tone: A.open ? 'bad' : '', s: 'no order, not closed', b: 'u' },
+    { l: 'Lead → order', v: A.lag == null ? '—' : `${A.lag} day${A.lag === 1 ? '' : 's'}`, s: 'median, video call orders', b: 'v' },
+  ]);
+
+  const seg = [[A.buy, C.teal, 'Bought (video call)'], [A.other, C.tealMid, 'Bought, other route'], [A.lost, C.sandDk, 'Not interested'], [A.open, C.rust, 'Still open']];
+  const flow = pcard('What happened to video calls', 'Video call conversion = routing remark "video" and order on/after the visit date, or not routed with a video call arranged and order on/after the lead date',
+    `<div class="wl-tree" style="flex-wrap:wrap">${lNode('Qualified', nf(lRows(r).filter((x) => x.q).length), 'Call Store + WhatsApp')}${lArrow}${lNode('Video call arranged', nf(A.n), 'store beyond 15 km')}${lArrow}${lNode('Demo held', '—', VB.n, 'await')}${lArrow}${lNode('Order by store team', nf(A.buy), inr(A.net), 'win')}</div>
+    <div class="wl-track" style="height:14px;margin-top:18px;display:flex">${seg.map(([v, col]) => (v ? `<div class="wl-fill" style="height:14px;width:${(v / Math.max(1, A.n) * 100).toFixed(1)}%;background:${col};border-radius:0"></div>` : '')).join('')}</div>
+    <div class="wl-legend">${seg.map(([v, col, l]) => `<span><i class="wl-sw" style="background:${col}"></i>${l} ${nf(v)}</span>`).join('')}</div>`, 'v');
+
+  // where the video call was recorded
+  const brow = ([k, l, sub]) => { const o = out(V.filter((x) => basis(x) === k)); return `<tr><td style="white-space:normal"><b>${l}</b><br><span class="k-s">${sub}</span></td><td>${nf(o.n)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.n, 0)}</td><td>${inr(o.net)}</td><td>${nf(o.lost)}</td><td class="${o.open ? 'bad' : ''}">${nf(o.open)}</td></tr>`; };
+  const bySrc = pcard('Where the video call was recorded', 'Lead\'s first contact source · a routing-sheet row with a video remark wins',
+    wtable(['Recorded in', 'Arranged', 'Bought', 'Conversion', 'Revenue', 'Not interested', 'Still open'], VBASIS.map(brow)), 'u');
+
+  // Bigin PDP Inventories queue (stage history read every 15 min)
+  let queue = '';
+  if (hasPinv()) {
+    const T = bTickets(r); const E = T.filter((t) => t.vcEver || t.g === 'video'); const now = E.filter((t) => t.g === 'video');
+    const over = now.filter((t) => t.fl.includes('video_over_48h')).length; const meas = E.map((t) => t.vcH).filter((v) => v != null);
+    const to = (g) => E.filter((t) => t.vcTo === g).length;
+    const cutover = PDATA.leadList.rules?.cutover; const pre = cutover ? E.filter((t) => t.d < cutover).length : 0;
+    const CL = (PDATA.call.leads || []).filter((x) => !x.dup && inPR(x.d, r) && pStoreOk(x.s) && (F.cta === 'all' || F.cta === 'call_popup') && /^video\s*call\s*arrang/i.test(x.st || ''));
+    queue = pcard('Video call queue in Bigin', 'SOP 02: run the demo, then Converted or Not Interested within 48 h · PDP Inventories stage history (from 22–23 Oct)',
+      pkpis([
+        { l: 'In Video Call Scheduled now', v: nf(now.length), s: `of ${nf(E.length)} WhatsApp tickets ever there`, b: 'u' },
+        { l: 'Over 48 h', v: nf(over), tone: over ? 'bad' : '', s: 'still scheduled, demo overdue', b: 'u' },
+        { l: 'Moved on', v: nf(meas.length), s: `median ${hTxt(median(meas))} · ${pct(meas.filter((v) => v <= 48).length, meas.length + over, 0)} within 48 h`, b: 'u' },
+        { l: 'Call Store · Video call arrange', v: nf(CL.length), s: 'current Bigin stage', b: 'u' },
+      ]) + (E.length ? `<p class="wl-note" style="margin-top:8px">Next stage after Video Call Scheduled: Converted ${nf(to('converted'))} · Not Interested ${nf(to('lost'))} · other ${nf(E.filter((t) => t.vcTo && !['converted', 'lost'].includes(t.vcTo)).length)}. Time is known only for moves made after tracking started.${pre ? ` ${nf(pre)} of these tickets were created before ${dpShort(cutover)}, when the LimeChat export is the WhatsApp source, so their Bigin stage is not used above.` : ''}</p>` : ''), 'u');
+  }
+
+  // by agent
+  const byA = {}; V.forEach((x) => { (byA[x.ag || '(no owner)'] = byA[x.ag || '(no owner)'] || []).push(x); });
+  const agents = pcard('By agent', 'Bigin owner / LimeChat first assignee who arranged the call', wtable(['Agent', 'Arranged', 'Bought', 'Conversion', 'Revenue', 'Not interested', 'Still open'],
+    Object.entries(byA).sort((a, b) => b[1].length - a[1].length).map(([ag, xs]) => { const o = out(xs); return `<tr><td class="b">${esc(ag)}</td><td>${nf(o.n)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.n, 0)}</td><td>${inr(o.net)}</td><td>${nf(o.lost)}</td><td class="${o.open ? 'bad' : ''}">${nf(o.open)}</td></tr>`; })), 'u');
+
+  // billing store of video call orders
+  const byS = {}; A.vo.forEach((o) => { const v = (byS[o.s] = byS[o.s] || { n: 0, net: 0 }); v.n++; v.net += o.net; });
+  const stores = pcard('Where video call orders were billed', 'DevX billing store · the store team places the order',
+    A.vo.length ? wtable(['Store', 'City', 'Orders', 'Revenue'], Object.entries(byS).sort((a, b) => b[1].net - a[1].net).map(([s, v]) => `<tr><td class="b">${esc(pStore(s).name)}</td><td>${esc(pStore(s).city)}</td><td>${nf(v.n)}</td><td class="b">${inr(v.net)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No video call orders in this range yet.</p>', 'v');
+
+  return kp + flow + bySrc + queue + `<div class="wl-g2">${agents}${stores}</div>` +
+    `<p class="wl-note">Leads whose first contact is in the selected range. "Video call arranged" is as recorded by the agent (Bigin stage, LimeChat note or routing remark); whether the demo happened is not recorded anywhere yet.</p>`;
+}
 
 function pagePdp(tab){
   if (PDATA) applyRev([PDATA.call?.attributed, PDATA.call?.lines, PDATA.call?.salesDaily, PDATA.call?.products, PDATA.text?.attributed, PDATA.routing?.routes]);
@@ -1942,7 +2001,7 @@ function pagePdp(tab){
   let body;
   if (tab === 'definitions') body = pDefs();
   else if (!PDATA || !DATA) body = PDATA_ERR || DATA_ERR ? wcard('Live data could not be loaded', esc(PDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="pRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin Callback Requests (T-1) and BigQuery sales.', '');
-  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, tat: pTat, routing: pRouting, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
+  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, tat: pTat, routing: pRouting, video: pVideo, journey: pJourney, agents: pAgents, 'follow-up': pFollow, revenue: pRevenue, product: pProduct, loss: pLoss, quality: pQuality }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
   const i = PTABS.findIndex((t) => t.id === tab);
   const prev = i > 0 ? `<a href="#/retail/pdp/${PTABS[i - 1].id}"><span class="p-dir">← Previous</span><span class="p-name">${PTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
   const next = i < PTABS.length - 1 ? `<a class="next" href="#/retail/pdp/${PTABS[i + 1].id}"><span class="p-dir">Next →</span><span class="p-name">${PTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
