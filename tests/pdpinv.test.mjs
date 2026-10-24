@@ -29,9 +29,9 @@ test('PDP Inventories hygiene flags; PII never leaves', () => {
   const hist = { 2: [['New Enquiry', '2026-10-22T11:00:00+05:30'], ['RNR 1', '2026-10-22T11:30:00+05:30']] };
   const r = computePdpInv({ recs, hist, cutoff: '2026-10-23', now: NOW, ordersByPhone, storeOf: (l) => ({ 'Skycity Borivali Mumbai': 'FRIDO_0010' })[l] || null, routedOn: () => null, lcFirst: (p) => (p === '9000000003' ? '2026-10-15' : null) });
   const fl = Object.fromEntries(r.tickets.map((t) => [t.i, t.fl]));
-  assert.deepEqual(fl['90001'], ['new_over_24h']);
-  assert.deepEqual(fl['90002'], ['dup_phone', 'no_owner', 'rnr_over_48h']);
-  assert.deepEqual(fl['90003'], ['no_tag', 'order_not_converted']);
+  assert.deepEqual(fl['90001'], ['new_over_24h', 'new_over_15m']);
+  assert.deepEqual(fl['90002'], ['dup_phone', 'no_owner', 'rnr1_over_3h']);
+  assert.deepEqual(fl['90003'], ['no_tag', 'connected_over_24h', 'order_not_converted']);
   assert.deepEqual(fl['90004'], ['converted_no_order']); // store comes from the chat_skycity tag
   assert.deepEqual(fl['90005'], ['no_phone', 'lost_no_reason']);
   assert.deepEqual(fl['90006'], ['visit_not_routed']);

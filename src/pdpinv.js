@@ -26,13 +26,15 @@ export function entryOfTag(ctag) {
 export const HYGIENE = {
   no_phone: 'No valid phone', dup_phone: 'Repeat phone (earlier ticket)', no_owner: 'No owner', no_store: 'No store',
   no_tag: 'No conversation tag', unknown_stage: 'Stage not in the flow', new_over_24h: 'New Enquiry > 24 h',
-  rnr_over_48h: 'RNR / callback stage > 48 h', lost_no_reason: 'Not Interested, no reason', converted_no_order: 'Converted, no DevX order',
+  new_over_15m: 'New Enquiry, no call in 15 min', rnr1_over_3h: 'RNR 1, next attempt overdue (3 h)', rnr2_over_3h: 'RNR 2, final attempt overdue (3 h)',
+  callback_over_24h: 'Callback scheduled > 24 h', connected_over_24h: 'Connected, not routed in 24 h', visit_date_passed: 'Store Visit Scheduled, visit date passed',
+  video_over_48h: 'Video Call Scheduled > 48 h', lost_no_reason: 'Not Interested, no reason', converted_no_order: 'Converted, no DevX order',
   order_not_converted: 'DevX order, stage not Converted', visit_not_routed: 'Store Visit Scheduled, not in routing sheet',
 };
 
 // recs: from bigin.js refreshPdpInventories · hist: id → [[stage, firstSeen, approx?]] · ordersByPhone: phone → orders (date-sorted)
 // routedOn(phone) → first routing date or null · lcFirst(phone) → first LimeChat-export date or null · storeOf(label) → store id
-export function computePdpInv({ recs, hist = {}, meta = null, cutoff, now = new Date().toISOString(), ordersByPhone = new Map(), routedOn = () => null, lcFirst = () => null, storeOf = () => null }) {
+export function computePdpInv({ recs, hist = {}, meta = null, cutoff, now = new Date().toISOString(), ordersByPhone = new Map(), routedOn = () => null, visitOn = () => null, lcFirst = () => null, storeOf = () => null }) {
   if (!recs) return null;
   const sorted = [...recs].sort((a, b) => String(a.tc || a.ct).localeCompare(String(b.tc || b.ct)) || (a.i < b.i ? -1 : 1));
   const seen = new Set();
@@ -45,21 +47,31 @@ export function computePdpInv({ recs, hist = {}, meta = null, cutoff, now = new 
     const h = hist[x.i] && hist[x.i].length ? hist[x.i] : [[x.st, created]];
     const dwellH = h[h.length - 1][2] === 'approx' ? null : H(h[h.length - 1][1], now);
     const ageH = H(created, now);
+    const k1 = h.findIndex(([s]) => stageGroupOf(s) !== 'new'); // first time the ticket left New Enquiry
+    const tFirst = k1 > 0 && h[k1][2] !== 'approx' ? H(created, h[k1][1]) : null;
+    const sk = key(x.st);
     const os = okPhone && d ? (ordersByPhone.get(p) || []).filter((o) => o.date >= d && o.date <= cutoff) : [];
-    const rd = okPhone ? routedOn(p) : null; const lc = okPhone ? lcFirst(p) : null;
+    const rd = okPhone ? routedOn(p) : null; const vd = okPhone ? visitOn(p) || '' : ''; const lc = okPhone ? lcFirst(p) : null;
     const history = (x.tags || []).some((t) => /limechat history/i.test(t)) ? 1 : 0;
     const fl = [];
     if (!okPhone) fl.push('no_phone'); if (dup) fl.push('dup_phone');
     if (!x.own) fl.push('no_owner'); if (s === 'UNMAPPED') fl.push('no_store'); if (!String(x.ctag || '').trim()) fl.push('no_tag');
     if (g === 'other') fl.push('unknown_stage');
     if (g === 'new' && ageH != null && ageH > 24) fl.push('new_over_24h');
-    if (g === 'attempt' && dwellH != null && dwellH > 48) fl.push('rnr_over_48h');
+    // SOP 02 turnaround rules on the live queue (dwell = time in the current stage; unknown when the move came before the first read)
+    if (g === 'new' && ageH != null && ageH > 0.25) fl.push('new_over_15m');
+    if (sk === 'rnr1' && dwellH != null && dwellH > 3) fl.push('rnr1_over_3h');
+    if (sk === 'rnr2' && dwellH != null && dwellH > 3) fl.push('rnr2_over_3h');
+    if (sk === 'callbackscheduled' && dwellH != null && dwellH > 24) fl.push('callback_over_24h');
+    if (g === 'connected' && dwellH != null && dwellH > 24) fl.push('connected_over_24h');
+    if (g === 'visit' && vd && vd <= cutoff) fl.push('visit_date_passed');
+    if (g === 'video' && dwellH != null && dwellH > 48) fl.push('video_over_48h');
     if (g === 'lost' && !String(x.lr || '').trim() && !String(x.rem || '').trim()) fl.push('lost_no_reason');
     if (g === 'converted' && !os.length) fl.push('converted_no_order');
     if (os.length && g !== 'converted') fl.push('order_not_converted');
     if (g === 'visit' && !rd) fl.push('visit_not_routed');
     return {
-      i: x.cid, d, st: x.st, g, ag: x.own || '', s, entry, pdp, hist: history, dup, ageH, dwellH, moves: h.length - 1,
+      i: x.cid, d, st: x.st, g, ag: x.own || '', s, entry, pdp, hist: history, dup, ageH, dwellH, tFirst, vd, moves: h.length - 1,
       ord: os.length, net: Math.round(os.reduce((u, o) => u + (o.net || 0), 0)), od: os[0]?.date || '', rt: rd ? 1 : 0, lc: lc ? 1 : 0, lcBefore: lc && d && lc < d ? 1 : 0,
       lr: x.lr ? 1 : 0, rem: x.rem ? 1 : 0, fl,
     };

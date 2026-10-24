@@ -220,7 +220,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
   };
   // Bigin PDP Inventories (LimeChat → Bigin) — read-only stage / disposition hygiene review, PII-free
   if (pdpInv) out.pinv = computePdpInv({ ...pdpInv, cutoff, ordersByPhone, storeOf: (l) => storeFromWeb(l),
-    routedOn: (p) => (RT && RT.firstByPhone.has(p) ? RT.firstByPhone.get(p).d : null), lcFirst: (p) => (LC0 && LC0.firstByPhone.has(p) ? LC0.firstByPhone.get(p).d : null) });
+    routedOn: (p) => (RT && RT.firstByPhone.has(p) ? RT.firstByPhone.get(p).d : null), visitOn: (p) => (RT && RT.firstByPhone.has(p) ? RT.firstByPhone.get(p).vd : null), lcFirst: (p) => (LC0 && LC0.firstByPhone.has(p) ? LC0.firstByPhone.get(p).d : null) });
   if (out.pinv && cut && LC0) out.pinv.recon = reconcile(LC0.tickets, pdpInv.recs, { from: cut });
   // Step 3 of the PDP rebuild: one lead list across Call Store + WhatsApp (LimeChat before the cutover, Bigin from it). Summary only.
   {
