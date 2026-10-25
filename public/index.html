@@ -1455,7 +1455,7 @@ function wDefs(){
    Call route = Bigin "Callback Requests" (real) × BigQuery sales (real).
    Text route (LimeChat) and the PDP layer (views, CTA clicks) are SAMPLE until their exports are connected. */
 const PTABS = [
-  { id: 'overview', name: 'Overview' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'routing', name: 'Store routing' }, { id: 'video', name: 'Video calls' }, { id: 'sources', name: 'Sources & gaps' },
+  { id: 'overview', name: 'Overview' }, { id: 'daily', name: 'Daily revenue' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'routing', name: 'Store routing' }, { id: 'video', name: 'Video calls' }, { id: 'sources', name: 'Sources & gaps' },
   { id: 'product', name: 'Products' }, { id: 'loss', name: 'Lost leads' },
   { id: 'definitions', name: 'Definitions' },
 ];
@@ -1598,7 +1598,7 @@ function pFilters(tab){
     <div class="wl-fl">DATE RANGE<div class="dp-wrap"><button type="button" class="dp-btn" data-dp-open aria-haspopup="dialog" aria-expanded="${DP.open}">${esc(dpBtnLabel())}</button><div id="dpHost"></div></div></div>
     ${sf.city}${sf.store}${sf.rest}
     <span class="wl-note" style="align-self:center">${r ? `${dpShort(r[0])} → ${dpShort(r[1])}` : 'No PDP data in this range'}${full[0] < PDATA.startDate ? ` · call leads start ${dpShort(PDATA.startDate)}` : ''}</span>
-  </div>${r && tab !== 'sources' ? (['overview', 'pipeline', 'tat', 'routing', 'video', 'product', 'loss'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
+  </div>${r && tab !== 'sources' ? (['overview', 'daily', 'pipeline', 'tat', 'routing', 'video', 'product', 'loss'].includes(tab) ? lCtaBar(r) : ctaBar(r)) : ''}`;
 }
 // CTA toggle: one pill per entry point with leads in range (lead counts ignore the toggle itself)
 function ctaBar(r){
@@ -1739,7 +1739,59 @@ function pOverview(r){
 
   return `<h3 class="psec">Orders placed in range · by order date</h3>` + ok + `<h3 class="psec">Leads in range · by lead date</h3>` + kp + flow + cta + `<div class="wl-g2">${rev}${fix}</div>` + trend + cohorts +
     `<p class="wl-note">Lead = one phone across Call Store + WhatsApp (a repeat within 30 days is the same lead) · converted = DevX order on/after the lead date within 60 days · ${nf(a.rep)} repeat contacts folded in.</p>`;
+}/* ---- Daily revenue (owner, 25 Oct 2026): revenue booked by order date (latest day provisional) + lead cohorts at D+0 / D+2 / D+7 ---- */
+// Leads buy within 0–2 days (79% of revenue) and almost all within 7 (99%), so a lead day is read at fixed ages and
+// shows "maturing" until it reaches that age — never a young day against an old one.
+const DAGES = [0, 2, 7];
+function pDaily(r){
+  if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
+  const cut = PDATA.cutoff, prov = (d) => d >= cut; // latest data day: sales arrive in the 8 AM IST upload and late Bigin tickets can still add orders
+  const days = []; for (let d = r[0]; d <= r[1]; d = dAdd(d, 1)) days.push(d);
+  const O = oRows(r); const byD = {}; O.forEach((o) => { (byD[o.d] = byD[o.d] || []).push(o); });
+  const day = (d) => { const os = byD[d] || []; const net = os.reduce((u, o) => u + o.net, 0); return { d, orders: os.length, net, buyers: new Set(os.map((o) => o.x)).size }; };
+  const D = days.map(day); const tot = D.reduce((u, x) => ({ orders: u.orders + x.orders, net: u.net + x.net }), { orders: 0, net: 0 });
+  const last = D[D.length - 1];
+
+  // lead cohorts by lead day (lead date in range)
+  const R = lRows(r); const byL = {}; R.forEach((x) => { (byL[x.d] = byL[x.d] || []).push(x); });
+  const age = (d) => dDiff(d, cut); // days of data after the lead day
+  const at = (xs, k) => { const b = xs.filter((x) => x.o.some((o) => o.lag <= k)); return { b: b.length, net: xs.reduce((u, x) => u + x.o.filter((o) => o.lag <= k).reduce((v, o) => v + o.net, 0), 0) }; };
+  const coh = days.map((d) => { const xs = byL[d] || []; return { d, n: xs.length, a: Object.fromEntries(DAGES.map((k) => [k, age(d) >= k ? at(xs, k) : null])) }; }).filter((x) => x.n);
+  const pool = (k) => { const xs = coh.filter((c) => c.a[k]); const n = xs.reduce((u, c) => u + c.n, 0), b = xs.reduce((u, c) => u + c.a[k].b, 0); return { n, b, days: xs.length }; };
+  const P2 = pool(2), P7 = pool(7);
+
+  const kp = pkpis([
+    { l: `Revenue booked · ${dpShort(last.d)}`, v: inr(last.net), s: `${nf(last.orders)} orders${prov(last.d) ? ' · provisional until the 8 AM upload' : ''}`, b: 'v' },
+    { l: 'Revenue booked in range', v: inr(tot.net), s: `${nf(tot.orders)} orders · ${dpShort(r[0])} → ${dpShort(r[1])}`, b: 'v' },
+    { l: 'D+2 conversion', v: pct(P2.b, P2.n, 1), s: `${nf(P2.days)} lead days old enough · ${nf(P2.b)} of ${nf(P2.n)} leads bought`, b: 'v' },
+    { l: 'D+7 conversion', v: pct(P7.b, P7.n, 1), s: P7.days ? `${nf(P7.days)} lead days old enough · ${nf(P7.b)} of ${nf(P7.n)} leads` : 'No lead day in range is 7 days old yet', b: 'v' },
+  ]);
+
+  // revenue booked by day
+  const mx = Math.max(1, ...D.map((x) => x.net));
+  const chart = `<div style="display:flex;align-items:flex-end;gap:4px;height:170px;margin-top:16px">${D.map((x) => `<div title="${dpShort(x.d)}: ${inr(x.net)} · ${nf(x.orders)} orders${prov(x.d) ? ' · provisional' : ''}" style="flex:1;height:${Math.max(x.net ? 2 : 0, x.net / mx * 100).toFixed(1)}%;background:${prov(x.d) ? 'repeating-linear-gradient(135deg,' + C.tealMid + ' 0 6px,' + C.tealLt + ' 6px 12px)' : C.teal};border-radius:3px 3px 0 0"></div>`).join('')}</div>
+    <div class="wl-axis"><span>${dpShort(days[0])}</span><span>${dpShort(days[days.length - 1])}</span></div>
+    <div class="wl-legend"><span><i class="wl-sw" style="background:${C.teal}"></i>Final</span><span><i class="wl-sw" style="background:repeating-linear-gradient(135deg,${C.tealMid} 0 4px,${C.tealLt} 4px 8px)"></i>Provisional</span></div>`;
+  const rows = [...D].reverse().map((x) => `<tr><td class="b">${dpShort(x.d)}</td><td>${nf(x.orders)}</td><td class="b">${inr(x.net)}</td><td>${nf(x.buyers)}</td><td>${x.orders ? inr(x.net / x.orders) : '—'}</td><td style="text-align:left">${prov(x.d) ? '<span class="vb vb-u">Provisional</span>' : '<span class="vb vb-v">Final</span>'}</td></tr>`);
+  const booked = pcard('Revenue booked by day' + DBT.o, 'PDP-lead orders punched on DevX each day · the latest day is provisional: DevX sales arrive in the 8 AM IST upload and a late WhatsApp ticket can still claim an order',
+    chart + wtable(['Order date', 'Orders', 'Revenue', 'Buyers', 'AOV', 'Status'], rows), 'v');
+
+  // lead cohorts at fixed ages
+  const cell = (c, k) => { const v = c.a[k]; if (!v) return `<td><span class="vb vb-u" title="Needs ${k} days of data after the lead day">Maturing</span></td>`; return `<td class="${k === 2 ? 'b' : ''}">${pct(v.b, c.n, 1)} <span class="k-s">${nf(v.b)}</span></td>`; };
+  const cohort = pcard('Lead cohort conversion' + DBT.l, 'Leads by the day they first contacted us · share that bought within 0, 2 and 7 days · compare D+2 with D+2 and D+7 with D+7, never a young day with an old one',
+    coh.length ? wtable(['Lead date', 'Leads', 'D+0', 'D+2', 'D+7', 'Revenue by D+7'], [...coh].reverse().map((c) => `<tr><td class="b">${dpShort(c.d)}</td><td>${nf(c.n)}</td>${DAGES.map((k) => cell(c, k)).join('')}<td>${c.a[7] ? inr(c.a[7].net) : '<span class="k-s">—</span>'}</td></tr>`))
+      + `<p class="wl-note" style="margin-top:8px">How fast PDP leads buy (all PDP orders): ${lagLine()}. A cell turns from "Maturing" to a number once the lead day is that many days old.</p>` : '<p class="sub" style="margin-top:14px">No leads in this range.</p>', 'v');
+
+  return kp + booked + cohort +
+    `<p class="wl-note">Revenue booked = Total Revenue (or Gross from the filter) of DevX orders credited to a PDP lead (latest lead before the order, within 60 days), by the day the order was punched. Data to ${dpShort(cut)} (T-1).</p>`;
 }
+// share of PDP revenue by days from the lead's first contact to the order, all PDP orders
+function lagLine(){
+  const O = (PDATA.leadList.rows || []).flatMap((x) => x.o).filter((o) => o.d >= PDATA.startDate); const tot = O.reduce((u, o) => u + o.net, 0) || 1;
+  const share = (k) => Math.round(O.filter((o) => o.lag <= k).reduce((u, o) => u + o.net, 0) / tot * 100);
+  return `${share(0)}% of revenue the same day, ${share(2)}% within 2 days, ${share(7)}% within 7 days`;
+}
+
 
 /* ---- Bigin pipeline (PDP Inventories · SOP 02 stages): live queue, time in stage, stage hygiene, by agent ---- */
 const BSTAGES = [
@@ -2124,7 +2176,7 @@ function pagePdp(tab){
   let body;
   if (tab === 'definitions') body = pDefs();
   else if (!PDATA || !DATA) body = PDATA_ERR || DATA_ERR ? wcard('Live data could not be loaded', esc(PDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="pRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin Callback Requests (T-1) and BigQuery sales.', '');
-  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, pipeline: pPipeline, tat: pTat, routing: pRouting, video: pVideo, sources: pSources, product: pProduct, loss: pLoss }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
+  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, daily: pDaily, pipeline: pPipeline, tat: pTat, routing: pRouting, video: pVideo, sources: pSources, product: pProduct, loss: pLoss }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
   const i = PTABS.findIndex((t) => t.id === tab);
   const prev = i > 0 ? `<a href="#/retail/pdp/${PTABS[i - 1].id}"><span class="p-dir">← Previous</span><span class="p-name">${PTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
   const next = i < PTABS.length - 1 ? `<a class="next" href="#/retail/pdp/${PTABS[i + 1].id}"><span class="p-dir">Next →</span><span class="p-name">${PTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
