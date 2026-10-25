@@ -1482,7 +1482,8 @@ const PTIP = {
   'Contacted': ['Unique leads moved past "Yet to Call".', 'Bigin stage · unverified'],
   'Purchased': ['Leads with a DevX order on/after lead date.', 'Bigin × BigQuery'],
   'PDP-attributed revenue': ['Orders from these leads. Total Revenue.', 'Bigin × BigQuery'],
-  'Revenue': ['PDP orders billed in the range (order date), from leads of any date. Sub-text: revenue from leads whose first contact is in the range (lead date).', 'DevX (BigQuery)'],
+  'Revenue': ['Total Revenue of PDP-lead orders punched on DevX in the selected dates (order date).', 'DevX (BigQuery)'],
+  'Orders': ['Unique DevX orders punched in the selected dates by customers who came in as a PDP lead (Call Store / WhatsApp) within the last 60 days.', 'DevX (BigQuery)'],
   'Share of store sales': ['PDP orders billed in the range ÷ all store sales in the range.', 'DevX (BigQuery)'],
   'Lead → purchase': ['Purchased ÷ unique leads.', 'Bigin × BigQuery'],
   'Shared with walk-in': ['Buyers who were also walk-in leads.', 'Bigin × BigQuery'],
@@ -1642,7 +1643,8 @@ function oRows(r, f = () => true){
 function oAgg(r){
   const O = oRows(r);
   const sum = (os) => ({ orders: os.length, buyers: new Set(os.map((o) => o.x)).size, net: os.reduce((u, o) => u + o.net, 0) });
-  return { ...sum(O), byRoute: { store: sum(O.filter((o) => o.r === 'store')), video: sum(O.filter((o) => o.r === 'video')), other: sum(O.filter((o) => o.r === 'other')) }, sameDay: O.filter((o) => o.lag === 0).length };
+  const units = O.reduce((u, o) => u + (o.i || []).reduce((v, l) => v + (l[2] || 0), 0), 0);
+  return { ...sum(O), units, byRoute: { store: sum(O.filter((o) => o.r === 'store')), video: sum(O.filter((o) => o.r === 'video')), other: sum(O.filter((o) => o.r === 'other')) }, sameDay: O.filter((o) => o.lag === 0).length };
 }
 function pOverview(r){
   if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
@@ -1654,14 +1656,21 @@ function pOverview(r){
   // revenue and orders by order date (billed in the range); leads, funnel and conversion rate by lead date
   const B = oAgg(r), BP = p ? oAgg(p) : null, billed = B.net;
   const sales = (PDATA.call.salesDaily || []).filter((x) => inPR(x.d, r) && pStoreOk(x.s)).reduce((u, x) => u + x.net, 0);
+  // two rows (owner, 25 Oct 2026): orders punched in the range by order date, then leads in the range by lead date
+  const ok = pkpis([
+    k('Orders', nf(B.orders), dl(B.orders, BP && BP.orders), 'PDP-lead orders punched on DevX', 'v'),
+    k('Revenue', inr(B.net), dl(B.net, BP && BP.net), 'Total Revenue of those orders', 'v'),
+    k('Buyers', nf(B.buyers), dl(B.buyers, BP && BP.buyers), 'Unique PDP leads who bought', 'v'),
+    k('AOV', B.orders ? inr(B.net / B.orders) : '—', dl(B.orders ? B.net / B.orders : null, BP && BP.orders ? BP.net / BP.orders : null), 'Revenue ÷ orders', 'v'),
+    k('Units', nf(B.units), dl(B.units, BP && BP.units), `${B.orders ? (B.units / B.orders).toFixed(1) : '—'} per order`, 'v'),
+    { l: 'Share of store sales', v: pct(billed, sales, 1), s: `of ${inr(sales)} store sales`, b: 'v' },
+  ]);
   const kp = pkpis([
     k('Leads', nf(a.leads), dl(a.leads, P && P.leads), `Call Store ${nf(a.call)} · WhatsApp ${nf(a.wa)}`, 'v'),
     k('Consumption rate', pct(a.cons, a.leads, 0), dl(rate(a.cons, a.leads), P && rate(P.cons, P.leads), { pts: 1 }), `${nf(a.cons)} called · ${nf(a.leads - a.cons)} untouched`, 'v'),
     k('Connected', nf(a.conn), dl(a.conn, P && P.conn), `${pct(a.conn, a.cons, 0)} of leads called`, 'u'),
     k('Routed', nf(a.st + a.vid), dl(a.st + a.vid, P && P.st + P.vid), `Store visit ${nf(a.st)} · Video call ${nf(a.vid)}`, 'v'),
-    k('Conversion rate', pct(a.buyers, a.leads, 1), dl(rate(a.buyers, a.leads), P && rate(P.buyers, P.leads), { pts: 1 }), `${nf(a.buyers)} of these leads bought · ${nf(a.orders)} order${a.orders === 1 ? '' : 's'}`, 'v'),
-    k('Revenue', inr(B.net), dl(B.net, BP && BP.net), `${nf(B.orders)} order${B.orders === 1 ? '' : 's'} billed in range · AOV ${B.orders ? inr(B.net / B.orders) : '—'} · ${inr(a.net)} from leads in range`, 'v'),
-    { l: 'Share of store sales', v: pct(billed, sales, 1), s: `${inr(billed)} PDP orders billed in range · of ${inr(sales)}`, b: 'v' },
+    k('Conversion rate', pct(a.buyers, a.leads, 1), dl(rate(a.buyers, a.leads), P && rate(P.buyers, P.leads), { pts: 1 }), `${nf(a.buyers)} of these leads have bought so far`, 'v'),
   ]);
 
   const flow = pcard('PDP routing flow', 'Every lead from the website tap to the sale · Whimsical: Final PDP routing mechanism',
@@ -1725,7 +1734,7 @@ function pOverview(r){
   const cohorts = pcard('Lead cohorts', 'By lead week (Mon) · revenue to date from those leads · recent weeks are still converting',
     wtable(['Week of', 'Leads', 'Bought', 'Conversion', 'Store visit conversion', 'Revenue', 'Median days to order'], coh.map((x) => `<tr><td class="b">${dpShort(x.w < r[0] ? r[0] : x.w)}${x.w < r[0] || dAdd(x.w, 6) > r[1] ? ' <span class="k-s">part week</span>' : ''}</td><td>${nf(x.n)}</td><td>${nf(x.b)}</td><td class="b">${pct(x.b, x.n, 1)}</td><td>${nf(x.st)}</td><td>${inr(x.net)}</td><td>${x.lag == null ? '—' : x.lag}</td></tr>`)), 'v');
 
-  return kp + flow + cta + `<div class="wl-g2">${rev}${fix}</div>` + trend + cohorts +
+  return `<h3 class="psec">Orders placed in range · by order date</h3>` + ok + `<h3 class="psec">Leads in range · by lead date</h3>` + kp + flow + cta + `<div class="wl-g2">${rev}${fix}</div>` + trend + cohorts +
     `<p class="wl-note">Lead = one phone across Call Store + WhatsApp (a repeat within 30 days is the same lead) · converted = DevX order on/after the lead date within 60 days · ${nf(a.rep)} repeat contacts folded in.</p>`;
 }
 
