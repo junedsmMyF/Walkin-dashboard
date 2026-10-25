@@ -72,7 +72,7 @@ export function attributeOrders(LL, ordersByPhone, { cutoff, orderDays = ORDER_D
       const l = [...ls].reverse().find((x) => x.d <= o.date);
       if (!l) { stats.beforeLead++; continue; }
       if (daysBetween(l.d, o.date) > orderDays) { stats.beyondWindow++; continue; }
-      seen.add(o.id); l.orders.push({ id: o.id, date: o.date, net: o.net, store: o.store, route: routeOf(l, o), lag: daysBetween(l.d, o.date), lines: o.lines || [] });
+      seen.add(o.id); l.orders.push({ id: o.id, date: o.date, net: o.net, store: o.store, route: routeOf(l, o), lag: daysBetween(l.d, o.date), lines: o.lines || [], gross: o.gross });
     }
   }
   LL.orderStats = stats;
@@ -80,12 +80,12 @@ export function attributeOrders(LL, ordersByPhone, { cutoff, orderDays = ORDER_D
 }
 
 // PII-free lead rows for the browser (no phone, name or ticket id). A routed lead counts as consumed, connected and qualified.
-// ci / pp = category / product page of interest · lr = loss reason · order lines i: [product index (pid), category, qty, net]
+// ci / pp = category / product page of interest · lr = loss reason · order lines i: [product index (pid), category, qty, net, gross]
 export const leadRows = (LL, { from, to, pid = null, catOf = () => '' }) => LL.leads.filter((l) => l.d >= from && l.d <= to).map((l) => {
   const r = l.rt ? 1 : 0;
   return { d: l.d, src: l.src, e: l.entry, s: l.store || l.rs || 'UNMAPPED', ag: l.ag, c: l.cons || r, n: l.conn || r, q: l.qual || r, x: l.lost && !r ? 1 : 0,
     rt: l.rt, vd: l.vd, rv: l.rv, vc: l.vc, rs: l.rs, rep: l.repeats, again: l.again, np: l.phone ? 0 : 1, ci: l.ci || '', pp: l.pp || '', lr: l.lr || '',
-    o: (l.orders || []).map((o) => ({ d: o.date, net: Math.round(o.net), r: o.route, s: o.store, lag: o.lag, ...(pid ? { i: (o.lines || []).map((x) => [pid(x.p), catOf(x.p), x.qty, Math.round(x.net)]) } : {}) })) };
+    o: (l.orders || []).map((o) => ({ d: o.date, net: Math.round(o.net), gross: Math.round(o.gross ?? o.net), r: o.route, s: o.store, lag: o.lag, ...(pid ? { i: (o.lines || []).map((x) => [pid(x.p), catOf(x.p), x.qty, Math.round(x.net), Math.round(x.gross ?? x.net)]) } : {}) })) };
 });
 
 // PII-free summary for a date window (lead start date within [from, to]).

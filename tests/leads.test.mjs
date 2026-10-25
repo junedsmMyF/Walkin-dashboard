@@ -88,7 +88,8 @@ test('interest, loss reason and order lines: first known interest, latest loss r
   const names = []; const pid = (n) => (names.includes(n) ? names.indexOf(n) : names.push(n) - 1);
   const rows = leadRows(LL, { from: '2026-10-01', to: '2026-10-31', pid, catOf: () => 'Mattress' });
   assert.deepEqual(rows.map((x) => [x.ci, x.pp, x.lr]), [['Car seat', 'Frido Ultimate Car Seat', 'Store too far'], ['Mattress', '', '']]);
-  assert.deepEqual(rows[1].o[0].i, [[0, 'Mattress', 1, 5000]]);
+  assert.deepEqual(rows[1].o[0].i, [[0, 'Mattress', 1, 5000, 5000]]);
+  assert.equal(rows[1].o[0].gross, 5000);
   assert.equal(rows[1].o[0].r, 'store');
   assert.deepEqual(names, ['Frido Mattress']);
 });
