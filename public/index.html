@@ -262,6 +262,7 @@ td.strong{font-weight:600}
 .vb-v{background:#DCE9EF;color:#123C4F}.vb-u{background:#FBEFD5;color:#6E4A05}.vb-s{background:#F6E1D1;color:#7A3610}.vb-n{background:#ECEAE4;color:#45484D}
 .wl-card.smp,.wl-kpi.smp{background:repeating-linear-gradient(135deg,#fff 0 14px,#FDF8F4 14px 28px);border-style:dashed;border-color:#E9B999}
 .wl-card h2 .vb{margin-left:6px}
+.vb-db{background:#DDE5ED;color:#333F48}
 .wl-list .row .vb{align-self:center;flex:none}
 .wl td.smpc{background:#FDF6F0;color:#7A3610}
 .pf{display:flex;flex-direction:column;gap:8px;margin-top:16px}
@@ -860,7 +861,7 @@ function pageRetail(){
     : v.id === 'meta-ads'
     ? `<tr><td class="strong"><a href="#/retail/meta-ads/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td><span class="vb vb-s">Sample</span></td><td>—</td><td>${META.statsLine()}</td><td><a href="#/retail/meta-ads/overview">Open →</a></td></tr>`
     : v.id === 'pdp'
-    ? `<tr><td class="strong"><a href="#/retail/pdp/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td class="strong">${PDATA ? inr(pdpAllNet()) : '—'}</td><td>—</td><td>${pdpStatsLine()} · since ${PDATA ? PDATA.startDate : '8 Oct'}</td><td><a href="#/retail/pdp/journey">Open →</a></td></tr>`
+    ? `<tr><td class="strong"><a href="#/retail/pdp/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td class="strong">${PDATA ? inr(pdpAllNet()) : '—'}</td><td>—</td><td>${pdpStatsLine()} · since ${PDATA ? PDATA.startDate : '8 Oct'}</td><td><a href="#/retail/pdp/overview">Open →</a></td></tr>`
     : v.live
     ? `<tr><td class="strong"><a href="#/retail/${v.id}/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td class="strong">${inr(a.net)}</td><td class="${toneOf(deltaTxt(a.net, b?.net))} strong">${deltaTxt(a.net, b?.net).replace(' vs previous period', '')}</td><td>Capture ${a.cr == null ? '—' : a.cr.toFixed(1) + '%'} · Walk-ins ${nf(a.walk)}</td><td><a href="#/retail/${v.id}/overview">Open →</a></td></tr>`
     : `<tr><td class="strong"><a href="#/retail/${v.id}">${v.name}</a></td><td><span class="badge b-grey">Coming soon</span></td><td>—</td><td>—</td><td>—</td><td><a href="#/retail/${v.id}">View →</a></td></tr>`;
@@ -1492,6 +1493,8 @@ const PTIP = {
 };
 const ptip = (l) => { const t = PTIP[l]; return t ? `<span class="k-i" role="button" tabindex="0" aria-label="What is this?">i</span><span class="k-tip" role="tooltip"><b>${esc(l)}</b>${esc(t[0])}<em>Source: ${esc(t[1])}</em></span>` : ''; };
 // Verification badges — every number says how far it can be trusted
+// date basis of a card's revenue (owner, 25 Oct 2026): order date = when the DevX order was punched · lead date = when the lead first contacted us
+const DBT = { o: ' <span class="vb vb-db">Order date</span>', l: ' <span class="vb vb-db">Lead date</span>', m: ' <span class="vb vb-db">Counts: lead date · revenue: order date</span>' };
 const VB = { v: '<span class="vb vb-v" title="Matched against source data">Verified</span>', u: '<span class="vb vb-u" title="As recorded by the agent (Bigin stage or LimeChat note); not checked against another source">As recorded · unverified</span>', s: '<span class="vb vb-s" title="Illustrative data until the source is connected">Sample</span>', n: '<span class="vb vb-n">Not tracked</span>' };
 const pkpis = (items) => `<div class="wl-kpis">` + items.map((k) => `<div class="wl-kpi ${k.b === 's' ? 'smp' : ''}" tabindex="0">${ptip(k.l)}<div class="k-l">${k.l}</div><div class="k-v ${k.v === '—' ? 'none' : ''}">${k.v}</div><div class="k-d ${k.tone || 'flat'}">${k.d || ''}</div><div class="k-s">${k.s}</div><div>${VB[k.b]}</div></div>`).join('') + `</div>`;
 const pcard = (title, sub, body, badge = '', right = '') => `<section class="wl-card ${badge === 's' ? 'smp' : ''}"><div class="wl-ch"><div><h2>${title} ${badge ? VB[badge] : ''}</h2>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${right}</div>${body}</section>`;
@@ -1697,12 +1700,12 @@ function pOverview(r){
     return [row(A, `<span class="cx-chev">${open ? '▾' : '▸'}</span> <b>${LCTA[e][0]}</b> <span class="k-s">${LCTA[e][1]} · ${nf(subs.length)} ${subs.length === 1 ? 'store' : 'stores'}</span>`, `cx-row ${F.cta === e ? 'je-on' : ''}`, `data-ex="l:${e}" tabindex="0" role="button" aria-expanded="${open}"`),
       ...(open ? subs.map(([s, xs]) => row(lAgg(xs), esc(s === 'UNMAPPED' ? 'Store not known' : pStore(s).name), 'je-sub')) : [])];
   });
-  const cta = pcard('CTA performance', 'Leads in range and what they bought (lead date) · bars: share of leads (teal) vs share of revenue (rust) · click a CTA to see it by store',
+  const cta = pcard('CTA performance' + DBT.l, 'Leads in range and what they bought (lead date) · bars: share of leads (teal) vs share of revenue (rust) · click a CTA to see it by store',
     `<div class="wl-tw"><table><thead><tr><th>CTA</th><th>Leads</th><th>Consumption</th><th>Connected</th><th>Store visits</th><th>Video calls</th><th>Bought</th><th>Conversion</th><th>Revenue</th><th>Per lead</th><th>Leads · revenue</th></tr></thead><tbody>${body.join('')}<tr class="je-grp">${row(tot, '<b>All CTAs</b>').replace(/^<tr[^>]*>|<\/tr>$/g, '')}</tr><tr><td><b>Get Direction</b> <span class="k-s">Store card · Google Maps</span></td><td colspan="10" style="text-align:left">${VB.n} <span class="k-s">creates no lead</span></td></tr></tbody></table></div>`, 'v');
 
   // revenue by conversion route + fix first
   const rt = B.byRoute, c = PCOL();
-  const rev = pcard('Revenue by conversion', 'Orders billed in the range (order date) · unique DevX orders · latest lead before the order · within 60 days',
+  const rev = pcard('Revenue by conversion' + DBT.o, 'Orders billed in the range (order date) · unique DevX orders · latest lead before the order · within 60 days',
     `<div class="wl-track" style="height:18px;margin-top:16px">${B.net ? ['store', 'video', 'other'].map((x) => rt[x].net ? `<div class="wl-fill" style="height:18px;width:${(rt[x].net / B.net * 100).toFixed(1)}%;background:${c[x]};border-radius:0"></div>` : '').join('') : ''}</div>
     <div class="wl-legend">${PATHS.map(([x, l]) => `<span><i class="wl-sw" style="background:${c[x]}"></i>${l} ${inr(rt[x].net)} (${pct(rt[x].net, B.net, 0)})</span>`).join('')}</div>
     ${wtable(['Route', 'Orders', 'Buyers', 'Revenue', 'AOV'], PATHS.map(([x, l]) => `<tr><td class="b">${l}</td><td>${nf(rt[x].orders)}</td><td>${nf(rt[x].buyers)}</td><td class="b">${inr(rt[x].net)}</td><td>${rt[x].orders ? inr(rt[x].net / rt[x].orders) : '—'}</td></tr>`))}
@@ -1721,7 +1724,7 @@ function pOverview(r){
   const days = []; for (let d = r[0]; d <= r[1]; d = dAdd(d, 1)) days.push(d);
   const ser = days.map((d) => { const xs = R.filter((x) => x.d === d); return { d, n: xs.length, b: xs.filter((x) => x.o.length).length }; });
   const mx = Math.max(1, ...ser.map((s) => s.n)), mb = Math.max(1, ...ser.map((s) => s.b));
-  const trend = pcard('Daily leads and buyers', 'Leads by day · buyers by lead date',
+  const trend = pcard('Daily leads and buyers' + DBT.l, 'Leads by day · buyers by lead date',
     `<div class="wl-legend"><span><i class="wl-sw" style="background:${C.tealMid}"></i>Leads</span><span><i class="wl-sw" style="background:${C.teal}"></i>Buyers</span></div>
     <div style="display:flex;align-items:flex-end;gap:4px;height:170px;margin-top:12px">${ser.map((s) => `<div title="${dpShort(s.d)}: ${nf(s.n)} leads" style="flex:1;height:${(s.n / mx * 100).toFixed(1)}%;background:${C.tealMid};border-radius:3px 3px 0 0"></div>`).join('')}</div>
     <div style="display:flex;align-items:flex-end;gap:4px;height:40px;margin-top:6px">${ser.map((s) => `<div title="${dpShort(s.d)}: ${nf(s.b)} buyers" style="flex:1;height:${(s.b / mb * 100).toFixed(1)}%;background:${C.teal}"></div>`).join('')}</div>
@@ -1731,7 +1734,7 @@ function pOverview(r){
   const wk = (d) => dAdd(d, -((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7));
   const coh = [...new Set(R.map((x) => wk(x.d)))].sort().map((w) => { const xs = R.filter((x) => wk(x.d) === w), b = xs.filter((x) => x.o.length);
     return { w, n: xs.length, b: b.length, net: xs.reduce((u, x) => u + x.o.reduce((v, o) => v + o.net, 0), 0), st: xs.filter((x) => x.o.some((o) => o.r === 'store')).length, lag: median(b.map((x) => x.o[0].lag)) }; });
-  const cohorts = pcard('Lead cohorts', 'By lead week (Mon) · revenue to date from those leads · recent weeks are still converting',
+  const cohorts = pcard('Lead cohorts' + DBT.l, 'By lead week (Mon) · revenue to date from those leads · recent weeks are still converting',
     wtable(['Week of', 'Leads', 'Bought', 'Conversion', 'Store visit conversion', 'Revenue', 'Median days to order'], coh.map((x) => `<tr><td class="b">${dpShort(x.w < r[0] ? r[0] : x.w)}${x.w < r[0] || dAdd(x.w, 6) > r[1] ? ' <span class="k-s">part week</span>' : ''}</td><td>${nf(x.n)}</td><td>${nf(x.b)}</td><td class="b">${pct(x.b, x.n, 1)}</td><td>${nf(x.st)}</td><td>${inr(x.net)}</td><td>${x.lag == null ? '—' : x.lag}</td></tr>`)), 'v');
 
   return `<h3 class="psec">Orders placed in range · by order date</h3>` + ok + `<h3 class="psec">Leads in range · by lead date</h3>` + kp + flow + cta + `<div class="wl-g2">${rev}${fix}</div>` + trend + cohorts +
@@ -1797,9 +1800,9 @@ function pPipeline(r){
   // by agent (Bigin owner)
   const byA = {}; T.forEach((t) => { (byA[t.ag || '(no owner)'] = byA[t.ag || '(no owner)'] || []).push(t); });
   const arow = ([ag, xs]) => { const called = xs.filter((t) => t.g !== 'new'), conn = xs.filter((t) => ['connected', 'visit', 'video', 'converted', 'lost'].includes(t.g)); const tf = median(xs.map((t) => t.tFirst).filter((v) => v != null));
-    return `<tr><td class="b">${esc(ag)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter(isOpen).length)}</td><td>${pct(called.length, xs.length, 0)}</td><td>${nf(conn.length)}</td><td>${nf(xs.filter((t) => t.rt).length)}</td><td>${nf(xs.filter((t) => t.ord).length)}</td><td class="b">${inr(xs.reduce((u, t) => u + t.net, 0))}</td><td>${tf == null ? '—' : ageTxt(tf)}</td><td class="bad">${nf(xs.filter(breach).length)}</td></tr>`; };
-  const agents = pcard('By agent · WhatsApp tickets in Bigin', 'Bigin ticket owner · first call = median time to leave New Enquiry (tracked since 23 Oct)',
-    wtable(['Agent', 'Tickets', 'Open', 'Called', 'Connected', 'Routed', 'Bought', 'Revenue', 'First call', 'SOP breaches'], Object.entries(byA).sort((x, y) => y[1].length - x[1].length).map(arow)), 'v');
+    return `<tr><td class="b">${esc(ag)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter(isOpen).length)}</td><td>${pct(called.length, xs.length, 0)}</td><td>${nf(conn.length)}</td><td>${nf(xs.filter((t) => t.rt).length)}</td><td>${tf == null ? '—' : ageTxt(tf)}</td><td class="bad">${nf(xs.filter(breach).length)}</td></tr>`; };
+  const agents = pcard('By agent · WhatsApp tickets in Bigin', 'Bigin ticket owner · first call = median time to leave New Enquiry (tracked since 23 Oct) · bought and revenue: Agent scorecard above',
+    wtable(['Agent', 'Tickets', 'Open', 'Called', 'Connected', 'Routed', 'First call', 'SOP breaches'], Object.entries(byA).sort((x, y) => y[1].length - x[1].length).map(arow)), 'v');
 
   // Call Store (Bigin Callback Requests) — its own stage list
   const CL = (PDATA.call.leads || []).filter((x) => !x.dup && inPR(x.d, r) && pStoreOk(x.s) && (F.cta === 'all' || F.cta === 'call_popup'));
@@ -1811,7 +1814,7 @@ function pPipeline(r){
   const LR = lRows(r); const byL = {}; LR.forEach((x) => { (byL[x.ag || '(no owner)'] = byL[x.ag || '(no owner)'] || []).push(x); });
   const srow = ([ag, xs]) => { const b = xs.filter((x) => x.o.length); const net = xs.reduce((u, x) => u + x.o.reduce((v, o) => v + o.net, 0), 0);
     return `<tr><td class="b">${esc(ag)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => x.src === 'call').length)}</td><td>${pct(xs.filter((x) => x.c).length, xs.length, 0)}</td><td>${nf(xs.filter((x) => x.n).length)}</td><td>${nf(xs.filter((x) => x.q).length)}</td><td>${nf(xs.filter((x) => x.rt && !x.rv).length)}</td><td>${nf(xs.filter((x) => (x.rt && x.rv) || (!x.rt && x.vc)).length)}</td><td>${nf(b.length)}</td><td class="b">${pct(b.length, xs.length, 1)}</td><td class="b">${inr(net)}</td></tr>`; };
-  const score = pcard('Agent scorecard', 'Call Store + WhatsApp leads in range · Bigin owner / LimeChat first assignee of the lead · same rules as Overview',
+  const score = pcard('Agent scorecard' + DBT.l, 'Call Store + WhatsApp leads in range · Bigin owner / LimeChat first assignee of the lead · same rules as Overview',
     wtable(['Agent', 'Leads', 'Call Store', 'Called', 'Connected', 'Qualified', 'Store visit', 'Video call', 'Bought', 'Conversion', 'Revenue'], Object.entries(byL).sort((a, b) => b[1].length - a[1].length).map(srow)), 'v');
 
   return kp + board + hyg + score + agents + call +
@@ -1905,7 +1908,7 @@ function pRouting(r){
 
   // outcome bar of visits due
   const seg = [[A.buy, C.teal, 'Bought on visit date'], [A.other, C.tealMid, 'Bought on another day'], [A.none, C.rust, 'No order yet'], [A.ahead, C.track, 'Visit date ahead']];
-  const flow = pcard('What happened to scheduled visits', 'Leads routed to a store (not video) · store visit conversion = DevX order on the expected visit date',
+  const flow = pcard('What happened to scheduled visits' + DBT.m, 'Leads routed to a store (not video) · store visit conversion = DevX order on the expected visit date',
     `<div class="wl-tree" style="flex-wrap:wrap">${lNode('Qualified & routed', nf(R.length), 'Lead routing sheet · DSR group')}${lArrow}${lNode('Store visit', nf(A.n), `${nf(VR.length)} video call instead`)}${lArrow}${lNode('Store acknowledged', '—', VB.n, 'await')}${lArrow}${lNode('Visit date reached', nf(A.due), `${nf(A.ahead)} still ahead`)}${lArrow}${lNode('Bought on visit date', nf(A.buy), `${inr(SA.net)} billed in range`, 'win')}</div>
     <div class="wl-track" style="height:14px;margin-top:18px;display:flex">${seg.map(([v, col]) => (v ? `<div class="wl-fill" style="height:14px;width:${(v / Math.max(1, A.n) * 100).toFixed(1)}%;background:${col};border-radius:0"></div>` : '')).join('')}</div>
     <div class="wl-legend">${seg.map(([v, col, l]) => `<span><i class="wl-sw" style="background:${col}"></i>${l} ${nf(v)}</span>`).join('')}</div>`, 'v');
@@ -1919,7 +1922,7 @@ function pRouting(r){
   const cities = [...new Set(srow.map((x) => cityOf(x.s)))].map((c) => { const xs = srow.filter((x) => cityOf(x.s) === c).sort((a, b) => b.o.n - a.o.n); return { c, xs, t: sum(xs) }; }).sort((a, b) => b.t.o.n - a.t.o.n);
   const cell = ({ o, at }) => { const so = typeof o.so === 'number' ? o.so : o.so.length; return `<td>${nf(o.n)}</td><td>${nf(o.due)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.due, 0)}</td><td>${nf(o.other)}</td><td class="${o.none ? 'bad' : ''}">${nf(o.none)}</td><td class="b">${inr(o.net)}</td><td>${so ? pct(at, so, 0) : '—'}</td>`; };
   const unm = (byS.UNMAPPED || []).length;
-  const stores = pcard('By store', 'Routed store from the sheet · click a city to see its stores · conversion = of visits due · revenue = store-visit orders billed in range (order date)',
+  const stores = pcard('By store' + DBT.m, 'Routed store from the sheet · click a city to see its stores · conversion = of visits due · revenue = store-visit orders billed in range (order date)',
     srow.length ? wtable(['Store', 'Scheduled', 'Visit date reached', 'Bought on visit date', 'Conversion', 'Bought another day', 'No order yet', 'Revenue', 'Billed at this store'],
       cities.flatMap(({ c, xs, t }) => { const open = !!F.cx[c]; return [`<tr class="je-grp cx-row" data-cx="${esc(c)}" tabindex="0" role="button" aria-expanded="${open}"><td class="b"><span class="cx-chev">${open ? '▾' : '▸'}</span> ${esc(c)} <span class="k-s">${nf(xs.length)} ${xs.length === 1 ? 'store' : 'stores'}</span></td>${cell(t)}</tr>`, ...(open ? xs.map((x) => `<tr class="je-sub"><td>${esc(pStore(x.s).name)}</td>${cell(x)}</tr>`) : [])]; }))
       + (unm ? `<p class="wl-note" style="margin-top:8px">${nf(unm)} routed with a store label not in the store master — in the totals above, not in this table.</p>` : '') : '<p class="sub" style="margin-top:14px">No store visits scheduled in this range.</p>', 'v');
@@ -1940,7 +1943,7 @@ function pRouting(r){
 
   // by agent (lead owner)
   const byA = {}; ST.forEach((x) => { (byA[x.ag || '(no owner)'] = byA[x.ag || '(no owner)'] || []).push(x); });
-  const agents = pcard('By agent', 'Bigin owner / LimeChat first assignee of the routed lead', wtable(['Agent', 'Scheduled', 'Visit date reached', 'Bought on visit date', 'Conversion', 'No order yet', 'Revenue', 'Video call routed'],
+  const agents = pcard('By agent' + DBT.m, 'Bigin owner / LimeChat first assignee of the routed lead', wtable(['Agent', 'Scheduled', 'Visit date reached', 'Bought on visit date', 'Conversion', 'No order yet', 'Revenue', 'Video call routed'],
     [...new Set([...Object.keys(byA), ...SO.map((o) => o.x.ag || '(no owner)')])].map((k) => [k, byA[k] || []]).sort((a, b) => b[1].length - a[1].length).map(([ag, xs]) => { const o = { ...out(xs), net: soOf((w) => (w.x.ag || '(no owner)') === ag).net }; return `<tr><td class="b">${esc(ag)}</td><td>${nf(o.n)}</td><td>${nf(o.due)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.due, 0)}</td><td class="${o.none ? 'bad' : ''}">${nf(o.none)}</td><td>${inr(o.net)}</td><td>${nf(VR.filter((x) => (x.ag || '(no owner)') === ag).length)}</td></tr>`; })), 'v');
 
   // routing sheet hygiene
@@ -1975,14 +1978,14 @@ function pVideo(r){
   ]);
 
   const seg = [[A.buy, C.teal, 'Bought (video call)'], [A.other, C.tealMid, 'Bought, other route'], [A.lost, C.sandDk, 'Not interested'], [A.open, C.rust, 'Still open']];
-  const flow = pcard('What happened to video calls', 'Video call conversion = routing remark "video" and order on/after the visit date, or not routed with a video call arranged and order on/after the lead date',
+  const flow = pcard('What happened to video calls' + DBT.m, 'Video call conversion = routing remark "video" and order on/after the visit date, or not routed with a video call arranged and order on/after the lead date',
     `<div class="wl-tree" style="flex-wrap:wrap">${lNode('Qualified', nf(lRows(r).filter((x) => x.q).length), 'Call Store + WhatsApp')}${lArrow}${lNode('Video call arranged', nf(A.n), 'store beyond 15 km')}${lArrow}${lNode('Demo held', '—', VB.n, 'await')}${lArrow}${lNode('Order by store team', nf(A.buy), `${inr(voNet(() => true))} billed in range`, 'win')}</div>
     <div class="wl-track" style="height:14px;margin-top:18px;display:flex">${seg.map(([v, col]) => (v ? `<div class="wl-fill" style="height:14px;width:${(v / Math.max(1, A.n) * 100).toFixed(1)}%;background:${col};border-radius:0"></div>` : '')).join('')}</div>
     <div class="wl-legend">${seg.map(([v, col, l]) => `<span><i class="wl-sw" style="background:${col}"></i>${l} ${nf(v)}</span>`).join('')}</div>`, 'v');
 
   // where the video call was recorded
   const brow = ([k, l, sub]) => { const o = out(V.filter((x) => basis(x) === k)); return `<tr><td style="white-space:normal"><b>${l}</b><br><span class="k-s">${sub}</span></td><td>${nf(o.n)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.n, 0)}</td><td>${inr(voNet((w) => basis(w.x) === k))}</td><td>${nf(o.lost)}</td><td class="${o.open ? 'bad' : ''}">${nf(o.open)}</td></tr>`; };
-  const bySrc = pcard('Where the video call was recorded', 'Lead\'s first contact source · a routing-sheet row with a video remark wins',
+  const bySrc = pcard('Where the video call was recorded' + DBT.m, 'Lead\'s first contact source · a routing-sheet row with a video remark wins',
     wtable(['Recorded in', 'Arranged', 'Bought', 'Conversion', 'Revenue', 'Not interested', 'Still open'], VBASIS.map(brow)), 'u');
 
   // Bigin PDP Inventories queue (stage history read every 15 min)
@@ -2004,12 +2007,12 @@ function pVideo(r){
 
   // by agent
   const byA = {}; V.forEach((x) => { (byA[x.ag || '(no owner)'] = byA[x.ag || '(no owner)'] || []).push(x); });
-  const agents = pcard('By agent', 'Bigin owner / LimeChat first assignee who arranged the call', wtable(['Agent', 'Arranged', 'Bought', 'Conversion', 'Revenue', 'Not interested', 'Still open'],
+  const agents = pcard('By agent' + DBT.m, 'Bigin owner / LimeChat first assignee who arranged the call', wtable(['Agent', 'Arranged', 'Bought', 'Conversion', 'Revenue', 'Not interested', 'Still open'],
     Object.entries(byA).sort((a, b) => b[1].length - a[1].length).map(([ag, xs]) => { const o = { ...out(xs), net: voNet((w) => (w.x.ag || '(no owner)') === ag) }; return `<tr><td class="b">${esc(ag)}</td><td>${nf(o.n)}</td><td class="b">${nf(o.buy)}</td><td class="b">${pct(o.buy, o.n, 0)}</td><td>${inr(o.net)}</td><td>${nf(o.lost)}</td><td class="${o.open ? 'bad' : ''}">${nf(o.open)}</td></tr>`; })), 'u');
 
   // billing store of video call orders
   const byS = {}; VO.forEach((o) => { const v = (byS[o.s] = byS[o.s] || { n: 0, net: 0 }); v.n++; v.net += o.net; });
-  const stores = pcard('Where video call orders were billed', 'Orders billed in range (order date) · DevX billing store · the store team places the order',
+  const stores = pcard('Where video call orders were billed' + DBT.o, 'Orders billed in range (order date) · DevX billing store · the store team places the order',
     VO.length ? wtable(['Store', 'City', 'Orders', 'Revenue'], Object.entries(byS).sort((a, b) => b[1].net - a[1].net).map(([s, v]) => `<tr><td class="b">${esc(pStore(s).name)}</td><td>${esc(pStore(s).city)}</td><td>${nf(v.n)}</td><td class="b">${inr(v.net)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No video call orders in this range yet.</p>', 'v');
 
   return kp + flow + bySrc + queue + `<div class="wl-g2">${agents}${stores}</div>` +
@@ -2053,7 +2056,7 @@ function pSources(r){
   const B = R.filter((x) => x.o.length);
   const crow = ([e, l, where, sees, cap]) => { const xs = R.filter((x) => x.e === e); const b = xs.filter((x) => x.o.length);
     return `<tr><td class="b">${l}</td><td style="text-align:left;white-space:normal">${where}</td><td style="text-align:left;white-space:normal">${sees}</td><td style="text-align:left">${cap}</td><td class="b">${nf(xs.length)}</td><td>${pct(xs.length, R.length, 0)}</td><td>${nf(b.length)}</td><td>${inr(b.reduce((u, x) => u + x.o.reduce((v, o) => v + o.net, 0), 0))}</td></tr>`; };
-  const map = pcard('CTA map', 'SOP 02 · section 4 · every website CTA, where it sits and where its lead lands · CTA = conversation tag today',
+  const map = pcard('CTA map' + DBT.l, 'SOP 02 · section 4 · every website CTA, where it sits and where its lead lands · CTA = conversation tag today',
     wtable(['CTA', 'Where it sits', 'What the customer sees', 'Captured in', 'Leads', 'Share', 'Buyers', 'Revenue'], [
       ...CTAMAP.map(crow),
       `<tr><td class="b">Visit Store · Store Locator · footer · PDP widget</td><td style="text-align:left;white-space:normal">Header, nav, footer, product page</td><td style="text-align:left">Experience Store page</td><td style="text-align:left">Only after Chat or Call</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>`,
@@ -2112,7 +2115,9 @@ function pSources(r){
 }
 
 function pagePdp(tab){
-  if (PDATA) applyRev([PDATA.call?.attributed, PDATA.call?.lines, PDATA.call?.salesDaily, PDATA.call?.products, PDATA.text?.attributed, PDATA.routing?.routes]);
+  if (PDATA) applyRev([PDATA.call?.attributed, PDATA.call?.lines, PDATA.call?.salesDaily, PDATA.call?.products, PDATA.text?.attributed, PDATA.routing?.routes, (PDATA.leadList?.rows || []).flatMap((x) => x.o)]);
+  // order lines follow the Revenue filter too: [product, category, qty, net (shown), gross, original net]
+  if (PDATA) { const g = F.rev === 'gross'; (PDATA.leadList?.rows || []).forEach((x) => x.o.forEach((o) => (o.i || []).forEach((l) => { if (l[5] === undefined) l[5] = l[3]; l[3] = g && l[4] != null ? l[4] : l[5]; }))); }
   if (!PTABS.find((t) => t.id === tab)) tab = 'overview';
   const tabName = PTABS.find((t) => t.id === tab).name;
   const crumb = crumbs([['Founders Office', '#/'], ['Retail Revenue', '#/retail'], ['PDP inventories', '#/retail/pdp/overview'], [tabName, '#']]);
@@ -2211,12 +2216,12 @@ function pProduct(r){
   // interest → purchase
   const same = (x, c) => x.o.some((o) => (o.i || []).some((ln) => ciMatch(c, ln[1])));
   const irow = ([c, xs]) => { const b = xs.filter((x) => x.o.length); return `<tr><td class="b">${esc(c)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => x.q).length)}</td><td>${nf(xs.filter((x) => x.rt).length)}</td><td>${nf(b.length)}</td><td class="b">${pct(b.length, xs.length, 1)}</td><td class="b">${inr(odNet((o) => (o.x.ci || 'Not known') === c))}</td><td>${c === 'Not known' ? '—' : pct(b.filter((x) => same(x, c)).length, b.length, 0)}</td></tr>`; };
-  const interest = pcard('Interest → purchase by category', 'Category the lead asked about (Bigin product, product page tag or routing sheet) · revenue = orders billed in range · bought same = buyers whose order has that category (Pillows & Cushions = pillows or cushions, Ergonomic Furniture = chairs or workspace)',
+  const interest = pcard('Interest → purchase by category' + DBT.m, 'Category the lead asked about (Bigin product, product page tag or routing sheet) · revenue = orders billed in range · bought same = buyers whose order has that category (Pillows & Cushions = pillows or cushions, Ergonomic Furniture = chairs or workspace)',
     wtable(['Category of interest', 'Leads', 'Qualified', 'Routed', 'Bought', 'Conversion', 'Revenue', 'Bought same category'], Object.entries(ciG).sort((a, b) => (a[0] === 'Not known') - (b[0] === 'Not known') || b[1].length - a[1].length).map(irow)), 'v');
 
   // product pages (PDP chat tag)
   const ppG = Object.entries(by(PP, (x) => x.pp)).sort((a, b) => b[1].length - a[1].length);
-  const pages = pcard('Which product pages generate leads', 'WhatsApp chats tagged with a product page · other CTAs do not record the page',
+  const pages = pcard('Which product pages generate leads' + DBT.m, 'WhatsApp chats tagged with a product page · other CTAs do not record the page',
     ppG.length ? wtable(['Product page', 'Leads', 'Called', 'Qualified', 'Bought', 'Conversion', 'Revenue'], ppG.map(([p, xs]) => { const b = xs.filter((x) => x.o.length); return `<tr><td class="b">${esc(p)}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => x.c).length)}</td><td>${nf(xs.filter((x) => x.q).length)}</td><td>${nf(b.length)}</td><td class="b">${pct(b.length, xs.length, 1)}</td><td>${inr(odNet((o) => o.x.pp === p))}</td></tr>`; }))
       : `<p class="sub" style="margin-top:14px">No product-page chats in this range.${PDATA.leadList.rows.some((x) => x.pp) ? ` The PDP chat tag was last used on ${dpShort(PDATA.leadList.rows.filter((x) => x.pp).map((x) => x.d).sort().pop())}.` : ''}</p>`, 'v');
 
@@ -2224,15 +2229,15 @@ function pProduct(r){
   const tot = lines.reduce((u, x) => u + x.net, 0);
   const cl = Object.entries(catNet).map(([c, xs]) => ({ c, net: xs.reduce((u, x) => u + x.net, 0), q: xs.reduce((u, x) => u + x.q, 0) })).sort((a, b) => b.net - a.net);
   const mxc = Math.max(1, ...cl.map((x) => x.net));
-  const rank = pcard('Category ranking', 'What PDP leads bought · DevX order lines billed in range (order date)', cl.length ? wtable(['Category', 'Revenue', '', 'Units', 'Share'], cl.map((o) => `<tr><td class="b">${esc(o.c)}</td><td class="b">${inr(o.net)}</td><td style="width:30%"><div class="wl-track"><div class="wl-fill" style="width:${(o.net / mxc * 100).toFixed(1)}%;background:${C.teal}"></div></div></td><td>${nf(o.q)}</td><td>${pct(o.net, tot, 0)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
+  const rank = pcard('Category ranking' + DBT.o, 'What PDP leads bought · DevX order lines billed in range (order date)', cl.length ? wtable(['Category', 'Revenue', '', 'Units', 'Share'], cl.map((o) => `<tr><td class="b">${esc(o.c)}</td><td class="b">${inr(o.net)}</td><td style="width:30%"><div class="wl-track"><div class="wl-fill" style="width:${(o.net / mxc * 100).toFixed(1)}%;background:${C.teal}"></div></div></td><td>${nf(o.q)}</td><td>${pct(o.net, tot, 0)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
 
   const sc = {}; lines.forEach((x) => { (sc[x.s] = sc[x.s] || {})[x.c] = (sc[x.s]?.[x.c] || 0) + x.net; });
   const topC = cl.slice(0, 6).map((x) => x.c); const stot = (s) => Object.values(sc[s]).reduce((u, v) => u + v, 0);
   const storesL = Object.keys(sc).sort((a, b) => stot(b) - stot(a)).slice(0, 10); const mxh = Math.max(1, ...storesL.flatMap((s) => topC.map((c) => sc[s][c] || 0)));
-  const heat = pcard('Store × category', 'Revenue by billing store · top 10 stores', topC.length ? `<div class="wl-heat" style="grid-template-columns:minmax(110px,160px) repeat(${topC.length},minmax(0,1fr))"><span></span>${topC.map((c) => `<span class="wl-hh" title="${esc(c)}">${esc(c)}</span>`).join('')}${storesL.map((s) => `<span class="wl-hn">${esc(pStore(s).name)}</span>` + topC.map((c) => `<div class="wl-cell" style="${heatBg(sc[s][c] || 0, mxh)}">${sc[s][c] ? inr(sc[s][c]) : '—'}</div>`).join('')).join('')}</div>` : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
+  const heat = pcard('Store × category' + DBT.o, 'Revenue by billing store · top 10 stores', topC.length ? `<div class="wl-heat" style="grid-template-columns:minmax(110px,160px) repeat(${topC.length},minmax(0,1fr))"><span></span>${topC.map((c) => `<span class="wl-hh" title="${esc(c)}">${esc(c)}</span>`).join('')}${storesL.map((s) => `<span class="wl-hn">${esc(pStore(s).name)}</span>` + topC.map((c) => `<div class="wl-cell" style="${heatBg(sc[s][c] || 0, mxh)}">${sc[s][c] ? inr(sc[s][c]) : '—'}</div>`).join('')).join('')}</div>` : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
 
   const pm = {}; lines.forEach((x) => { const o = (pm[x.p] = pm[x.p] || { p: names[x.p] || '?', c: x.c, q: 0, net: 0 }); o.q += x.q; o.net += x.net; });
-  const prods = pcard('Products bought', 'Top 15 by revenue', Object.keys(pm).length ? wtable(['Product', 'Category', 'Units', 'Revenue'], Object.values(pm).sort((a, b) => b.net - a.net).slice(0, 15).map((o) => `<tr><td class="b" style="white-space:normal">${esc(o.p)}</td><td>${esc(o.c)}</td><td>${nf(o.q)}</td><td class="b">${inr(o.net)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
+  const prods = pcard('Products bought' + DBT.o, 'Top 15 by revenue', Object.keys(pm).length ? wtable(['Product', 'Category', 'Units', 'Revenue'], Object.values(pm).sort((a, b) => b.net - a.net).slice(0, 15).map((o) => `<tr><td class="b" style="white-space:normal">${esc(o.p)}</td><td>${esc(o.c)}</td><td>${nf(o.q)}</td><td class="b">${inr(o.net)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
 
   const m = pdpAgg(r).sort((a, b) => b.views - a.views);
   const ga = pcard('PDP views and store CTA clicks', 'Illustrative until GA4 / Shopify page events are connected', wtable(['PDP', 'Views', 'Lead CTA clicks', 'CTR', 'WhatsApp', 'Call'], m.map((x) => `<tr><td class="b">${esc(x.n)}</td><td>${nf(x.views)}</td><td>${nf(x.clicks)}</td><td>${pct(x.clicks, x.views, 2)}</td><td>${nf(x.wa)}</td><td>${nf(x.call)}</td></tr>`)), 's');
@@ -2329,8 +2334,10 @@ function pDefs(){
   return pcard('How a PDP lead flows', 'SOP 02 · lead → called → connected → qualified → store visit or video call → DevX order', map) + wh +
     `<div class="wl-g2">${pcard('Definitions', 'The rules every tab uses', defs)}<div>${pcard('Agreed rules', 'Signed off by the owner, Oct 2026', list(agreed, '<span class="vb vb-v">Agreed</span>'))}${pcard('Open questions', 'Not changed until the owner decides', list(pending, '<span class="vb vb-u">Needs sign-off</span>'))}</div></div>`;
 }
-function pdpAllNet(){ return allAttributed(false).filter((x) => x.d >= PDATA.startDate && x.d <= PDATA.cutoff).reduce((u, x) => u + x.net, 0); }
-function pdpStatsLine(){ if (!PDATA) return 'Loading'; const keep = [F.city, F.store, F.cta, F.format, F.day]; F.city = 'all'; F.store = 'all'; F.cta = 'all'; F.format = 'all'; F.day = 'all'; const R = [PDATA.startDate, PDATA.cutoff]; const a = callAgg(R), t = textAgg(R); [F.city, F.store, F.cta, F.format, F.day] = keep; return `Leads <b>${nf(a.unique + t.unique)}</b> (call ${nf(a.unique)} · WhatsApp ${nf(t.unique)}) · Bought <b>${nf(a.purchased + t.purchased)}</b> · Revenue <b>${inr(pdpAllNet())}</b>`; }
+// Home card: PDP-lead orders punched since the PDP start date (order date), same rules as the PDP dashboard; filters ignored
+const pdpHomeOrders = () => (PDATA?.leadList?.rows || []).flatMap((x) => x.o.filter((o) => o.d >= PDATA.startDate && o.d <= PDATA.cutoff).map((o) => ({ ...o, x })));
+function pdpAllNet(){ return pdpHomeOrders().reduce((u, o) => u + o.net, 0); }
+function pdpStatsLine(){ if (!PDATA) return 'Loading'; const L = (PDATA.leadList?.rows || []).filter((x) => x.d >= PDATA.startDate && x.d <= PDATA.cutoff); const O = pdpHomeOrders(); return `Leads <b>${nf(L.length)}</b> (Call Store ${nf(L.filter((x) => x.src === 'call').length)} · WhatsApp ${nf(L.filter((x) => x.src !== 'call').length)}) · Orders <b>${nf(O.length)}</b> · Revenue <b>${inr(pdpAllNet())}</b>`; }
 
 /* ---------- Meta ads module (Lead Gen = Bigin live · CTWA, spend, revenue = sample until connected) ---------- */
 const MTABS = [
