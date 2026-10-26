@@ -1,4 +1,4 @@
-name = "walkin-dashboard"
+name = "fo-dashboard"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 account_id = "64cd065d47d134cf62ccfb35bd874af9"
