@@ -262,6 +262,8 @@ td.strong{font-weight:600}
 .vb-v{background:#DCE9EF;color:#123C4F}.vb-u{background:#FBEFD5;color:#6E4A05}.vb-s{background:#F6E1D1;color:#7A3610}.vb-n{background:#ECEAE4;color:#45484D}
 .wl-card.smp,.wl-kpi.smp{background:repeating-linear-gradient(135deg,#fff 0 14px,#FDF8F4 14px 28px);border-style:dashed;border-color:#E9B999}
 .wl-card h2 .vb{margin-left:6px}
+.stale-note{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 16px;margin-bottom:14px;border-radius:12px;background:#FBEFD5;color:#6E4A05;font-size:13px}
+.stale-note .wl-btn{margin-left:auto}
 .vb-db{background:#DDE5ED;color:#333F48}
 .wl-list .row .vb{align-self:center;flex:none}
 .wl td.smpc{background:#FDF6F0;color:#7A3610}
@@ -680,15 +682,48 @@ function crumbs(list){
 let DATA = null, DATA_ERR = null, LOADING = false;
 const F = { rcamp: 'all', rFrom: null, rTo: null, rLabel: null, rprod: 'net', oFrom: null, oTo: null, oLabel: null, mtype: 'all', mcity: 'all', mstore: 'all', mleads: 'net', range: 'mtd', format: 'all', city: 'all', store: 'all', cta: 'all', ex: {}, cx: {}, rev: 'net', cmp: 'prev', day: 'all', from: null, to: null, crf: '1', dpLabel: null };
 const dayOk = (d) => F.day === 'all' || (F.day === 'weekend' ? ((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7) >= 5 : ((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7) < 5);
+/* ---------- Safe API loading (audit 27 Oct 2026) ----------
+   apiJson: checks the status and the content type before parsing, so an HTML error page (e.g. Cloudflare 1102) is never
+   fed to JSON.parse. Every good response is kept in this browser (IndexedDB, per signed-in email); when a later load
+   fails the page keeps showing that copy with its build time instead of an error. The data is PII-free by design. */
+const LAST = { db: null, stale: {} }; // stale: url → { at } for data shown from the last good copy
+const lastKey = (url) => (ME?.email || 'anon') + '|' + url;
+// Browser storage must never hold up a page: every call gives up after 1.5 s and the page carries on without the copy.
+const lastTimed = (p) => Promise.race([p, new Promise((ok) => setTimeout(() => ok(null), 1500))]);
+function lastDb(){
+  if (LAST.db) return LAST.db;
+  LAST.db = lastTimed(new Promise((ok) => { try { const q = indexedDB.open('fo-last-good', 1); q.onupgradeneeded = () => q.result.createObjectStore('snap'); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); q.onblocked = () => ok(null); } catch { ok(null); } }));
+  return LAST.db;
+}
+async function lastPut(url, body){ try { const db = await lastDb(); if (!db) return; db.transaction('snap', 'readwrite').objectStore('snap').put({ at: body?.snapshot?.builtAt || body?.generatedAt || new Date().toISOString(), body }, lastKey(url)); } catch {} }
+async function lastGet(url){ try { const db = await lastDb(); if (!db) return null; return await lastTimed(new Promise((ok) => { const q = db.transaction('snap').objectStore('snap').get(lastKey(url)); q.onsuccess = () => ok(q.result || null); q.onerror = () => ok(null); })); } catch { return null; } }
+// close this page's connection first, or the delete waits on it and later opens hang
+async function lastClear(){ try { const p = LAST.db; LAST.db = null; LAST.stale = {}; const db = p ? await p : null; if (db) db.close(); indexedDB.deleteDatabase('fo-last-good'); } catch {} }
+async function apiJson(url){
+  let r;
+  try { r = await fetch(url, { cache: 'no-store' }); } catch { throw new Error('Data is temporarily unavailable (no connection to the server).'); }
+  const isJson = /application\/json/i.test(r.headers.get('content-type') || '');
+  let j = null; if (isJson) { try { j = await r.json(); } catch { j = null; } }
+  if (r.status === 401) throw new Error('Your session has ended. Reload the page to sign in again.');
+  if (!r.ok || !j) throw new Error(j?.warming ? 'Data is being prepared. Try again in a few minutes.' : j?.error && r.status < 500 ? j.error : 'Data is temporarily unavailable.');
+  if (j.error) throw new Error(j.error);
+  return j;
+}
+// Load an API into a slot; on failure fall back to the last good copy (marked stale) or report a plain message.
+async function loadInto(url, set){
+  try { const j = await apiJson(url); delete LAST.stale[url]; set(j); lastPut(url, j); return null; }
+  catch (e) { const prev = await lastGet(url); if (prev?.body) { LAST.stale[url] = { at: prev.at, why: String(e.message || e) }; set(prev.body); return null; } return String(e.message || e); }
+}
+// Banner over a page whose data came from the last good copy
+function staleNote(urls){
+  const s0 = urls.map((u) => LAST.stale[u]).filter(Boolean); if (!s0.length) return '';
+  const at = s0.map((x) => x.at).sort()[0]; const when = new Date(at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
+  return `<div class="stale-note" role="status"><b>Data is temporarily unavailable.</b> Showing the last good data, built ${esc(when)} IST. <button type="button" class="wl-btn" id="staleRetry">Try again</button></div>`;
+}
 async function loadData(force){
   if (LOADING || (DATA && !force)) return;
   LOADING = true; DATA_ERR = null;
-  try {
-    const r = await fetch('/api/metrics', { cache: 'no-store' });
-    const j = await r.json();
-    if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
-    DATA = j;
-  } catch (e) { DATA_ERR = String(e.message || e); }
+  DATA_ERR = await loadInto('/api/metrics', (j) => { DATA = j; });
   LOADING = false; rerender();
 }
 function rerender(){ const y = window.scrollY; const p = parse(); renderView(p); bind(); window.scrollTo(0, y); }
@@ -787,7 +822,7 @@ function kpiLive(items, cols){
   return `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr))">` + items.map((k) => `<div class="kpi" tabindex="0">${kpiTip(k[0])}<span class="k-label">${k[0]}</span><span class="k-value num">${k[1]}</span><span class="k-delta ${toneOf(k[2])}">${k[2]}</span><span class="k-sub">${k[3]}</span>${src(k[4])}</div>`).join('') + `</div>`;
 }
 const loadingView = () => DATA_ERR
-  ? `<section class="card"><h2>Live data could not be loaded</h2><p class="sub">${esc(DATA_ERR)}</p><button type="button" class="nbtn" id="retryBtn" style="margin-top:12px">Try again</button></section>`
+  ? `<section class="card"><h2>Data is temporarily unavailable</h2><p class="sub">${esc(DATA_ERR)}</p><button type="button" class="nbtn" id="retryBtn" style="margin-top:12px">Try again</button></section>`
   : `<section class="card"><h2>Loading live data…</h2><p class="sub">Reading Bigin (T-1), the Retail Sales sheet and the DSR sheet.</p></section>`;
 function freshness(){
   const s = DATA.sources || {};
@@ -1077,8 +1112,8 @@ function pageWalkIn(tab){
   const crumb = crumbs([['Founders Office', '#/'], ['Retail Revenue', '#/retail'], ['Walk in lead management', '#/retail/walk-in/overview'], [tabName, '#']]);
   const live = !['definitions'].includes(tab);
   let body;
-  if (live && !DATA) body = DATA_ERR ? wcard('Live data could not be loaded', esc(DATA_ERR), `<button type="button" class="wl-btn" id="retryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin (T-1), the Retail Sales sheet and the DSR sheet.', '');
-  else body = (live ? wlFilters() : '') + ({ overview: wOverview, capture: wCapture, 'follow-up': wFollow, revenue: wRevenue, product: wProductTab, loss: wLoss, definitions: wDefs }[tab])();
+  if (live && !DATA) body = DATA_ERR ? wcard('Data is temporarily unavailable', esc(DATA_ERR), `<button type="button" class="wl-btn" id="retryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin (T-1), the Retail Sales sheet and the DSR sheet.', '');
+  else body = (live ? staleNote(['/api/metrics']) + wlFilters() : '') + ({ overview: wOverview, capture: wCapture, 'follow-up': wFollow, revenue: wRevenue, product: wProductTab, loss: wLoss, definitions: wDefs }[tab])();
   const i = WTABS.findIndex((t) => t.id === tab);
   const prev = i > 0 ? `<a href="#/retail/walk-in/${WTABS[i - 1].id}"><span class="p-dir">← Previous</span><span class="p-name">${WTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
   const next = i < WTABS.length - 1 ? `<a class="next" href="#/retail/walk-in/${WTABS[i + 1].id}"><span class="p-dir">Next →</span><span class="p-name">${WTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
@@ -1463,8 +1498,7 @@ let PDATA = null, PDATA_ERR = null, PLOADING = false;
 async function loadPdp(force){
   if (PLOADING || (PDATA && !force)) return;
   PLOADING = true; PDATA_ERR = null;
-  try { const r = await fetch('/api/pdp', { cache: 'no-store' }); const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status)); PDATA = j; }
-  catch (e) { PDATA_ERR = String(e.message || e); }
+  PDATA_ERR = await loadInto('/api/pdp', (j) => { PDATA = j; });
   PLOADING = false; rerender();
 }
 const PTIP = {
@@ -2175,8 +2209,8 @@ function pagePdp(tab){
   const crumb = crumbs([['Founders Office', '#/'], ['Retail Revenue', '#/retail'], ['PDP inventories', '#/retail/pdp/overview'], [tabName, '#']]);
   let body;
   if (tab === 'definitions') body = pDefs();
-  else if (!PDATA || !DATA) body = PDATA_ERR || DATA_ERR ? wcard('Live data could not be loaded', esc(PDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="pRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin Callback Requests (T-1) and BigQuery sales.', '');
-  else { const r = pRange(); body = pFilters(tab) + (r ? ({ overview: pOverview, daily: pDaily, pipeline: pPipeline, tat: pTat, routing: pRouting, video: pVideo, sources: pSources, product: pProduct, loss: pLoss }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
+  else if (!PDATA || !DATA) body = PDATA_ERR || DATA_ERR ? wcard('Data is temporarily unavailable', esc(PDATA_ERR || DATA_ERR), `<button type="button" class="wl-btn" id="pRetryBtn" style="margin-top:12px">Try again</button>`) : wcard('Loading live data…', 'Reading Bigin Callback Requests (T-1) and BigQuery sales.', '');
+  else { const r = pRange(); body = staleNote(['/api/pdp', '/api/metrics']) + pFilters(tab) + (r ? ({ overview: pOverview, daily: pDaily, pipeline: pPipeline, tat: pTat, routing: pRouting, video: pVideo, sources: pSources, product: pProduct, loss: pLoss }[tab])(r) : wcard('No data in this range', `Callback Requests went live on ${dpShort(PDATA.startDate)}. Pick a range from that date.`, '')); }
   const i = PTABS.findIndex((t) => t.id === tab);
   const prev = i > 0 ? `<a href="#/retail/pdp/${PTABS[i - 1].id}"><span class="p-dir">← Previous</span><span class="p-name">${PTABS[i - 1].name}</span></a>` : `<a href="#/retail"><span class="p-dir">← Back to</span><span class="p-name">Retail Revenue</span></a>`;
   const next = i < PTABS.length - 1 ? `<a class="next" href="#/retail/pdp/${PTABS[i + 1].id}"><span class="p-dir">Next →</span><span class="p-name">${PTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
@@ -3067,6 +3101,7 @@ function bind(){
   RET.bindPage();
   const prt = document.getElementById('pRetryBtn'); if (prt) prt.addEventListener('click', () => { PDATA_ERR = null; DATA_ERR = null; loadPdp(true); if (!DATA) loadData(true); rerender(); });
   const rt = document.getElementById('retryBtn'); if (rt) rt.addEventListener('click', () => { DATA_ERR = null; loadData(true); rerender(); });
+  const st = document.getElementById('staleRetry'); if (st) st.addEventListener('click', () => { loadData(true); if (canP('pdp')) loadPdp(true); });
 }
 document.getElementById('backBtn').addEventListener('click', () => {
   if (nav.pos > 0) history.back();
@@ -3080,6 +3115,8 @@ document.getElementById('menuBtn').addEventListener('click', (e) => {
 });
 (async () => {
   try { const r = await fetch('/api/me', { cache: 'no-store' }); ME = await r.json(); } catch { ME = null; }
+  if (ME && ME.enforced && !ME.approved) lastClear(); // signed out: drop this browser's last good copies
+  document.addEventListener('click', (e) => { if (ME?.logout && e.target.closest?.(`a[href="${ME.logout}"]`)) lastClear(); });
   if (ME && ME.enforced && ME.approved && !ME.bot) document.getElementById('botFab')?.setAttribute('hidden', '');
   go();
 })();
