@@ -21,7 +21,7 @@ import { STAGE_GROUPS } from './metrics.js';
 import { categoryOf } from './categories.js';
 import { salesDate, biginDate, daysBetween, phone10, addDays } from './dates.js';
 import { standardiseLimechat, coverageGaps } from './limechat.js';
-import { standardiseRouting } from './routing.js';
+import { standardiseRouting, routedKind } from './routing.js';
 import { computePdpInv, pinvAsTextTickets, mergeTextSources, reconcile, stageGroupOf } from './pdpinv.js';
 import { buildLeadList, summariseLeads, attributeOrders, leadRows, REPEAT_DAYS, ORDER_DAYS } from './leads.js';
 
@@ -102,7 +102,9 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
   // A routed lead is a video call when the routing remark mentions video (owner, 23 Oct 2026) or Bigin says video:
   // PDP Inventories "Video Call Scheduled" / Callback Requests "Video call arrange", any ticket date (owner, 24 Oct 2026).
   const biginVideo = new Set([...((pdpInv && pdpInv.recs) || []).filter((r) => stageGroupOf(r.st) === 'video').map((r) => phone10(r.p)), ...callbacks.filter((c) => isVcStage(c.st)).map((c) => phone10(c.p))].filter(Boolean));
-  const routedVideo = (p) => routedBy(p) && (!!RT.firstByPhone.get(p).video || biginVideo.has(p));
+  // Interaction type first (owner, 27 Oct 2026); blank rows: remark "video" or Bigin video stage, as before
+  const routedVideo = (p) => routedBy(p) && routedKind(RT.firstByPhone.get(p), { biginVideo: biginVideo.has(p) }).video;
+  const biginVisit = new Set([...((pdpInv && pdpInv.recs) || []).filter((r) => stageGroupOf(r.st) === 'visit').map((r) => phone10(r.p)), ...callbacks.filter((c) => stageGroup(c.st) === 'visitPlan').map((c) => phone10(c.p))].filter(Boolean));
   const QUAL_G = new Set(['engaged', 'visitPlan', 'vcPlan', 'visit', 'crmWon']);
   if (LC) for (const x of LC.tickets) if (!x.svc && x.stage !== 'qualified' && routedBy(x.phone)) { x.stageRaw = x.stage; x.stage = 'qualified'; x.am = 1; x.oc = 'routed_store'; x.flags.push('routed_stage_mismatch'); }
 
@@ -199,7 +201,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
         const os = !x.test && x.phone ? (ordersByPhone.get(x.phone) || []).filter((o) => o.date >= x.d && o.date <= cutoff) : [];
         const o = os[0];
         return {
-          i: x.id, d: x.d, s: x.s || 'UNMAPPED', sr: x.storeRaw, p: x.prods[0] || '', np: x.prods.length, c: x.cat, cr: x.catRaw, vd: x.vd, vt: x.vtKind, vh: x.vtFrom,
+          i: x.id, d: x.d, it: x.itype, s: x.s || 'UNMAPPED', sr: x.storeRaw, p: x.prods[0] || '', np: x.prods.length, c: x.cat, cr: x.catRaw, vd: x.vd, vt: x.vtKind, vh: x.vtFrom,
           disc: x.disc ? 1 : 0, dv: x.disc.slice(0, 12), rem: x.remarks ? 1 : 0, by: x.by, fl: x.flags, test: x.test, dup: x.dup, after: x.d > cutoff ? 1 : 0,
           src: cl && tl ? 'both' : cl ? 'call' : tl ? 'text' : '', en: lead ? lead.en : '', ld: lead ? lead.d : '', lag: lead ? daysBetween(lead.d, x.d) : null, ag: lead ? lead.ag || '' : '',
           od: o ? o.date : '', os: o ? o.store : '', same: o ? (o.store === x.s ? 1 : 0) : 0, net: Math.round(os.reduce((s, y) => s + y.net, 0)), gross: Math.round(os.reduce((s, y) => s + y.gross, 0)), n: os.length,
@@ -244,7 +246,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
       ...(cut ? pinvAsTextTickets(pdpInv.recs.filter((r) => !(r.tags || []).some((t) => /limechat history/i.test(t))), { from: cut, storeOf: (l) => storeFromWeb(l) }).map((x) => ({ src: 'bigin', id: x.id, ts: x.ts, d: x.d, phone: x.phone || null, valid: !!x.validPhone, entry: x.entry, store: x.store, vc: x.oc === 'routed_video', ag: x.fa, ...textF(x), ...textI(x) })) : []),
     ];
     const llIdx = new Map(), llNames = []; const llPid = (n) => { if (!llIdx.has(n)) { llIdx.set(n, llNames.length); llNames.push(n); } return llIdx.get(n); };
-    const LL = attributeOrders(buildLeadList({ contacts, routes: RT ? RT.routes.filter((r) => r.d <= cutoff) : [], ordersByPhone, videoPhones: biginVideo }), ordersByPhone, { cutoff });
+    const LL = attributeOrders(buildLeadList({ contacts, routes: RT ? RT.routes.filter((r) => r.d <= cutoff) : [], ordersByPhone, videoPhones: biginVideo, visitPhones: biginVisit }), ordersByPhone, { cutoff });
     out.leadList = { rules: { repeatDays: REPEAT_DAYS, orderDays: ORDER_DAYS, cutover: cut, sources: 'Call Store (Bigin Callback Requests) · LimeChat export before the cutover · Bigin PDP Inventories from it' },
       mtd: summariseLeads(LL, { from: cutoff.slice(0, 8) + '01', to: cutoff }), all: summariseLeads(LL, { from: startDate, to: cutoff }),
       rows: leadRows(LL, { from: startDate, to: cutoff, pid: llPid, catOf: categoryOf }), pnames: llNames };

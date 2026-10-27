@@ -9,14 +9,16 @@
 //    date, if the order is within 60 days of that lead's start. Route: routed + bought on the expected visit date = store visit;
 //    routing remark mentions video, or not routed + video call arranged = video call; anything else = other.
 import { daysBetween } from './dates.js';
+import { routedKind } from './routing.js';
 
 export const REPEAT_DAYS = 30;
 export const ORDER_DAYS = 60;
 
 // contacts: [{ src: 'call'|'limechat'|'bigin', id, ts, d, phone, valid, entry, store }]
 // routes: standardised routing rows ({ d, phone, test, vd, s }) · ordersByPhone: phone → date-sorted orders
-// videoPhones: phones Bigin shows in a video-call stage — a routed lead with one counts as a video call even without a "video" remark
-export function buildLeadList({ contacts = [], routes = [], ordersByPhone = new Map(), repeatDays = REPEAT_DAYS, videoPhones = new Set() }) {
+// videoPhones / visitPhones: phones Bigin shows in a video-call / store-visit stage. Routed leads are classified by the
+// sheet's Interaction type first (routedKind); videoPhones is part of the fallback, both are the Bigin cross-check.
+export function buildLeadList({ contacts = [], routes = [], ordersByPhone = new Map(), repeatDays = REPEAT_DAYS, videoPhones = new Set(), visitPhones = new Set() }) {
   const sorted = contacts.filter((c) => c.d).sort((a, b) => a.ts - b.ts || (String(a.id) < String(b.id) ? -1 : 1));
   const leads = []; const open = new Map();
   const boughtBetween = (p, from, to) => (ordersByPhone.get(p) || []).some((o) => o.date >= from && o.date <= to);
@@ -46,7 +48,12 @@ export function buildLeadList({ contacts = [], routes = [], ordersByPhone = new 
     const l = [...ls].reverse().find((x) => x.d <= r.d);
     if (!l) { if (ls.length) routing.beforeLead++; else routing.unmatched++; continue; }
     if (l.rt) { routing.repeatRows++; continue; }
-    l.rt = r.d; l.vd = r.vd || ''; l.rs = r.s || ''; l.rv = r.video || (l.phone && videoPhones.has(l.phone)) ? 1 : 0; routing.matched++;
+    l.rt = r.d; l.vd = r.vd || ''; l.rs = r.s || ''; routing.matched++;
+    const bv = !!(l.phone && videoPhones.has(l.phone)); const k = routedKind(r, { biginVideo: bv, otherVideo: !!l.vc });
+    // rv = video call (classification used everywhere) · rvo = what the earlier rule says · rby = 'i' Interaction type / 'f' fallback
+    // rmm = Interaction type disagrees with the fallback signals · rbg = Bigin stage 'v' video / 's' store visit / '' none
+    l.rv = k.video ? 1 : 0; l.rvo = k.fallback ? 1 : 0; l.rby = k.by === 'itype' ? 'i' : 'f'; l.rmm = k.mismatch ? 1 : 0;
+    l.rbg = bv ? 'v' : l.phone && visitPhones.has(l.phone) ? 's' : '';
     if (!l.ci && r.cat) l.ci = r.cat; // category from the routing sheet when the lead had none
   }
   return { leads, routing };
@@ -84,7 +91,7 @@ export function attributeOrders(LL, ordersByPhone, { cutoff, orderDays = ORDER_D
 export const leadRows = (LL, { from, to, pid = null, catOf = () => '' }) => LL.leads.filter((l) => l.d >= from && l.d <= to).map((l) => {
   const r = l.rt ? 1 : 0;
   return { d: l.d, src: l.src, e: l.entry, s: l.store || l.rs || 'UNMAPPED', ag: l.ag, c: l.cons || r, n: l.conn || r, q: l.qual || r, x: l.lost && !r ? 1 : 0,
-    rt: l.rt, vd: l.vd, rv: l.rv, vc: l.vc, rs: l.rs, rep: l.repeats, again: l.again, np: l.phone ? 0 : 1, ci: l.ci || '', pp: l.pp || '', lr: l.lr || '',
+    rt: l.rt, vd: l.vd, rv: l.rv, rvo: l.rvo || 0, rby: l.rby || '', rmm: l.rmm || 0, rbg: l.rbg || '', vc: l.vc, rs: l.rs, rep: l.repeats, again: l.again, np: l.phone ? 0 : 1, ci: l.ci || '', pp: l.pp || '', lr: l.lr || '',
     o: (l.orders || []).map((o) => ({ d: o.date, net: Math.round(o.net), gross: Math.round(o.gross ?? o.net), r: o.route, s: o.store, lag: o.lag, ...(pid ? { i: (o.lines || []).map((x) => [pid(x.p), catOf(x.p), x.qty, Math.round(x.net), Math.round(x.gross ?? x.net)]) } : {}) })) };
 });
 

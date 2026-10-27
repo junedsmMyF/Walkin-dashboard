@@ -1502,6 +1502,10 @@ async function loadPdp(force){
   PLOADING = false; rerender();
 }
 const PTIP = {
+  'Store visits scheduled': ['Routed leads classified as a store visit. Interaction type in the routing sheet is the main source; blank rows use the earlier rule. Verified when Bigin shows a store-visit stage.', 'Routing sheet (Interaction type) · Bigin'],
+  'Video calls arranged': ['Routed leads with Interaction type "Video Call" (blank: remark "video" or Bigin video stage), plus non-routed leads with a video call arranged. Verified when Bigin shows a video-call stage.', 'Routing sheet (Interaction type) · Bigin · LimeChat'],
+  'Store visit conversion': ['Routed store-visit leads that bought on the expected visit date. Store visit vs video call: Interaction type first.', 'Routing sheet · DevX'],
+  'Video call conversion': ['Video-call leads that bought on or after the video call date. Store visit vs video call: Interaction type first.', 'Routing sheet · Bigin · DevX'],
   'Leads': ['Unique phones from call + WhatsApp CTAs.', 'Bigin · LimeChat'],
   'Consumption rate': ['Call past Yet to Call · WhatsApp agent replied.', 'Bigin stage · LimeChat agent messages'],
   'Qualified': ['Leads the agent marked interested.', 'Bigin stage · agent note'],
@@ -1965,10 +1969,30 @@ function pTat(r){
     `<p class="wl-note">WhatsApp leads from Bigin PDP Inventories created in the selected range. Call Store leads are read once a day, so their turnaround cannot be timed yet.</p>`;
 }
 /* ---- Store routing (SOP 02 · Whimsical: qualified → DSR group → routing sheet → store visit): visits, outcomes by store and agent, sheet hygiene ---- */
+/* Interaction type (owner, 27 Oct 2026): the routing sheet's "Interaction type" decides store visit vs video call when it is
+   filled; blank rows keep the earlier rule (remark "video" or Bigin video stage). Lead rows: rby 'i' / 'f' (by Interaction
+   type / fallback), rvo = earlier-rule result, rmm = Interaction type disagrees with remark / Bigin / LimeChat, rbg = Bigin
+   stage ('v' video, 's' store visit). Verified = classified by Interaction type and Bigin shows the same; otherwise as recorded. */
+const rtBy = (x) => x.rby || 'f';
+const rtBiginOk = (x) => rtBy(x) === 'i' && ((x.rv && x.rbg === 'v') || (!x.rv && x.rbg === 's'));
+// badge for a set of routed leads: Verified only when every lead classified by Interaction type is confirmed by Bigin
+const rtBadge = (xs, dflt) => { const it = xs.filter((x) => rtBy(x) === 'i'); return !it.length ? dflt : it.every(rtBiginOk) ? 'v' : 'u'; };
+function rtClassCard(R){
+  const row = (label, sub, xs) => { const st = xs.filter((x) => !x.rv).length, vc = xs.filter((x) => x.rv).length;
+    return `<tr><td style="white-space:normal"><b>${label}</b><br><span class="k-s">${sub}</span></td><td>${nf(st)}</td><td>${nf(vc)}</td><td class="b">${nf(xs.length)}</td><td class="${xs.some((x) => x.rmm) ? 'bad' : ''}">${nf(xs.filter((x) => x.rmm).length)}</td><td>${rtBy(xs[0] || {}) === 'i' ? nf(xs.filter(rtBiginOk).length) : '<span class="k-s">—</span>'}</td></tr>`; };
+  const I = R.filter((x) => rtBy(x) === 'i'), Fb = R.filter((x) => rtBy(x) !== 'i');
+  return pcard('How routed leads were classified' + DBT.l, 'Interaction type in the routing sheet decides when it is filled (from 27 Oct 2026) · blank rows keep the earlier rule · mismatch = Interaction type disagrees with the remark, Bigin stage or LimeChat note (counted by Interaction type)',
+    wtable(['Classified by', 'Store visit', 'Video call', 'Routed leads', 'Mismatch', 'Bigin agrees'], [
+      row('Interaction type', 'Main source · as recorded in the sheet', I),
+      row('Blank → earlier rule', 'Remark mentions "video" or Bigin video stage', Fb),
+      `<tr class="je-grp"><td class="b">All routed leads</td><td>${nf(R.filter((x) => !x.rv).length)}</td><td>${nf(R.filter((x) => x.rv).length)}</td><td class="b">${nf(R.length)}</td><td>${nf(R.filter((x) => x.rmm).length)}</td><td>${nf(I.filter(rtBiginOk).length)}</td></tr>`,
+    ]), rtBadge(R, 'u'));
+}
 const RTFLAG = { test_row: ['Test row ("test" name or tester\'s phone)', 'Use a separate test sheet'], repeat_phone: ['Same phone on several rows', 'Update the existing row'], invalid_phone: ['Invalid phone', 'Validate 10-digit mobile'],
   duplicate_lead_id: ['Duplicate Lead ID', 'Lead ID must be unique'], store_unmapped: ['Store label not recognised', 'Use the store master list'], no_visit_date: ['No expected visit date', 'Make the date mandatory'],
   visit_before_routing: ['Visit date before routing date', 'Date picker from today'], no_visit_time: ['No visit time slot', 'Make the slot mandatory'], visit_time_unreadable: ['Visit time not a slot ("6pm-8pm")', 'Fixed slot dropdown'],
-  category_prefix: ['Category has "NM - " prefix', 'One category list; standardised here'], no_product: ['No product', 'Make product mandatory'] };
+  category_prefix: ['Category has "NM - " prefix', 'One category list; standardised here'], no_product: ['No product', 'Make product mandatory'],
+  interaction_unrecognised: ['Interaction type not recognised', 'Use "Video Call" or "Store Visit"'] };
 function pRouting(r){
   if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
   const cut = PDATA.cutoff;
@@ -1985,7 +2009,7 @@ function pRouting(r){
   const SA = soOf(() => true);
   const atStore = SA.at;
   const kp = pkpis([
-    { l: 'Store visits scheduled', v: nf(A.n), s: `${nf(VR.length)} more routed for a video call`, b: 'v' },
+    { l: 'Store visits scheduled', v: nf(A.n), s: `${nf(VR.length)} more routed for a video call`, b: rtBadge(ST, 'v') },
     { l: 'Visit date reached', v: nf(A.due), s: `${nf(A.ahead)} still ahead`, b: 'v' },
     { l: 'Store visit conversion', v: nf(A.buy), s: `${pct(A.buy, A.due, 0)} of visits due · ${inr(SA.net)} billed in range`, b: 'v' },
     { l: 'No order yet', v: nf(A.none), tone: A.none ? 'bad' : '', s: `visit date passed · ${nf(A.other)} bought another day`, b: 'v' },
@@ -2039,11 +2063,11 @@ function pRouting(r){
     wtable(['Check', 'Rows', 'Share', 'Fix'], Object.keys(RTFLAG).map((k) => `<tr><td>${RTFLAG[k][0]}</td><td class="${rfc[k] ? 'bad' : ''}">${nf(rfc[k] || 0)}</td><td>${pct(rfc[k] || 0, RS.length, 0)}</td><td style="text-align:left;white-space:normal">${RTFLAG[k][1]}</td></tr>`))
     + (J.rows != null ? `<p class="wl-note" style="margin-top:8px">Matched to a lead (since ${dpShort(PDATA.startDate)}): ${nf(J.matched)} of ${nf(J.rows)} non-test rows · ${nf(J.repeatRows)} repeat rows for an already routed lead · ${nf(J.beforeLead)} routed before the lead's first contact · ${nf(J.unmatched)} with no Call Store or WhatsApp lead.</p>` : ''), 'u');
 
-  return kp + flow + stores + plan + agents + hyg +
+  return kp + flow + rtClassCard(R) + stores + plan + agents + hyg +
     `<p class="wl-note">Leads whose first contact is in the selected range and that are in the Lead routing backend sheet (filled from the WhatsApp DSR groups). The DSR group reaction (store acknowledged in 10 min) is not recorded anywhere yet.</p>`;
 }
 /* ---- Video calls (Whimsical: store beyond 15 km → video consult with the store team → order placed by the store team): arranged, outcome, Bigin queue ---- */
-const VBASIS = [['routed', 'Routing sheet', 'Routed · remark mentions video or Bigin shows a video-call stage'], ['call', 'Call Store', 'Bigin stage Video call arrange'], ['bigin', 'WhatsApp · Bigin', 'PDP Inventories Video Call Scheduled'], ['limechat', 'WhatsApp · LimeChat', 'Video outcome note (before 22 Oct)']];
+const VBASIS = [['routed', 'Routing sheet', 'Interaction type "Video Call" · blank: remark mentions video or Bigin video-call stage'], ['call', 'Call Store', 'Bigin stage Video call arrange'], ['bigin', 'WhatsApp · Bigin', 'PDP Inventories Video Call Scheduled'], ['limechat', 'WhatsApp · LimeChat', 'Video outcome note (before 22 Oct)']];
 function pVideo(r){
   if (!hasLL()) return wcard('Lead list not available yet', 'The new lead list is computed by the Worker; reload in a minute.', '');
   const V = lRows(r).filter((x) => (x.rt && x.rv) || (!x.rt && x.vc));
@@ -2056,7 +2080,7 @@ function pVideo(r){
   const VO = oRows(r, (x) => (x.rt && x.rv) || (!x.rt && x.vc)).filter((o) => o.r === 'video');
   const voNet = (f) => VO.filter(f).reduce((u, o) => u + o.net, 0);
   const kp = pkpis([
-    { l: 'Video calls arranged', v: nf(A.n), s: `${nf(V.filter((x) => x.rt).length)} via routing sheet · ${nf(V.filter((x) => !x.rt).length)} Bigin / LimeChat`, b: 'u' },
+    { l: 'Video calls arranged', v: nf(A.n), s: `${nf(V.filter((x) => x.rt).length)} via routing sheet · ${nf(V.filter((x) => !x.rt).length)} Bigin / LimeChat`, b: rtBadge(V.filter((x) => x.rt), 'u') },
     { l: 'Video call conversion', v: nf(A.buy), s: `${pct(A.buy, A.n, 0)} of arranged · ${inr(voNet(() => true))} billed in range`, b: 'v' },
     { l: 'Not interested', v: nf(A.lost), s: 'after the video call was arranged', b: 'u' },
     { l: 'Still open', v: nf(A.open), tone: A.open ? 'bad' : '', s: 'no order, not closed', b: 'u' },
@@ -2101,7 +2125,7 @@ function pVideo(r){
   const stores = pcard('Where video call orders were billed' + DBT.o, 'Orders billed in range (order date) · DevX billing store · the store team places the order',
     VO.length ? wtable(['Store', 'City', 'Orders', 'Revenue'], Object.entries(byS).sort((a, b) => b[1].net - a[1].net).map(([s, v]) => `<tr><td class="b">${esc(pStore(s).name)}</td><td>${esc(pStore(s).city)}</td><td>${nf(v.n)}</td><td class="b">${inr(v.net)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No video call orders in this range yet.</p>', 'v');
 
-  return kp + flow + bySrc + queue + `<div class="wl-g2">${agents}${stores}</div>` +
+  return kp + flow + rtClassCard(lRows(r).filter((x) => x.rt)) + bySrc + queue + `<div class="wl-g2">${agents}${stores}</div>` +
     `<p class="wl-note">Leads whose first contact is in the selected range. "Video call arranged" is as recorded by the agent (Bigin stage, LimeChat note or routing remark); whether the demo happened is not recorded anywhere yet.</p>`;
 }
 /* ---- Sources & gaps (SOP 02 · sections 4 and 14): CTA map with live lead counts, data sources, coverage checks, known gaps ---- */
@@ -2176,6 +2200,8 @@ function pSources(r){
   const cov = pcard('Coverage checks', 'What the data itself shows is missing or unmatched · selected range unless noted',
     wtable(['Check', 'Count', 'Share', 'Effect', 'Basis'], [
       chk('Leads with no store', unm, R.length, 'Mostly generic WhatsApp · kept in totals, left out of store views', 'v'),
+      chk('Interaction type disagrees with remark / Bigin / LimeChat', R.filter((x) => x.rmm).length, R.filter((x) => rtBy(x) === 'i').length || null, 'Counted by Interaction type · check the sheet or the Bigin stage', 'u'),
+      chk('Interaction type not recognised (all time)', (PDATA.routing?.routes || []).filter((x) => (x.fl || []).includes('interaction_unrecognised')).length, null, 'Falls back to the earlier rule · use "Video Call" or "Store Visit"', 'v'),
       chk(`CTA tags with no leads in range${gone.length ? ': ' + gone.join(', ') : ''}`, gone.length, null, 'Tag no longer applied: these leads now land under another CTA', 'v'),
       chk('Leads with no valid phone', R.filter((x) => x.np).length, R.length, 'Cannot be matched to an order or routing row', 'v'),
       chk(`LimeChat chats not in Bigin (from ${cut ? dpShort(cut) : 'cutover'})`, miss, lcL || null, 'Integration gap: lead not in the agent queue', 'v'),
@@ -2196,7 +2222,15 @@ function pSources(r){
     wtable(['Date', 'LimeChat leads', 'In Bigin', 'Missing', 'Bigin tickets', 'Not in export'], DD.map((x) => `<tr><td class="b">${dpShort(x.d)}</td><td>${nf(x.lcLeads)}</td><td>${nf(x.inBigin)}</td><td class="${x.missing ? 'bad' : ''}">${nf(x.missing)}</td><td>${nf(x.bigin)}</td><td>${nf(x.notInExport)}</td></tr>`))
     + `<p class="wl-note" style="margin-top:8px">LimeChat export covers to ${PDATA.pinv.recon.lcEnd ? dpShort(PDATA.pinv.recon.lcEnd) : '—'}; later days show Bigin only until the export catches up.</p>`, 'v') : '';
 
-  return kp + map + src + cov + daily + gaps +
+  // Interaction type reconciliation (audit 27 Oct 2026): last 14 days by routing date, earlier rule vs current classification
+  const rcEnd = PDATA.cutoff, rcStart = dAdd(rcEnd, -13); const rcDays = []; for (let d = rcStart; d <= rcEnd; d = dAdd(d, 1)) rcDays.push(d);
+  const RC = (PDATA.leadList.rows || []).filter((x) => x.rt && x.rt >= rcStart && x.rt <= rcEnd && pStoreOk(x.rs || x.s));
+  const rcRow = (label, xs, cls = '') => `<tr class="${cls}"><td class="b">${label}</td><td>${nf(xs.length)}</td><td>${nf(xs.filter((x) => rtBy(x) === 'i').length)}</td><td>${nf(xs.filter((x) => !x.rvo).length)}</td><td>${nf(xs.filter((x) => x.rvo).length)}</td><td class="b">${nf(xs.filter((x) => !x.rv).length)}</td><td class="b">${nf(xs.filter((x) => x.rv).length)}</td><td>${nf(xs.filter((x) => !!x.rv !== !!x.rvo).length)}</td><td class="${xs.some((x) => x.rmm) ? 'bad' : ''}">${nf(xs.filter((x) => x.rmm).length)}</td></tr>`;
+  const recon = pcard('Interaction type reconciliation · last 14 days', `Routed leads by routing date, ${dpShort(rcStart)} → ${dpShort(rcEnd)} · earlier rule = remark "video" or Bigin video stage · current = Interaction type when filled, else the earlier rule`,
+    wtable(['Routing date', 'Routed', 'Interaction type filled', 'Earlier rule · store visit', 'Earlier rule · video call', 'Current · store visit', 'Current · video call', 'Changed', 'Mismatch'],
+      [...rcDays.reverse().map((d) => rcRow(dpShort(d), RC.filter((x) => x.rt === d))), rcRow('Last 14 days', RC, 'je-grp')]), 'u');
+
+  return kp + map + src + cov + recon + daily + gaps +
     `<p class="wl-note">Lead counts ignore the CTA toggle on this tab · leads whose first contact is in the selected range.</p>`;
 }
 
@@ -2400,9 +2434,9 @@ function pDefs(){
     ['Not interested · unreachable', 'Not Interested stage with its loss reason (Bigin Close Lost Reason, else the LimeChat outcome). Unreachable = called, never connected.'],
   ]) + sec('Routing and conversion', [
     ['Store visit', 'Routing sheet row (WhatsApp DSR group), test rows left out, joined to the latest lead of that phone that started on or before the routing date.'],
-    ['Video call', 'Routed with a remark that mentions "video" or with Bigin in a video-call stage ("Video call arrange" / "Video Call Scheduled"; Bigin wins over a missing remark), or not routed with a video call arranged (Bigin stage or LimeChat video note).'],
+    ['Video call', 'Main source: the routing sheet\'s "Interaction type" (filled from 27 Oct 2026; "Video Call" = video call, "Store Visit" = store visit). When it is blank: a remark that mentions "video" or Bigin in a video-call stage ("Video call arrange" / "Video Call Scheduled"); not routed: a video call arranged (Bigin stage or LimeChat video note). Where Interaction type and those signals disagree, Interaction type counts and the row is flagged on Sources & gaps.'],
     ['Converted', 'A DevX order on or after the lead date, within 60 days, credited to the latest lead of that phone before the order. Every order is punched on DevX.'],
-    ['Conversion route', 'Store visit conversion = routed and bought on the expected visit date. Video call conversion = video remark and bought on or after the visit date, or not routed with a video call arranged. Anything else = other.'],
+    ['Conversion route', 'Store visit or video call is decided by Interaction type first (else the earlier rule, see Video call). Store visit conversion = bought on the expected visit date. Video call conversion = bought on or after the video call date (routed), or on or after the lead date (not routed, video call arranged). Anything else = other. Verified when Bigin shows the same stage, otherwise as recorded.'],
     ['Orders and revenue', 'Unique DevX order IDs (products and quantity do not add orders). Revenue = Total Revenue (gross − discount), or Gross from the filter.'],
   ]) + sec('Turnaround (SOP 02)', [
     ['Targets', 'First call 15 min · RNR attempts 3 h apart · lead form on the connecting call · stage updated on the visit date · video demo within 48 h · DSR acknowledged in 10 min.'],
@@ -2413,7 +2447,7 @@ function pDefs(){
     ['Sample', 'PDP views and CTA clicks: illustrative until GA4 / Shopify is connected.'],
     ['Not tracked', 'No source records it yet. The card stays, empty.'],
   ]);
-  const agreed = ['One lead per phone · 30-day repeat rule · fresh lead after 30 days unless bought', 'Mobility and service queries not counted', 'CTA by today\'s conversation tag', 'Converted = DevX order within 60 days · latest lead before the order · unique order IDs', 'Routed (routing sheet) = qualified', 'Store visit = bought on the expected visit date · video call = video remark or video call arranged', 'Routed without a "video" remark but Bigin shows a video-call stage = video call', 'WhatsApp from Bigin PDP Inventories from 22 Oct 2026'];
+  const agreed = ['One lead per phone · 30-day repeat rule · fresh lead after 30 days unless bought', 'Mobility and service queries not counted', 'CTA by today\'s conversation tag', 'Converted = DevX order within 60 days · latest lead before the order · unique order IDs', 'Routed (routing sheet) = qualified', 'Store visit = bought on the expected visit date · video call = video remark or video call arranged', 'Routed without a "video" remark but Bigin shows a video-call stage = video call', 'Interaction type in the routing sheet decides store visit vs video call; blank rows keep the earlier rule', 'WhatsApp from Bigin PDP Inventories from 22 Oct 2026'];
   const pending = ['"Test Lead" and "Customer Success Lead" closures still count as leads', 'Monthly targets for the KPIs (Compare to → Target)', 'Orders also counted on Walk-in / Retail retention are kept on both dashboards'];
   const list = (xs, b) => `<div class="wl-list" style="margin-top:6px">${xs.map((x) => `<div class="row"><span>${x}</span>${b}</div>`).join('')}</div>`;
   const wh = pcard('Funnel flowchart', 'Whimsical · Final PDP routing mechanism', `<div class="wh"><iframe src="https://whimsical.com/embed/K8YnGdgbNtixDZnFj3vHtF?color-mode=light" title="Frido PDP to retail revenue journey (Whimsical)" loading="lazy" allowfullscreen></iframe></div><p class="wl-note" style="margin-top:8px"><a href="https://whimsical.com/saiyed-abdal-frido/frido-pdp-lead-funnel-and-store-routing-K8YnGdgbNtixDZnFj3vHtF" target="_blank" rel="noopener">Open funnel board ↗</a> · <a href="https://whimsical.com/frido-d2c-retail-cta-flow-VzWDTwaeCci9GWbWcRd38d" target="_blank" rel="noopener">Website CTA flow ↗</a></p>`);

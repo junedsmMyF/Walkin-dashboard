@@ -4,10 +4,25 @@
 //
 // Columns (Oct 2026): Lead ID, Submitted at (M/D/YYYY H:MM:SS), Store (DSR-style label), Customer name, Customer number,
 // Product name (comma-separated), Product category ("NM - " prefix on some rows), Expected visit date (M/D/YYYY),
-// Expected visit time (free text: "9:30 PM", "6pm-8pm", blank), Discount offered (free text), Remarks, Submitted by.
+// Expected visit time (free text: "9:30 PM", "6pm-8pm", blank), Discount offered (free text), Remarks, Submitted by,
+// Interaction type (added 27 Oct 2026: how the lead was handled — "Video Call" / store visit; blank on older rows).
 //
 // The source is never changed: values are standardised next to the raw value and hygiene issues are flagged.
 import { phone10, daysBetween } from './dates.js';
+
+// "Interaction type" (owner, 27 Oct 2026): the main source for store visit vs video call. Mapping agreed 27 Oct 2026 —
+// case, spaces and punctuation ignored; anything else is "unknown" (flagged, and the row falls back to the old rules).
+const IT_VIDEO = new Set(['videocall', 'vc', 'video', 'videoconsultation', 'vcarranged']);
+const IT_STORE = new Set(['storevisit', 'visit', 'walkin', 'storevisitscheduled']);
+export const interactionKind = (v) => { const k = String(v ?? '').toLowerCase().replace(/[^a-z]/g, ''); return !k ? '' : IT_VIDEO.has(k) ? 'video' : IT_STORE.has(k) ? 'store' : 'unknown'; };
+// Store visit or video call for a routed row. Interaction type wins when it names one; otherwise the earlier rule
+// (routing remark mentions "video", or Bigin in a video-call stage) — unchanged, so rows from before 27 Oct do not move.
+// mismatch: Interaction type disagrees with the fallback signals (remark, Bigin video stage, LimeChat video note).
+export function routedKind(row, { biginVideo = false, otherVideo = false } = {}) {
+  const fallback = !!(row.video || biginVideo);
+  if (row.itype === 'video' || row.itype === 'store') { const video = row.itype === 'video'; return { video, by: 'itype', fallback, mismatch: video !== !!(fallback || otherVideo) }; }
+  return { video: fallback, by: 'fallback', fallback, mismatch: false };
+}
 
 // 'M/D/YYYY' or 'M/D/YYYY H:MM[:SS]' (Google Sheets US format) → { d: 'YYYY-MM-DD', t: ms }
 export function usDate(s) {
@@ -50,7 +65,8 @@ export function standardiseRouting(rows, { storeOf, cutoff } = {}) {
       id: String(r['Lead ID'] || '').trim(), d: sub.d, ts: sub.t, phone, validPhone: !!phone && /^[6-9]/.test(phone) && raw.length <= 12,
       storeRaw, s: (storeOf && storeOf(storeRaw)) || '', prods, cat: cleanCategory(catRaw), catRaw, vd: vd ? vd.d : '', vdRaw: String(r['Expected visit date'] || '').trim(),
       vtKind: vt.kind, vtFrom: vt.from, disc: /^(na|n\/a|nil|no|none|-|0)$/i.test(disc) ? '' : disc, discRaw: disc,
-      remarks: !!String(r['Remarks'] || '').trim(), video: /video/i.test(String(r['Remarks'] || '')) ? 1 : 0, // remark asks for a video consultation (owner, 23 Oct 2026) by: String(r['Submitted by'] || '').trim(),
+      remarks: !!String(r['Remarks'] || '').trim(), video: /video/i.test(String(r['Remarks'] || '')) ? 1 : 0, // remark asks for a video consultation (owner, 23 Oct 2026)
+      by: String(r['Submitted by'] || '').trim(), itypeRaw: String(r['Interaction type'] ?? '').trim(), itype: interactionKind(r['Interaction type']),
       testName: TEST_NAME.test(String(r['Customer name'] || '').trim()),
     });
   }
@@ -64,6 +80,7 @@ export function standardiseRouting(rows, { storeOf, cutoff } = {}) {
     const f = [];
     if (x.test) f.push('test_row');
     if (!x.validPhone) f.push('invalid_phone');
+    if (x.itype === 'unknown') f.push('interaction_unrecognised');
     if (x.phone && count.get(x.phone) > 1) f.push('repeat_phone');
     if (!x.id) f.push('no_lead_id'); else if (seenId.has(x.id)) f.push('duplicate_lead_id'); seenId.add(x.id);
     if (!x.s) f.push('store_unmapped');
