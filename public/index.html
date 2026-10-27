@@ -285,6 +285,19 @@ td.strong{font-weight:600}
 .wh{position:relative;width:100%;aspect-ratio:4/5;max-height:900px;margin-top:14px;border:1px solid #E3DFD4;border-radius:10px;overflow:hidden;background:#F8F7F3}.wh iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .jn b{font-size:12.5px}.jn span{font-size:11px;color:#5B6068}
 .jn.ok{background:#DCE9EF;border-color:#B9D2DD}.jn.gap{background:#F6E1D1;border-color:#E9B999;border-style:dashed}.jn.smp{background:#FBEFD5;border-color:#EAD3A0}
+/* Phones (audit 27 Oct 2026): the tab bar is a dropdown (built in bind() from the same links) and every tap target is at least 44 px. */
+.wl-tabsel{display:none}
+@media (max-width:767px){
+  .wl-tabs{display:none}
+  .wl-tabsel{display:block;width:100%;min-height:44px;margin:0 0 6px;padding:10px 14px;font-family:inherit;font-size:15px;font-weight:600;border:1px solid #E3DFD4;border-radius:8px;background:#fff;color:#1B1F24}
+  .nbtn,.wl-btn,.wl-seg button,.dp-btn,.wl select,.wl input,.pager a{min-height:44px}
+  .wl-pills{align-items:center}.wl-pills .wl-btn{min-height:44px !important}
+  a.wl-pill,td a,.wl-ch a{display:inline-flex;align-items:center;min-height:44px}
+  .side .nav-group a{min-height:44px;align-items:center}
+  .crumbs{align-items:center;row-gap:0}.crumbs a{display:inline-flex;align-items:center;min-height:44px}
+  tr.cx-row td{height:44px}
+  .k-i::after{content:'';position:absolute;inset:-14px}
+}
 @media (max-width:860px){.pf-row{grid-template-columns:1fr 70px;row-gap:4px}.pf-bar{grid-column:1 / -1}.pf-p,.pf-row>div:last-child{display:none}.jl{flex-direction:column;align-items:stretch}.jr{grid-template-columns:repeat(2,minmax(0,1fr))}.jn::after{display:none}}
 
 
@@ -3125,6 +3138,13 @@ const RET = (() => {
 })();
 
 function bind(){
+  // Phones: a dropdown copy of each tab bar (same links, same order); CSS shows one or the other at 768 px.
+  document.querySelectorAll('nav.wl-tabs').forEach((nav) => {
+    const sel = document.createElement('select'); sel.className = 'wl-tabsel'; sel.setAttribute('aria-label', nav.getAttribute('aria-label') || 'Dashboard pages');
+    nav.querySelectorAll('a.wl-tab').forEach((a) => { const o = new Option(a.textContent.trim(), a.getAttribute('href')); o.selected = a.classList.contains('on'); sel.add(o); });
+    sel.addEventListener('change', () => { location.hash = sel.value.replace(/^#/, ''); });
+    nav.before(sel);
+  });
   document.querySelectorAll('select[data-f]').forEach((el) => el.addEventListener('change', () => { F[el.dataset.f] = el.value; if (el.dataset.f === 'city' || el.dataset.f === 'format') F.store = 'all'; if (el.dataset.f === 'mcity') F.mstore = 'all'; rerender(); }));
   document.querySelectorAll('[data-cx]').forEach((el) => { const go = () => { const c = el.dataset.cx; F.cx[c] = !F.cx[c]; const y = window.scrollY; rerender(); window.scrollTo(0, y); }; el.addEventListener('click', go); el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }); });
   document.querySelectorAll('[data-ex]').forEach((el) => { const go = () => { const k = el.dataset.ex; F.ex[k] = !F.ex[k]; const y = window.scrollY; rerender(); window.scrollTo(0, y); }; el.addEventListener('click', go); el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }); });
