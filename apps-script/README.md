@@ -7,7 +7,7 @@ Runs as **you**, with the BigQuery access you already use in the console. Free (
 2. **Project Settings** (gear) → tick **Show "appsscript.json" manifest file in editor**.
 3. In the editor, replace the contents of `appsscript.json` with this folder's `appsscript.json`, and of `Code.gs` with `SalesToDashboard.gs`. Save.
 4. **Project Settings → Script properties → Add**:
-   * `DASHBOARD_URL` = `https://fo-dashboard.frido-stf.workers.dev`
+   * `DASHBOARD_URL` = `https://fo.stffrido.workers.dev`
    * `ADMIN_KEY` = the same value as `ADMIN_KEY` in Cloudflare
 5. Pick **backfill** in the function menu → **Run**. Approve the permissions prompt (BigQuery, external requests, triggers, email).
    It loads 1 Sep 2026 → yesterday, month by month (watch **Execution log**).
