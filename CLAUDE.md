@@ -13,6 +13,12 @@ Frido Founders Office dashboard. Owner: Abdal (AVP Founders Office). Deployed fr
 - Sales source = BigQuery via apps-script/SalesToDashboard.gs (Apps Script as the user, daily 08:00 IST, last 7 days) → POST /admin/ingest-sales → KV monthly gzip blocks sales:m:YYYY-MM + sales:index → src/clean.js. Metrics cached in KV (metrics:cache). Gross = qty×price; revenue = gross − discount; keep cancelled/refunded. No service account. Never print or commit customer data (public repo).
 - Open items: DSR names for FRIDO_0022–0025; stage-history (Bigin DealHistory) not yet used.
 
+## Snapshots (audit 27 Oct 2026 — Error 1102 fix)
+- `/api/pdp` and `/api/metrics` never compute. They serve KV snapshots `pdp:snap` / `metrics:snap` (stored JSON string, with `snapshot.builtAt`), or JSON 503 `{ warming: true }` before the first build. Per-user scoping (`filterMetrics`, dates-only roles) still runs on read.
+- Builds run in cron, each in its own invocation (own 128 MB): `*/15` = PDP Inventories read → `buildSnapshot('pdp')`; `7-59/15` = `buildSnapshot('metrics')`. A build is skipped when its version (`pdpVersion` / `metricsVersion`: sales `uploadedAt`, Bigin refresh, cutoff, 15-min bucket, PDP stage `changedAt`) is unchanged. Sales ingest and DSR alias edits no longer clear a cache — the version changes (or `metrics:snap:meta` is deleted) and the next cron run rebuilds.
+- Admin: `GET /admin/snapshot` (last build, last try, last error per snapshot — a try newer than the build means it was killed for memory/CPU), `POST /admin/snapshot?which=pdp|metrics` (force), `POST /admin/pdp-refresh` also rebuilds the PDP snapshot.
+- Sales loader is `src/sales.js` `salesCombined()`: months read one at a time, each line straight to its engine row (one copy; `keepClean` only for `/admin/sales.csv`). The old loader held three full copies (~144 MB at 100k lines). `tests/sales.test.mjs` proves identical output. Workers Paid plan (frido-stf account) — cron builds need it.
+
 ## PDP inventories (added Oct 2026)
 ### Current dashboard — rebuilt 23–24 Oct 2026 (SOP 02 + Whimsical "Final PDP routing mechanism")
 - **Tabs**: Overview · Bigin pipeline · TAT & SLAs · Store routing · Video calls · Sources & gaps · Products · Lost leads · Definitions. Customer journey, Backend agents, Follow-up, Revenue and Data quality were retired 24 Oct (their useful cards moved: lead cohorts + share of store sales → Overview, agent scorecard → Bigin pipeline, LimeChat → Bigin daily coverage → Sources & gaps). Old `#/retail/pdp/<removed tab>` links fall back to Overview.

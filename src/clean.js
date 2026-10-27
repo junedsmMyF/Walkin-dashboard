@@ -25,13 +25,15 @@ export function excludedSummary(rows) {
     refunded: v.filter((o) => !o.canc && o.fs === 'refunded').length, partially_refunded: v.filter((o) => !o.canc && o.fs === 'partially_refunded').length };
 }
 
+export const toEngineRow = (r) => ({
+  'POS Order ID': r.order_id, 'Shopify Order ID': r.order_id,
+  'POS Created At': r.order_date, 'Store ID': r.store_id, 'Store Name': r.store_name,
+  'Customer Phone': r.phone, 'Customer Email': '', 'Employee Name': r.employee_name || '',
+  'Order Type': r.order_type === 'CASH_AND_CARRY' ? 'RETAIL' : r.order_type === 'ONLINE_ORDER' ? 'ONLINE' : String(r.order_type || '').toUpperCase(),
+  'Product Name': r.product_name, Quantity: r.quantity, 'Ret/Exc': '-',
+  __gross: r.gross, __net: r.net,
+});
+
 export function cleanToEngineRows(rows) {
-  return rows.filter((r) => !isExcluded(r)).map((r) => ({
-    'POS Order ID': r.order_id, 'Shopify Order ID': r.order_id,
-    'POS Created At': r.order_date, 'Store ID': r.store_id, 'Store Name': r.store_name,
-    'Customer Phone': r.phone, 'Customer Email': '', 'Employee Name': r.employee_name || '',
-    'Order Type': r.order_type === 'CASH_AND_CARRY' ? 'RETAIL' : r.order_type === 'ONLINE_ORDER' ? 'ONLINE' : String(r.order_type || '').toUpperCase(),
-    'Product Name': r.product_name, Quantity: r.quantity, 'Ret/Exc': '-',
-    __gross: r.gross, __net: r.net,
-  }));
+  return rows.filter((r) => !isExcluded(r)).map(toEngineRow);
 }

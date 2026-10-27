@@ -4,7 +4,7 @@ import { parseCsv } from './csv.js';
 import { istDate, addDays, dsrDate, phone10, biginDate } from './dates.js';
 import { computeMetrics } from './metrics.js';
 import { standardizeTab, combineTabs } from './standardize.js';
-import { cleanToEngineRows, excludedSummary } from './clean.js';
+import { gunzipText, readMonth, salesCombined } from './sales.js';
 import { buildBotTables } from './bot/tables.js';
 import { syncBotTables } from './bot/sync.js';
 import { ask, checkSql, MODELS, MODEL_CHAIN, runModel } from './bot/ask.js';
@@ -55,24 +55,6 @@ const tabLabel = (u, i) => { const g = (u.match(/[?&]gid=(\d+)/) || [])[1]; retu
 // Stored as gzip-compressed column blocks, one per month (KV key sales:m:YYYY-MM), plus an index (sales:index).
 // Each daily run sends only a date range (last 7 days); those dates are replaced inside their month blocks.
 const gzipBytes = async (text) => new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
-const gunzipText = async (buf) => new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
-async function readMonth(env, ym) { const b = await env.DASH_KV.get('sales:m:' + ym, 'arrayBuffer'); return b ? JSON.parse(await gunzipText(b)) : null; }
-async function salesCombined(env) {
-  const index = await env.DASH_KV.get('sales:index', 'json');
-  let cols = null, rows = [];
-  if (index && Object.keys(index.months || {}).length) {
-    const blocks = await Promise.all(Object.keys(index.months).sort().map((ym) => readMonth(env, ym)));
-    for (const b of blocks) if (b) { cols = cols || b.columns; const pos = cols.map((c) => b.columns.indexOf(c)); for (const r of b.rows) rows.push(pos.map((k) => (k < 0 ? null : r[k]))); }
-  } else {
-    const buf = await env.DASH_KV.get('sales:clean', 'arrayBuffer');     // earlier one-file uploads, if any
-    if (buf) { const p = JSON.parse(await gunzipText(buf)); cols = p.columns; rows = p.rows; }
-  }
-  if (!cols) throw new Error('Waiting for the first BigQuery sales run (Apps Script: run backfill once).');
-  const objs = rows.map((r) => Object.fromEntries(cols.map((c, k) => [c, r[k]])));
-  const meta = index || (await env.DASH_KV.get('sales:clean:meta', 'json')) || {};
-  const hours = meta.uploadedAt ? (Date.now() - Date.parse(meta.uploadedAt)) / 3600e3 : 999;
-  return { rows: cleanToEngineRows(objs), cleanRows: objs, columns: cols, meta, excluded: excludedSummary(objs), late: hours > 30, hoursSinceUpload: Math.round(hours), version: meta.uploadedAt || 'none' };
-}
 // Merge a date range into the monthly blocks: rows for dates in [from, to] are replaced; everything else is kept.
 async function ingestSales(env, payload) {
   const { columns, rows, from, to } = payload;
@@ -95,8 +77,7 @@ async function ingestSales(env, payload) {
   }
   Object.assign(index, { uploadedAt: new Date().toISOString(), lastRange: { from, to, rows: rows.length }, summary: payload.summary || null });
   await env.DASH_KV.put('sales:index', JSON.stringify(index));
-  await env.DASH_KV.delete('metrics:cache');
-  return index;
+  return index; // new uploadedAt changes both snapshot versions: the next cron run rebuilds them
 }
 const csvCell = (v) => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 
@@ -173,15 +154,17 @@ async function botTest(env) {
   return rows;
 }
 
-async function metrics(env, ctx) {
+// Version of the walk-in metrics inputs: a snapshot is rebuilt only when it changes (DSR is live, so at least every 15 min).
+async function metricsVersion(env) {
   const meta = (await biginMeta(env)) || {};
   const cutoff = addDays(istDate(), -1); // T-1 for every source, so all three line up
-  // Compute once, serve many: the result is kept in KV for 15 minutes (DSR is live) and recomputed at once when
-  // new sales arrive (the ingest clears it) or Bigin refreshes (part of the key).
   const idx = await env.DASH_KV.get('sales:index', 'json');
-  const ver = [idx?.uploadedAt || 'none', meta.refreshedAt || 'none', cutoff].join('|');
-  const cached = await env.DASH_KV.get('metrics:cache', 'json');
-  if (cached && cached.k === ver && Date.now() - cached.at < 15 * 60e3) return json(cached.body, 200, { 'cache-control': 'private, max-age=60', 'x-metrics-cache': 'hit' });
+  return ['m1', idx?.uploadedAt || 'none', meta.refreshedAt || 'none', cutoff, Math.floor(Date.now() / 900e3)].join('|');
+}
+// Full walk-in metrics build (cron only — never inside a page request).
+async function buildMetrics(env) {
+  const meta = (await biginMeta(env)) || {};
+  const cutoff = addDays(istDate(), -1); // T-1 for every source, so all three line up
   const [sales, dsrRows, leads] = await Promise.all([salesCombined(env), sheet(env.DSR_CSV_URL, env), biginLeads(env)]);
   const salesRows = sales.rows;
   const dsrAliases = (await env.DASH_KV.get('dsr:aliases', 'json')) || {};
@@ -191,19 +174,23 @@ async function metrics(env, ctx) {
     sales: { source: 'bigquery', status: sales.late ? 'stale' : 'live', uploadedAt: sales.meta.uploadedAt, hoursSinceUpload: sales.hoursSinceUpload, lastOrderDate: m.lastDates.sales, lines: sales.rows.length, run: sales.meta.summary || null, lastRange: sales.meta.lastRange || null, excluded: sales.excluded, months: sales.meta.months ? Object.keys(sales.meta.months).length : null },
     dsr: { status: (SHEET_STATUS.get(env.DSR_CSV_URL) || { ok: true }).ok ? 'live' : 'stale', fetchedAt: new Date().toISOString(), lastDate: m.lastDates.dsr, link: SHEET_STATUS.get(env.DSR_CSV_URL) || null },
   };
-  ctx.waitUntil(env.DASH_KV.put('metrics:cache', JSON.stringify({ k: ver, at: Date.now(), body: m })));
-  return json(m, 200, { 'cache-control': 'private, max-age=60', 'x-metrics-cache': 'miss' });
+  return m;
 }
 
 // ---- PDP inventories: Callback Requests (Bigin) × BigQuery sales; LimeChat + PDP analytics are sample until connected ----
-async function pdpMetrics(env, ctx) {
+// Version of the PDP inputs (stage changes, 15-min bucket for ages and dwell times, sales upload, Bigin refresh, cutoff).
+async function pdpVersion(env) {
   const meta = (await biginMeta(env)) || {};
   const cutoff = addDays(istDate(), -1);
   const idx = await env.DASH_KV.get('sales:index', 'json');
   const pinv = await pdpInventories(env);
-  const ver = ['pdp5', pinv.meta?.changedAt || pinv.meta?.refreshedAt || 'none', Math.floor(Date.now() / 900e3), idx?.uploadedAt || 'none', meta.refreshedAt || 'none', cutoff].join('|');
-  const cached = await env.DASH_KV.get('pdp:cache', 'json');
-  if (cached && cached.k === ver && Date.now() - cached.at < 15 * 60e3) return json(cached.body, 200, { 'cache-control': 'private, max-age=60', 'x-pdp-cache': 'hit' });
+  return ['pdp5', pinv.meta?.changedAt || pinv.meta?.refreshedAt || 'none', Math.floor(Date.now() / 900e3), idx?.uploadedAt || 'none', meta.refreshedAt || 'none', cutoff].join('|');
+}
+// Full PDP build (cron only — never inside a page request).
+async function buildPdp(env) {
+  const meta = (await biginMeta(env)) || {};
+  const cutoff = addDays(istDate(), -1);
+  const pinv = await pdpInventories(env);
   const [callbacks, walkin] = await Promise.all([biginCallbacks(env), biginLeads(env)]);
   let limechatRows = null, lcErr = null;
   if (env.LIMECHAT_CSV_URL) { try { limechatRows = await sheet(env.LIMECHAT_CSV_URL, env); } catch (e) { lcErr = String(e.message || e); } }
@@ -218,9 +205,32 @@ async function pdpMetrics(env, ctx) {
     sales: { status: sales.error ? 'error' : sales.late ? 'stale' : 'live', uploadedAt: sales.meta?.uploadedAt || null, error: sales.error || null },
     limechat: { status: limechatRows ? ((SHEET_STATUS.get(env.LIMECHAT_CSV_URL) || { ok: true }).ok ? 'live' : 'stale') : (env.LIMECHAT_CSV_URL ? 'error' : 'not_configured'), rows: limechatRows ? limechatRows.length : 0, error: lcErr, link: env.LIMECHAT_CSV_URL ? SHEET_STATUS.get(env.LIMECHAT_CSV_URL) || null : null }, routing: { status: routingRows ? ((SHEET_STATUS.get(env.ROUTING_CSV_URL) || { ok: true }).ok ? 'live' : 'stale') : (env.ROUTING_CSV_URL ? 'error' : 'not_configured'), rows: routingRows ? routingRows.length : 0, error: rtErr }, pdp: { status: 'sample' },
   };
-  ctx.waitUntil(env.DASH_KV.put('pdp:cache', JSON.stringify({ k: ver, at: Date.now(), body: m })));
-  return json(m, 200, { 'cache-control': 'private, max-age=60', 'x-pdp-cache': 'miss' });
+  return m;
 }
+
+// ---- Snapshots (audit 27 Oct 2026): builds run in cron and are stored in KV; page requests only read them ----
+const SNAPS = { pdp: { version: pdpVersion, build: buildPdp }, metrics: { version: metricsVersion, build: buildMetrics } };
+async function buildSnapshot(env, name, { force = false } = {}) {
+  const S = SNAPS[name]; const k = await S.version(env);
+  const cur = await env.DASH_KV.get(name + ':snap:meta', 'json');
+  if (!force && cur && cur.k === k) return { name, skipped: true, k, builtAt: cur.at };
+  // Attempt marker first: a build killed for memory or CPU cannot record its own failure, so a try newer than the last
+  // snapshot (see /admin/snapshot) means the build is not finishing.
+  const t0 = Date.now(); await env.DASH_KV.put(name + ':snap:try', JSON.stringify({ k, at: new Date(t0).toISOString() }));
+  let body;
+  try { body = await S.build(env); } catch (e) { const err = { k, at: new Date().toISOString(), error: String(e.message || e).slice(0, 300) }; await env.DASH_KV.put(name + ':snap:error', JSON.stringify(err)); return { name, built: false, ...err }; }
+  const at = new Date().toISOString();
+  body.snapshot = { builtAt: at, version: k };
+  await env.DASH_KV.put(name + ':snap', JSON.stringify(body));
+  await env.DASH_KV.put(name + ':snap:meta', JSON.stringify({ k, at, ms: Date.now() - t0 }));
+  return { name, built: true, k, builtAt: at, ms: Date.now() - t0 };
+}
+// Snapshot as stored (string — no parse for the common path). null until the first cron build.
+const readSnapshot = (env, name) => env.DASH_KV.get(name + ':snap', 'text');
+const notReady = () => json({ error: 'Data is being prepared. Try again in a few minutes.', warming: true }, 503, { 'retry-after': '120' });
+const snapHeaders = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store' };
+async function metrics(env) { const t = await readSnapshot(env, 'metrics'); return t ? new Response(t, { headers: snapHeaders }) : notReady(); }
+async function pdpMetrics(env) { const t = await readSnapshot(env, 'pdp'); return t ? new Response(t, { headers: snapHeaders }) : notReady(); }
 
 // ---- Meta ads: Lead Gen leads (Bigin Meta pipeline, T-1); CTWA, spend and revenue are sample until connected ----
 async function metaMetrics(env, ctx) {
@@ -397,7 +407,7 @@ async function adminDsr(request, env, url) {
     else if (f.get('action') === 'unmap') { delete aliases[nk]; msg = `"${name}" is no longer mapped.`; }
     else if (!valid.has(sid)) msg = 'Pick a store.';
     else { aliases[nk] = sid; msg = `"${name}" now counts as ${valid.get(sid)}.`; }
-    await env.DASH_KV.put('dsr:aliases', JSON.stringify(aliases)); await env.DASH_KV.delete('metrics:cache');
+    await env.DASH_KV.put('dsr:aliases', JSON.stringify(aliases)); await env.DASH_KV.delete('metrics:snap:meta'); // next cron run rebuilds
   }
   let rows = []; let err = '';
   try { rows = await sheet(env.DSR_CSV_URL, env); } catch (e) { err = String(e.message || e); }
@@ -543,10 +553,10 @@ export default {
         if (!canWalkin(id)) {
           // PDP / Meta / retention-only roles: those pages need just the data dates and the store list — no walk-in figures
           if (!['pdp', 'meta', 'retention'].some((p) => can(id, p))) return json({ error: 'You do not have access to the walk-in dashboard.' }, 403);
-          const r0 = await metrics(env, ctx); if (r0.status !== 200) return r0; const m0 = await r0.json();
+          const r0 = await metrics(env); if (r0.status !== 200) return r0; const m0 = await r0.json();
           return json({ cutoff: m0.cutoff, startDate: m0.startDate, stores: m0.stores, datesOnly: true }, 200, { 'cache-control': 'private, no-store' });
         }
-        const r = await metrics(env, ctx);
+        const r = await metrics(env);
         if (!id.enforced || id.role === 'admin' || r.status !== 200) return r;
         const scoped = filterMetrics(await r.json(), id);
         return json(scoped, 200, { 'cache-control': 'private, no-store' });
@@ -554,7 +564,7 @@ export default {
       if (url.pathname === '/api/pdp') {
         if (!id.approved) return json({ error: id.reason, auth: false }, 401);
         if (!can(id, 'pdp')) return json({ error: 'You do not have access to the PDP inventories dashboard.' }, 403);
-        return await pdpMetrics(env, ctx);
+        return await pdpMetrics(env);
       }
       if (url.pathname === '/api/meta') {
         if (!id.approved) return json({ error: id.reason, auth: false }, 401);
@@ -647,7 +657,7 @@ export default {
           return json({ ok: true, ...meta });
         }
         if (url.pathname === '/admin/sales.csv') {
-          const s = await salesCombined(env);
+          const s = await salesCombined(env, { keepClean: true });
           const body = [s.columns.map(csvCell).join(','), ...s.cleanRows.map((r) => s.columns.map((c) => csvCell(r[c])).join(','))].join('\r\n');
           return new Response('\ufeff' + body, { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="sales-standardized-${new Date().toISOString().slice(0, 10)}.csv"`, 'cache-control': 'no-store', 'x-robots-tag': 'noindex' } });
         }
@@ -679,7 +689,9 @@ export default {
           const rows = await botTest(env); const esc2 = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
           return html(`<h1>Bot test — ${rows.filter((r) => r.pass).length} of ${rows.length} correct</h1><table border="1" cellpadding="6" style="border-collapse:collapse;font-size:13px"><tr><th>Question</th><th>Expected (exact SQL)</th><th>Bot</th><th></th><th>Bot answer</th><th>Bot SQL</th></tr>${rows.map((r) => `<tr><td>${esc2(r.q)}</td><td>${esc2(r.expected)}</td><td>${esc2(r.got)}</td><td>${r.pass ? '✅' : '❌'}</td><td>${esc2(r.answer)}</td><td><code style="font-size:11px">${esc2(r.sql)}</code></td></tr>`).join('')}</table>`);
         }
-        if (url.pathname === '/admin/pdp-refresh' && request.method === 'POST') return json(await refreshPdpInventories(env)); // read-only
+        if (url.pathname === '/admin/pdp-refresh' && request.method === 'POST') { const r = await refreshPdpInventories(env); return json({ ...r, snapshot: await buildSnapshot(env, 'pdp', { force: true }) }); } // Bigin read-only
+        if (url.pathname === '/admin/snapshot' && request.method === 'GET') return json(Object.fromEntries(await Promise.all(Object.keys(SNAPS).map(async (n) => [n, { meta: await env.DASH_KV.get(n + ':snap:meta', 'json'), lastTry: await env.DASH_KV.get(n + ':snap:try', 'json'), lastError: await env.DASH_KV.get(n + ':snap:error', 'json') }]))));
+        if (url.pathname === '/admin/snapshot' && request.method === 'POST') { const which = url.searchParams.get('which'); if (!SNAPS[which]) return json({ ok: false, error: 'which must be pdp or metrics' }, 400); return json(await buildSnapshot(env, which, { force: true })); }
         if (url.pathname === '/admin/refresh' && request.method === 'POST') {
           const r = await refreshBigin(env);
           return html(`<h1>${r.ok ? 'Refreshed' : 'Refresh failed'}</h1><p>${r.ok ? `${r.count} walk-in leads loaded.` : String(r.error).replace(/</g, '&lt;')}</p><a class="btn" href="/admin?key=${encodeURIComponent(url.searchParams.get('key'))}">Back</a>`);
@@ -692,7 +704,8 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    if (event.cron === '*/15 * * * *') { ctx.waitUntil(refreshPdpInventories(env).catch(() => {})); return; } // every 15 min: PDP Inventories stages (TATs to +-15 min)
+    if (event.cron === '*/15 * * * *') { ctx.waitUntil(refreshPdpInventories(env).catch(() => {}).then(() => buildSnapshot(env, 'pdp')).catch(() => {})); return; } // every 15 min: PDP Inventories stages (TATs to +-15 min), then the PDP snapshot
+    if (event.cron === '7-59/15 * * * *') { ctx.waitUntil(buildSnapshot(env, 'metrics').catch(() => {})); return; } // walk-in metrics snapshot in its own run (own memory budget)
     if (event.cron === '10 * * * *') { ctx.waitUntil((env.RETENTION_CSV_URL ? retentionBroadcasts(env, true) : Promise.resolve()).catch(() => {})); return; } // hourly: retention broadcast cache
     ctx.waitUntil(refreshBigin(env).then(() => refreshPdpInventories(env)).then(() => rebuildBot(env)).catch(() => {}));
   },
