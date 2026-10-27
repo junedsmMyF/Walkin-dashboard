@@ -12,6 +12,7 @@ import { identify, can, canBot, canWalkin, filterMetrics, PAGES, ROLES, makeSess
 import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, normStoreName, suggestStore } from './stores.js';
 import { refreshBigin, biginLeads, biginCallbacks, biginMetaAds, biginMeta, biginConnected, startConnect, finishConnect, refreshPdpInventories, pdpInventories } from './bigin.js';
 import { computePdp } from './pdp.js';
+import { pdpAnalytics } from './ga4.js';
 import { computeMeta } from './meta.js';
 import { computeRetention, parseBroadcastCsv, storeOrders, sampleInputs, packBroadcasts, unpackBroadcasts } from './retention.js';
 import { standardiseLimechat } from './limechat.js';
@@ -198,12 +199,15 @@ async function buildPdp(env) {
   if (env.ROUTING_CSV_URL) { try { routingRows = await sheet(env.ROUTING_CSV_URL, env); } catch (e) { rtErr = String(e.message || e); } }
   let sales = { rows: [], meta: {}, late: false };
   try { sales = await salesCombined(env); } catch (e) { sales.error = String(e.message || e); }
-  const m = computePdp({ callbacks: callbacks || [], walkinLeads: walkin || [], salesRows: sales.rows, limechatRows, routingRows, pdpInv: pinv.recs ? pinv : null, pdpInvFrom: env.PDP_INV_FROM || null, startDate: env.PDP_START_DATE || '2026-10-08', cutoff, backendAgents: String(env.BACKEND_AGENTS || '').split(',').map((x) => x.trim()).filter(Boolean) });
+  // PDP views / CTA clicks: GA4 when GA4_PDP_CSV_URL is set (src/ga4.js), else the sample stays on and is labelled
+  const ga = await pdpAnalytics(env, sheet, { from: env.PDP_START_DATE || '2026-10-08', to: cutoff });
+  const m = computePdp({ sample: ga.status !== 'live', callbacks: callbacks || [], walkinLeads: walkin || [], salesRows: sales.rows, limechatRows, routingRows, pdpInv: pinv.recs ? pinv : null, pdpInvFrom: env.PDP_INV_FROM || null, startDate: env.PDP_START_DATE || '2026-10-08', cutoff, backendAgents: String(env.BACKEND_AGENTS || '').split(',').map((x) => x.trim()).filter(Boolean) });
+  if (ga.status === 'live') m.pdpViews = ga.data;
   m.sources = {
     pdpinv: { status: pinv.recs ? pinv.meta?.status || 'ok' : (pinv.meta?.status === 'error' ? 'error' : 'waiting_first_refresh'), refreshedAt: pinv.meta?.refreshedAt || null, records: pinv.recs ? pinv.recs.length : 0, error: pinv.meta?.status === 'error' ? pinv.meta.error || null : null },
     callback: { status: callbacks ? meta.status || 'ok' : (env.CALLBACK_PIPELINE_ID ? 'waiting_first_refresh' : 'not_configured'), refreshedAt: meta.refreshedAt || null, records: callbacks ? callbacks.length : 0 },
     sales: { status: sales.error ? 'error' : sales.late ? 'stale' : 'live', uploadedAt: sales.meta?.uploadedAt || null, error: sales.error || null },
-    limechat: { status: limechatRows ? ((SHEET_STATUS.get(env.LIMECHAT_CSV_URL) || { ok: true }).ok ? 'live' : 'stale') : (env.LIMECHAT_CSV_URL ? 'error' : 'not_configured'), rows: limechatRows ? limechatRows.length : 0, error: lcErr, link: env.LIMECHAT_CSV_URL ? SHEET_STATUS.get(env.LIMECHAT_CSV_URL) || null : null }, routing: { status: routingRows ? ((SHEET_STATUS.get(env.ROUTING_CSV_URL) || { ok: true }).ok ? 'live' : 'stale') : (env.ROUTING_CSV_URL ? 'error' : 'not_configured'), rows: routingRows ? routingRows.length : 0, error: rtErr }, pdp: { status: 'sample' },
+    limechat: { status: limechatRows ? ((SHEET_STATUS.get(env.LIMECHAT_CSV_URL) || { ok: true }).ok ? 'live' : 'stale') : (env.LIMECHAT_CSV_URL ? 'error' : 'not_configured'), rows: limechatRows ? limechatRows.length : 0, error: lcErr, link: env.LIMECHAT_CSV_URL ? SHEET_STATUS.get(env.LIMECHAT_CSV_URL) || null : null }, routing: { status: routingRows ? ((SHEET_STATUS.get(env.ROUTING_CSV_URL) || { ok: true }).ok ? 'live' : 'stale') : (env.ROUTING_CSV_URL ? 'error' : 'not_configured'), rows: routingRows ? routingRows.length : 0, error: rtErr }, pdp: { status: ga.status === 'live' ? 'live' : ga.status === 'not_connected' ? 'sample' : ga.status, rows: ga.data?.pdpDaily.length || 0, from: ga.data?.from || null, to: ga.data?.to || null, unknownCtas: ga.data?.unknownCtas || {}, skipped: ga.data?.skipped || 0, error: ga.error || null },
   };
   return m;
 }

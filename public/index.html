@@ -1639,7 +1639,7 @@ function textAgg(r){
   };
 }
 function pdpAgg(r){
-  const S = PDATA.sample; if (!S) return [];
+  const S = PDATA.pdpViews || PDATA.sample; if (!S) return []; // pdpViews = GA4 (src/ga4.js) once connected
   const m = S.pdps.map((p, i) => ({ i, n: p.n, c: p.c, views: 0, clicks: 0, wa: 0, call: 0 }));
   for (const x of S.pdpDaily) if (inPR(x.d, r)) { const o = m[x.p]; o.views += x.views; o.clicks += x.clicks; o.wa += x.wa; o.call += x.call; }
   return m;
@@ -1659,7 +1659,7 @@ function pdpPills(){
   out.push(cut ? srcPill(s.pdpinv, `WhatsApp · Bigin from ${dpShort(cut)}`, 'Bigin PDP Inventories') : srcPill(s.limechat, 'WhatsApp · LimeChat live', 'LimeChat export'));
   if (cut && s.limechat && !['ok', 'live'].includes(s.limechat.status)) out.push(srcPill(s.limechat, '', `LimeChat export (before ${dpShort(cut)})`));
   out.push(srcPill(s.routing, `Routing sheet live · ${nf(s.routing?.rows || 0)} rows`, 'Routing sheet'));
-  if (s.pdp) out.push(s.pdp.status === 'sample' ? pill('p-peach', 'PDP views: sample', 'Until GA4 / Shopify is connected') : pill('p-teal', 'PDP views live'));
+  if (s.pdp) out.push(s.pdp.status === 'sample' ? pill('p-peach', 'PDP views: sample', 'Until GA4 / Shopify is connected') : s.pdp.status === 'live' ? pill('p-teal', 'PDP views · GA4 live') : s.pdp.status === 'empty' ? pill('p-grey', 'GA4 connected · no rows yet · sample shown') : pill('p-peach', 'GA4 not readable · sample shown', s.pdp.error || ''));
   if (s.sales?.status === 'stale') out.push(pill('p-peach', 'BigQuery sales upload is late')); else if (s.sales?.status === 'error') out.push(pill('p-peach', 'Sales not readable', s.sales.error || ''));
   const so = PDATA.signoff; if (so) out.push(`<a class="wl-pill ${so.open.length ? 'p-grey' : 'p-teal'}" href="#/retail/pdp/definitions" title="${esc(so.open.join(' · '))}">${nf(so.agreed.length)} rules agreed${so.open.length ? ` · ${nf(so.open.length)} open` : ''}</a>`);
   if (PDATA.snapshot?.builtAt) out.push(pill('p-grey', 'Built ' + new Date(PDATA.snapshot.builtAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }) + ' IST', 'Data snapshot, rebuilt every 15 minutes'));
@@ -2230,7 +2230,7 @@ function pSources(r){
       srow('LimeChat export', `WhatsApp leads before ${cut ? dpShort(cut) : 'the cutover'}; coverage check after`, 'Live (published sheet)', S.limechat, '—', nf(S.limechat?.rows || 0), 'v'),
       srow('Lead routing backend sheet', 'Store visits, video remarks, visit dates (WhatsApp DSR groups)', 'Live (published sheet)', S.routing, '—', nf(S.routing?.rows || 0), 'v'),
       srow('DevX orders (BigQuery)', 'Orders and revenue · unique order IDs', 'Daily 08:00 IST', S.sales, ts(S.sales?.uploadedAt), '—', 'v'),
-      srow('GA4 / Shopify', 'PDP views, CTA clicks', '—', S.pdp?.status === 'sample' ? 'sample' : S.pdp, '—', '—', 'v'),
+      srow('GA4 (BigQuery export)', 'PDP views, CTA clicks · date × product handle × CTA', S.pdp?.status === 'sample' ? 'Not connected · sample shown' : 'Every 15 min (published sheet)', S.pdp?.status === 'sample' ? 'sample' : S.pdp, '—', S.pdp?.rows ? nf(S.pdp.rows) : '—', 'u'),
     ]), 'v');
 
   // coverage checks on the data
@@ -2404,7 +2404,8 @@ function pProduct(r){
   const prods = pcard('Products bought' + DBT.o, 'Top 15 by revenue', Object.keys(pm).length ? wtable(['Product', 'Category', 'Units', 'Revenue'], Object.values(pm).sort((a, b) => b.net - a.net).slice(0, 15).map((o) => `<tr><td class="b" style="white-space:normal">${esc(o.p)}</td><td>${esc(o.c)}</td><td>${nf(o.q)}</td><td class="b">${inr(o.net)}</td></tr>`)) : '<p class="sub" style="margin-top:14px">No orders in this range.</p>', 'v');
 
   const m = pdpAgg(r).sort((a, b) => b.views - a.views);
-  const ga = pcard('PDP views and store CTA clicks', 'Illustrative until GA4 / Shopify page events are connected', wtable(['PDP', 'Views', 'Lead CTA clicks', 'CTR', 'WhatsApp', 'Call'], m.map((x) => `<tr><td class="b">${esc(x.n)}</td><td>${nf(x.views)}</td><td>${nf(x.clicks)}</td><td>${pct(x.clicks, x.views, 2)}</td><td>${nf(x.wa)}</td><td>${nf(x.call)}</td></tr>`)), 's');
+  const gaLive = !!PDATA.pdpViews;
+  const ga = pcard('PDP views and store CTA clicks', gaLive ? `GA4 · data ${dpShort(PDATA.pdpViews.from)} → ${dpShort(PDATA.pdpViews.to)} · lead CTA clicks = WhatsApp + Call` : 'Illustrative until GA4 / Shopify page events are connected', wtable(['PDP', 'Views', 'Lead CTA clicks', 'CTR', 'WhatsApp', 'Call'], m.map((x) => `<tr><td class="b">${esc(x.n)}</td><td>${nf(x.views)}</td><td>${nf(x.clicks)}</td><td>${pct(x.clicks, x.views, 2)}</td><td>${nf(x.wa)}</td><td>${nf(x.call)}</td></tr>`)), gaLive ? 'u' : 's');
 
   return kp + interest + pages + `<div class="wl-g2">${rank}${heat}</div>` + prods + ga +
     `<p class="wl-note">Leads, bought and conversion: leads whose first contact is in the range. Revenue and products: DevX orders billed in the range (order date), credited to a PDP lead (60 days, latest lead before the order).</p>`;
