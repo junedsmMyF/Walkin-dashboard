@@ -63,6 +63,12 @@ export function isAgentName(emp, agents) {
   return agents.some((a) => { const k = agentKey(a); if (!k.length) return false; if (k.join(' ') === e.join(' ')) return true;
     return k[0] === e[0] && (!k[1] || !e[1] || k[1][0] === e[1][0]); }); // "Raj B" ~ "Raj Bhardwaj"
 }
+// Metric-rule sign-off (owner). Served in /api/pdp as `signoff`: the Definitions tab lists it and the header pill counts it.
+export const SIGNOFF = {
+  agreed: ['One lead per phone · 30-day repeat rule · fresh lead after 30 days unless bought', 'Mobility and service queries not counted', 'CTA by today\'s conversation tag', 'Converted = DevX order within 60 days · latest lead before the order · unique order IDs', 'Routed (routing sheet) = qualified', 'Store visit = bought on the expected visit date · video call = video remark or video call arranged', 'Routed without a "video" remark but Bigin shows a video-call stage = video call', 'Interaction type in the routing sheet decides store visit vs video call; blank rows keep the earlier rule', 'WhatsApp from Bigin PDP Inventories from 22 Oct 2026'],
+  open: ['"Test Lead" and "Customer Success Lead" closures still count as leads', 'Monthly targets for the KPIs (Compare to → Target)', 'Orders also counted on Walk-in / Retail retention are kept on both dashboards'],
+};
+
 export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], limechatRows = null, routingRows = null, pdpInv = null, pdpInvFrom = null, startDate, cutoff, sample = true, backendAgents = [] }) {
   const callStart = startDate;
   const LC0 = limechatRows ? standardiseLimechat(limechatRows, { cutoff }) : null;
@@ -217,6 +223,7 @@ export function computePdp({ callbacks = [], walkinLeads = [], salesRows = [], l
   const salesDaily = new Map();
   for (const o of orders.values()) { if (!inRange(o.date)) continue; const k = o.date + '|' + o.store; const v = salesDaily.get(k) || { d: o.date, s: o.store, net: 0, gross: 0, n: 0 }; v.net += o.net; v.gross += o.gross; v.n++; salesDaily.set(k, v); }
   const out = {
+    signoff: SIGNOFF,
     startDate, callStart, cutoff, generatedAt: new Date().toISOString(), stores, text, routing,
     call: { leads, attributed, lines, pnames: pNames, salesDaily: [...salesDaily.values()].map((v) => ({ ...v, net: Math.round(v.net), gross: Math.round(v.gross) })), products: [...productRev.values()].map((v) => ({ ...v, net: Math.round(v.net), gross: Math.round(v.gross) })).sort((a, b) => b.net - a.net) },
     agents,

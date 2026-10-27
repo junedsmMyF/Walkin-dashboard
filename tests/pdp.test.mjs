@@ -95,3 +95,10 @@ test('routed lead counts as qualified whatever its stage; raw stage kept and mis
   const t = m.text.tickets[0];
   assert.deepEqual([t.st, t.sr, t.am, t.oc, t.rt, t.fl.includes('routed_stage_mismatch')], ['qualified', 'bot_only', 1, 'routed_store', 1, true]);
 });
+
+test('the API serves the rule sign-off list the header pill and Definitions read', async () => {
+  const { computePdp, SIGNOFF } = await import('../src/pdp.js');
+  const m = computePdp({ startDate: '2026-10-08', cutoff: '2026-10-14', sample: false, callbacks: [], salesRows: [] });
+  assert.deepEqual(m.signoff, SIGNOFF);
+  assert.ok(SIGNOFF.agreed.length >= 9 && SIGNOFF.open.length >= 1);
+});
