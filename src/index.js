@@ -690,6 +690,24 @@ export default {
           return html(`<h1>Bot test — ${rows.filter((r) => r.pass).length} of ${rows.length} correct</h1><table border="1" cellpadding="6" style="border-collapse:collapse;font-size:13px"><tr><th>Question</th><th>Expected (exact SQL)</th><th>Bot</th><th></th><th>Bot answer</th><th>Bot SQL</th></tr>${rows.map((r) => `<tr><td>${esc2(r.q)}</td><td>${esc2(r.expected)}</td><td>${esc2(r.got)}</td><td>${r.pass ? '✅' : '❌'}</td><td>${esc2(r.answer)}</td><td><code style="font-size:11px">${esc2(r.sql)}</code></td></tr>`).join('')}</table>`);
         }
         if (url.pathname === '/admin/pdp-refresh' && request.method === 'POST') { const r = await refreshPdpInventories(env); return json({ ...r, snapshot: await buildSnapshot(env, 'pdp', { force: true }) }); } // Bigin read-only
+        if (url.pathname === '/admin/routing-columns') {
+          // Audit task 3 (read-only): routing sheet column names and the distinct "Interaction type" values with counts —
+          // no names, phones or other row data. First filled date = when the column starts being used.
+          if (!env.ROUTING_CSV_URL) return json({ ok: false, error: 'ROUTING_CSV_URL is not set' }, 400);
+          const rows = await sheet(env.ROUTING_CSV_URL, env);
+          const headers = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+          const col = headers.find((h) => /^\s*interaction\s*type\s*$/i.test(h)) || headers.find((h) => /interaction/i.test(h)) || null;
+          const day = (r) => { const m = String(r['Submitted at'] || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : ''; };
+          const values = {}; let firstFilled = null, lastBlank = null;
+          for (const r of rows) {
+            const raw = col ? String(r[col] ?? '') : ''; const k = raw.trim() === '' ? '(blank)' : raw;
+            const v = (values[k] = values[k] || { rows: 0, first: null, last: null }); v.rows++; const d = day(r);
+            if (d) { if (!v.first || d < v.first) v.first = d; if (!v.last || d > v.last) v.last = d; }
+            if (raw.trim() && d && (!firstFilled || d < firstFilled)) firstFilled = d;
+            if (!raw.trim() && d && (!lastBlank || d > lastBlank)) lastBlank = d;
+          }
+          return json({ ok: true, rows: rows.length, headers, interactionColumn: col, firstFilled, lastBlank, values: Object.entries(values).sort((x, y) => y[1].rows - x[1].rows).map(([value, v]) => ({ value, ...v })) });
+        }
         if (url.pathname === '/admin/snapshot' && request.method === 'GET') return json(Object.fromEntries(await Promise.all(Object.keys(SNAPS).map(async (n) => [n, { meta: await env.DASH_KV.get(n + ':snap:meta', 'json'), lastTry: await env.DASH_KV.get(n + ':snap:try', 'json'), lastError: await env.DASH_KV.get(n + ':snap:error', 'json') }]))));
         if (url.pathname === '/admin/snapshot' && request.method === 'POST') { const which = url.searchParams.get('which'); if (!SNAPS[which]) return json({ ok: false, error: 'which must be pdp or metrics' }, 400); return json(await buildSnapshot(env, which, { force: true })); }
         if (url.pathname === '/admin/refresh' && request.method === 'POST') {
