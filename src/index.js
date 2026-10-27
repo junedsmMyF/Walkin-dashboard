@@ -527,10 +527,30 @@ async function adminPage(env, url) {
   <a class="btn" href="/api/status">Data status</a> <a class="btn" href="/">Open dashboard</a>`);
 }
 
+// ---- Privacy and indexing (audit 27 Oct 2026) ----
+const ROBOTS = 'User-agent: *\nDisallow: /\n';
+// Signed-out visitors get this tiny page instead of the app shell: it keeps the deep link (#/…) and carries no dashboard code.
+const toLogin = (login) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Sign in · Founders Office</title></head><body><script>location.replace(${JSON.stringify(login)} + '?next=' + encodeURIComponent(location.hash || '#/'));</script><noscript><a href="${login}">Sign in</a></noscript></body></html>`,
+  { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+// Every response: never indexed; anything that can differ by user is never stored in a shared cache.
+function harden(res) {
+  const r = new Response(res.body, res);
+  r.headers.set('x-robots-tag', 'noindex, nofollow');
+  const cc = r.headers.get('cache-control') || '';
+  if (!/no-store|private/i.test(cc)) r.headers.set('cache-control', 'private, no-store');
+  r.headers.append('vary', 'Cookie');
+  return r;
+}
+
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env, ctx) { return harden(await handle(request, env, ctx)); },
+  async scheduled(event, env, ctx) { return scheduledRun(event, env, ctx); },
+};
+
+async function handle(request, env, ctx) {
     const url = new URL(request.url);
     try {
+      if (url.pathname === '/robots.txt') return new Response(ROBOTS, { headers: { 'content-type': 'text/plain; charset=utf-8' } });
       // ---- Built-in sign-in (LOGIN = "on"): email + personal access code ----
       const codeMode = !(env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD) && String(env.LOGIN || '').toLowerCase() === 'on';
       if (url.pathname === '/login') return await loginPage(request, env, url);
@@ -716,15 +736,17 @@ export default {
         }
         return adminPage(env, url);
       }
-      return env.ASSETS.fetch(request);
+      // App shell (public/index.html): only for signed-in, approved users when sign-in is on.
+      const me = await identify(request, env);
+      if (me.enforced && !me.approved) return toLogin('/login');
+      return await env.ASSETS.fetch(request);
     } catch (e) {
       return json({ error: String(e.message || e) }, 500);
     }
-  },
-  async scheduled(event, env, ctx) {
+}
+async function scheduledRun(event, env, ctx) {
     if (event.cron === '*/15 * * * *') { ctx.waitUntil(refreshPdpInventories(env).catch(() => {}).then(() => buildSnapshot(env, 'pdp')).catch(() => {})); return; } // every 15 min: PDP Inventories stages (TATs to +-15 min), then the PDP snapshot
     if (event.cron === '7-59/15 * * * *') { ctx.waitUntil(buildSnapshot(env, 'metrics').catch(() => {})); return; } // walk-in metrics snapshot in its own run (own memory budget)
     if (event.cron === '10 * * * *') { ctx.waitUntil((env.RETENTION_CSV_URL ? retentionBroadcasts(env, true) : Promise.resolve()).catch(() => {})); return; } // hourly: retention broadcast cache
     ctx.waitUntil(refreshBigin(env).then(() => refreshPdpInventories(env)).then(() => rebuildBot(env)).catch(() => {}));
-  },
-};
+}

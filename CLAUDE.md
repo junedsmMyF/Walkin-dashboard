@@ -19,6 +19,10 @@ Frido Founders Office dashboard. Owner: Abdal (AVP Founders Office). Deployed fr
 - Admin: `GET /admin/snapshot` (last build, last try, last error per snapshot — a try newer than the build means it was killed for memory/CPU), `POST /admin/snapshot?which=pdp|metrics` (force), `POST /admin/pdp-refresh` also rebuilds the PDP snapshot.
 - Sales loader is `src/sales.js` `salesCombined()`: months read one at a time, each line straight to its engine row (one copy; `keepClean` only for `/admin/sales.csv`). The old loader held three full copies (~144 MB at 100k lines). `tests/sales.test.mjs` proves identical output. Workers Paid plan (frido-stf account) — cron builds need it.
 
+## Privacy and indexing (audit 27 Oct 2026)
+- `wrangler.toml` `[assets] run_worker_first = true`: every request goes through the Worker. Before this, Cloudflare served `public/index.html` (the whole app, with KPI rules) to anyone, with a public cache. Now `handle()` serves the shell only when `identify()` approves (or sign-in is off); signed-out visitors get a tiny page that redirects to `/login?next=#…` (no dashboard code). Auth / OTP logic is unchanged.
+- `harden()` wraps every response: `X-Robots-Tag: noindex, nofollow`, `Vary: Cookie`, and `Cache-Control: private, no-store` unless the response already says private / no-store. `/robots.txt` = `User-agent: * / Disallow: /`. `tests/privacy.test.mjs` covers these.
+
 ## PDP inventories (added Oct 2026)
 ### Current dashboard — rebuilt 23–24 Oct 2026 (SOP 02 + Whimsical "Final PDP routing mechanism")
 - **Tabs**: Overview · Bigin pipeline · TAT & SLAs · Store routing · Video calls · Sources & gaps · Products · Lost leads · Definitions. Customer journey, Backend agents, Follow-up, Revenue and Data quality were retired 24 Oct (their useful cards moved: lead cohorts + share of store sales → Overview, agent scorecard → Bigin pipeline, LimeChat → Bigin daily coverage → Sources & gaps). Old `#/retail/pdp/<removed tab>` links fall back to Overview.

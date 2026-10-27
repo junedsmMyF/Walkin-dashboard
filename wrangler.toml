@@ -9,6 +9,9 @@ keep_vars = true
 [assets]
 directory = "./public"
 binding = "ASSETS"
+# Every request goes through the Worker first, so the app shell is only served after the sign-in check (audit 27 Oct 2026).
+# Without this Cloudflare served public/index.html itself — before login, with a public cache.
+run_worker_first = true
 
 [[kv_namespaces]]
 binding = "DASH_KV"
