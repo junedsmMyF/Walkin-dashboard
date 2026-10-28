@@ -918,7 +918,7 @@ function pageRetail(){
     ['Needs attention', String(attentionItems().length), '▼ act today', 'All live projects', 'mix'],
   ], 5);
   const row = (v) => v.id === 'retention'
-    ? `<tr><td class="strong"><a href="#/retail/retention/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td><span class="vb vb-s">Sample</span></td><td>—</td><td>${RET.statsLine()}</td><td><a href="#/retail/retention/overview">Open →</a></td></tr>`
+    ? `<tr><td class="strong"><a href="#/retail/retention/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td>${RET.boardCells()}<td>${RET.statsLine()}</td><td><a href="#/retail/retention/overview">Open →</a></td></tr>`
     : v.id === 'meta-ads'
     ? `<tr><td class="strong"><a href="#/retail/meta-ads/overview">${v.name}</a></td><td><span class="badge b-good">Live</span></td><td><span class="vb vb-s">Sample</span></td><td>—</td><td>${META.statsLine()}</td><td><a href="#/retail/meta-ads/overview">Open →</a></td></tr>`
     : v.id === 'pdp'
@@ -3134,11 +3134,19 @@ const RET = (() => {
     const next = i < RTABS.length - 1 ? `<a class="next" href="${href(RTABS[i + 1].id)}"><span class="p-dir">Next →</span><span class="p-name">${RTABS[i + 1].name}</span></a>` : `<a class="next" href="#/"><span class="p-dir">Done →</span><span class="p-name">Home</span></a>`;
     return crumb + `<div class="wl mt">${header()}${body}</div><nav class="pager" aria-label="Previous and next page">${prev}${next}</nav>`;
   }
+  const runAgg = (r) => agg(RDATA.recipients.filter((x) => x.run >= r[0] && x.run <= r[1]), RDATA.credited.filter((x) => x.run >= r[0] && x.run <= r[1]));
+  // Scoreboard revenue + vs-previous cells: real MTD revenue once the broadcast report is live, the Sample badge until then
+  function boardCells(){
+    if (!RDATA) return `<td>${RDATA_ERR ? '—' : 'Loading…'}</td><td>—</td>`;
+    if (RDATA.sample) return '<td><span class="vb vb-s">Sample</span></td><td>—</td>';
+    const c = RDATA.cutoff, r = [c.slice(0, 8) + '01', c], p = prevOf(r), d = deltaTxt(runAgg(r).net, p ? runAgg(p).net : null);
+    return `<td class="strong">${inr(runAgg(r).net)}</td><td class="${toneOf(d)} strong">${d.replace(' vs previous period', '')}</td>`;
+  }
   // Month-to-date line for Home and the Retail Revenue scoreboard
   function statsLine(){
     if (!RDATA) return RDATA_ERR ? 'Data unavailable' : 'Loading…';
     const c = RDATA.cutoff; const r = [c.slice(0, 8) + '01', c];
-    const a = agg(RDATA.recipients.filter((x) => x.run >= r[0] && x.run <= r[1]), RDATA.credited.filter((x) => x.run >= r[0] && x.run <= r[1]));
+    const a = runAgg(r);
     const sp = a.del * RDATA.costPerDelivered;
     return `Delivered <b>${nf(a.del)}</b> · Orders <b>${nf(a.orders)}</b> · Revenue <b>${inr(a.net)}</b> · ROAS <b>${sp ? (a.net / sp).toFixed(1) + '×' : '—'}</b> (MTD${RDATA.sample ? ', sample' : ''})`;
   }
@@ -3150,7 +3158,7 @@ const RET = (() => {
     const rl = document.getElementById('rReloadBtn'); if (rl) rl.addEventListener('click', () => { RDATA = null; loadRet(true); rerender(); });
     const rt = document.getElementById('rRetryBtn'); if (rt) rt.addEventListener('click', () => { RDATA_ERR = null; DATA_ERR = null; loadRet(true); if (!DATA) loadData(true); rerender(); });
   }
-  return { page, statsLine, bindPage };
+  return { page, statsLine, boardCells, bindPage };
 })();
 
 function bind(){
