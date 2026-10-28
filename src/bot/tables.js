@@ -30,6 +30,7 @@ export const DATE_COL = { sales_orders: 'order_date', sales_lines: 'order_date',
 
 export function buildBotTables({ leads = [], salesRows = [], dsrRows = [], startDate, cutoff, dsrAliases = null }) {
   const m = computeMetrics({ leads, salesRows, dsrRows, startDate, cutoff, audit: true, dsrAliases });
+  for (const x of m.stores) if (!SM.has(x.id) && x.id !== 'UNMAPPED') SM.set(x.id, { ...x, city: x.city === 'Other' ? null : x.city }); // stores not yet in the master (name and city from Sales)
   const inRange = (d) => d && d >= startDate && d <= cutoff;
   // walk-in orders (dashboard attribution)
   const walk = new Map(m.revenueAudit.map((r) => [r['POS Order ID'], r]));

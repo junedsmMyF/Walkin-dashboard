@@ -25,6 +25,10 @@ export const STORE_MASTER = [
   { id: 'FRIDO_0024', format: 'Mall', name: 'Elan Miracle', city: 'Gurgaon', dsr: ['Elan Miracle Store'], bigin: ['Elan Miracle Gurugram'] },
   { id: 'FRIDO_0025', format: 'Mall', name: 'Royal Meenakshi', city: 'Bangalore', dsr: [], bigin: ['Royal Meenakshi Mall Bangalore', 'Royal Minakshi Mall Bangalore'] },
 ];
+// New stores seen in Sales before they have a master row (store ID not known yet): city by the Sales "Store Name" (owner, 28 Oct 2026).
+// Move each into STORE_MASTER once its FRIDO_ id, format and DSR / Bigin names are known.
+const NEW_STORE_CITY = { laxmiindustrial: 'Mumbai', orionavenue: 'Bangalore', sarathcity: 'Hyderabad' };
+export const cityFromStoreName = (name) => NEW_STORE_CITY[String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '')] || null;
 export const EXCLUDED_STORE_IDS = new Set(['FRIDO_0000']); // TESTSTORE
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
