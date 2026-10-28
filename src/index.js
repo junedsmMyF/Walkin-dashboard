@@ -749,7 +749,7 @@ async function handle(request, env, ctx) {
     }
 }
 async function scheduledRun(event, env, ctx) {
-    if (event.cron === '*/15 * * * *') { ctx.waitUntil(refreshPdpInventories(env).catch(() => {}).then(() => buildSnapshot(env, 'pdp')).catch(() => {})); return; } // every 15 min: PDP Inventories stages (TATs to +-15 min), then the PDP snapshot
+    if (event.cron === '*/15 * * * *') { ctx.waitUntil(buildSnapshot(env, 'pdp').catch(() => {})); return; } // every 15 min: PDP snapshot only (live sheets); Bigin PDP Inventories is read once a day in the 06:00 IST run (owner, 28 Oct 2026)
     if (event.cron === '7-59/15 * * * *') { ctx.waitUntil(buildSnapshot(env, 'metrics').catch(() => {})); return; } // walk-in metrics snapshot in its own run (own memory budget)
     if (event.cron === '10 * * * *') { ctx.waitUntil((env.RETENTION_CSV_URL ? retentionBroadcasts(env, true) : Promise.resolve()).catch(() => {})); return; } // hourly: retention broadcast cache
     ctx.waitUntil(refreshBigin(env).then(() => refreshPdpInventories(env)).then(() => rebuildBot(env)).catch(() => {}));

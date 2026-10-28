@@ -18,7 +18,7 @@ binding = "DASH_KV"
 id = "557386ba9dee45b3ae9f99d967109a42"
 
 [triggers]
-crons = ["30 0 * * *", "10 * * * *", "*/15 * * * *", "7-59/15 * * * *"]  # daily full Bigin refresh · hourly retention cache · PDP Inventories stages every 15 min (read-only)
+crons = ["30 0 * * *", "10 * * * *", "*/15 * * * *", "7-59/15 * * * *"]  # 06:00 IST daily Bigin refresh incl. PDP Inventories · hourly retention cache · PDP snapshot every 15 min · walk-in snapshot every 15 min
 
 [vars]
 # Sign-in & roles — a one-time code is emailed to each approved person when they sign in (no Cloudflare setup).

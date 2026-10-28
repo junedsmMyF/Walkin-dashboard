@@ -1515,7 +1515,7 @@ function wDefs(){
    Call route = Bigin "Callback Requests" (real) × BigQuery sales (real).
    Text route (LimeChat) and the PDP layer (views, CTA clicks) are SAMPLE until their exports are connected. */
 const PTABS = [
-  { id: 'overview', name: 'Overview' }, { id: 'daily', name: 'Daily revenue' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'tat', name: 'TAT & SLAs' }, { id: 'routing', name: 'Store routing' }, { id: 'video', name: 'Video calls' }, { id: 'sources', name: 'Sources & gaps' },
+  { id: 'overview', name: 'Overview' }, { id: 'daily', name: 'Daily revenue' }, { id: 'pipeline', name: 'Bigin pipeline' }, { id: 'routing', name: 'Store routing' }, { id: 'video', name: 'Video calls' }, { id: 'sources', name: 'Sources & gaps' },
   { id: 'product', name: 'Products' }, { id: 'loss', name: 'Lost leads' },
   { id: 'definitions', name: 'Definitions' },
 ];
@@ -1893,13 +1893,16 @@ const BRULES = [
   ['converted_no_order', 'Converted, no DevX order found', 'Converted = purchased'],
   ['unknown_stage', 'Stage not in SOP 02', 'Use only the 9 SOP stages'],
 ];
+// Sub-day targets (15 min, 3 h) need stage times finer than the daily 06:00 IST read — hidden since 28 Oct 2026 (owner).
+const SUBDAY = new Set(['new_over_15m', 'rnr1_over_3h', 'rnr2_over_3h']);
+for (let i = BRULES.length - 1; i >= 0; i--) if (SUBDAY.has(BRULES[i][0])) BRULES.splice(i, 1);
 const SOP_BREACH = new Set(BRULES.map((x) => x[0]));
 const bKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const hasPinv = () => !!(PDATA && PDATA.pinv && PDATA.pinv.tickets);
 const bTickets = (r) => (hasPinv() && r ? PDATA.pinv.tickets.filter((t) => t.d && inPR(t.d, r) && pStoreOk(t.s) && (F.cta === 'all' || t.entry === F.cta)) : []);
 const isOpen = (t) => !['converted', 'lost'].includes(t.g);
 function pPipeline(r){
-  if (!hasPinv()) return wcard('Bigin PDP Inventories not connected', 'The pipeline is read every 15 minutes; it appears after the first read.', '');
+  if (!hasPinv()) return wcard('Bigin PDP Inventories not connected', 'The pipeline is read daily at 06:00 IST; it appears after the first read.', '');
   const T = bTickets(r); const open = T.filter(isOpen);
   const breach = (t) => t.fl.some((f) => SOP_BREACH.has(f));
   const newest = open.filter((t) => t.g === 'new'); const oldest = newest.length ? Math.max(...newest.map((t) => t.ageH || 0)) : null;
@@ -1952,7 +1955,7 @@ function pPipeline(r){
     wtable(['Agent', 'Leads', 'Call Store', 'Called', 'Connected', 'Qualified', 'Store visit', 'Video call', 'Bought', 'Conversion', 'Revenue'], Object.entries(byL).sort((a, b) => b[1].length - a[1].length).map(srow)), 'v');
 
   return kp + board + hyg + score + agents + call +
-    `<p class="wl-note">Tickets created in the selected range · WhatsApp leads from Bigin PDP Inventories (read every 15 min) · Bigin ${PDATA.pinv.meta?.refreshedAt ? 'read ' + new Date(PDATA.pinv.meta.refreshedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : ''}.</p>`;
+    `<p class="wl-note">Tickets created in the selected range · WhatsApp leads from Bigin PDP Inventories (read daily at 06:00 IST) · Bigin ${PDATA.pinv.meta?.refreshedAt ? 'read ' + new Date(PDATA.pinv.meta.refreshedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : ''}.</p>`;
 }
 
 /* ---- TAT & SLAs (SOP 02 · section 13): turnaround targets on Bigin PDP Inventories tickets, from the 15-min stage history ---- */
@@ -2142,7 +2145,7 @@ function pVideo(r){
   const bySrc = pcard('Where the video call was recorded' + DBT.m, 'Lead\'s first contact source · a routing-sheet row with a video remark wins',
     wtable(['Recorded in', 'Arranged', 'Bought', 'Conversion', 'Revenue', 'Not interested', 'Still open'], VBASIS.map(brow)), 'u');
 
-  // Bigin PDP Inventories queue (stage history read every 15 min)
+  // Bigin PDP Inventories queue (stage history read daily at 06:00 IST)
   let queue = '';
   if (hasPinv()) {
     const T = bTickets(r); const E = T.filter((t) => t.vcEver || t.g === 'video'); const now = E.filter((t) => t.g === 'video');
@@ -2226,7 +2229,7 @@ function pSources(r){
   const src = pcard('Data sources', 'Where every number comes from · read-only · customer names and phones never leave the Worker',
     wtable(['Source', 'Feeds', 'Read', 'Last read', 'Rows', 'Status'], [
       srow('Bigin · Callback Requests', 'Call Store leads and stages', 'Daily 06:00 IST', S.callback, ts(S.callback?.refreshedAt), nf(S.callback?.records || 0), 'v'),
-      srow('Bigin · PDP Inventories', `WhatsApp leads from ${cut ? dpShort(cut) : 'the cutover'}, stages and stage times`, 'Every 15 min', S.pdpinv, ts(S.pdpinv?.refreshedAt), nf(S.pdpinv?.records || 0), 'v'),
+      srow('Bigin · PDP Inventories', `WhatsApp leads from ${cut ? dpShort(cut) : 'the cutover'}, stages`, 'Daily 06:00 IST', S.pdpinv, ts(S.pdpinv?.refreshedAt), nf(S.pdpinv?.records || 0), 'v'),
       srow('LimeChat export', `WhatsApp leads before ${cut ? dpShort(cut) : 'the cutover'}; coverage check after`, 'Live (published sheet)', S.limechat, '—', nf(S.limechat?.rows || 0), 'v'),
       srow('Lead routing backend sheet', 'Store visits, video remarks, visit dates (WhatsApp DSR groups)', 'Live (published sheet)', S.routing, '—', nf(S.routing?.rows || 0), 'v'),
       srow('DevX orders (BigQuery)', 'Orders and revenue · unique order IDs', 'Daily 08:00 IST', S.sales, ts(S.sales?.uploadedAt), '—', 'v'),
