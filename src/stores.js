@@ -24,18 +24,10 @@ export const STORE_MASTER = [
   { id: 'FRIDO_0023', format: 'Mall', name: 'M5 Bangalore', city: 'Bangalore', dsr: ['M5 Bangalore Mall'], bigin: ['M5 Ecity Mall', 'M5 Mall Bangalore'] },
   { id: 'FRIDO_0024', format: 'Mall', name: 'Elan Miracle', city: 'Gurgaon', dsr: ['Elan Miracle Store'], bigin: ['Elan Miracle Gurugram'] },
   { id: 'FRIDO_0025', format: 'Mall', name: 'Royal Meenakshi', city: 'Bangalore', dsr: [], bigin: ['Royal Meenakshi Mall Bangalore', 'Royal Minakshi Mall Bangalore'] },
+  { id: 'FRIDO_0026', format: 'High street', name: 'Laxmi Industrial', city: 'Mumbai', dsr: [], bigin: ['Laxmi Industries Mumbai', 'Laxmi Industrial Mumbai'] },
+  { id: 'FRIDO_0027', format: 'Mall', name: 'Sarath City', city: 'Hyderabad', dsr: ['Sharath City', 'Sarath City'], bigin: ['Sarath City Mall', 'Sarath City Hyderabad'] },
+  { id: 'FRIDO_0028', format: 'Mall', name: 'Orion Avenue', city: 'Bangalore', dsr: ['Orion Avenue'], bigin: ['Orion Avenue Bangalore'] },
 ];
-// New stores seen in Sales before they have a master row (store ID not known yet): city by the Sales "Store Name" (owner, 28 Oct 2026).
-// Move each into STORE_MASTER once its FRIDO_ id, format and DSR / Bigin names are known.
-// names: every spelling seen in Sales and the DSR sheet (DSR writes "Sharath City", Sales "Sarath city").
-const NEW_STORES = [
-  { city: 'Mumbai', names: ['Laxmi Industrial'] },
-  { city: 'Bangalore', names: ['Orion Avenue'] },
-  { city: 'Hyderabad', names: ['Sarath City', 'Sharath City'] },
-];
-const NEW_STORE_INDEX = new Map(NEW_STORES.flatMap((s, i) => s.names.map((n) => [String(n).toLowerCase().replace(/[^a-z0-9]/g, ''), i])));
-export const newStoreKey = (name) => NEW_STORE_INDEX.get(String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '')) ?? null;
-export const cityFromStoreName = (name) => NEW_STORES[newStoreKey(name)]?.city || null;
 export const EXCLUDED_STORE_IDS = new Set(['FRIDO_0000']); // TESTSTORE
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');

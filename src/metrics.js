@@ -1,6 +1,6 @@
 // Turns raw Bigin leads + Retail Sales rows + DSR rows into aggregated, PII-free metrics.
 // Rules agreed with the Founders Office (Sep 2026) — see public/index.html → Funnel & definitions.
-import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, storeFromBigin, cityFromStoreName, newStoreKey } from './stores.js';
+import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, storeFromBigin } from './stores.js';
 import { MANUAL_WALKIN_ORDERS } from './overrides.js';
 import { categoryOf } from './categories.js';
 import { salesDate, dsrDate, dsrTimestamp, biginDate, daysBetween, phone10 } from './dates.js';
@@ -49,10 +49,8 @@ export function computeMetrics({ leads: rawLeads = [], salesRows = [], dsrRows =
 
   // ---------- DSR → walk-ins: latest submission per store per date; New + Other ----------
   const dsr = new Map();
-  const newStoreIds = new Map(); // new stores (not in STORE_MASTER yet): DSR name → the Sales Store ID with the same store name
-  for (const [id, nm] of storeNames) { const k = newStoreKey(nm); if (k != null && !newStoreIds.has(k)) newStoreIds.set(k, id); }
   dsrRows.forEach((r, idx) => {
-    const store = storeFromDsr(r['Store'], dsrAliases) || newStoreIds.get(newStoreKey(r['Store'])) || null;
+    const store = storeFromDsr(r['Store'], dsrAliases);
     if (!store) { const k = r['Store'] || '(blank)'; quality.dsrUnmapped[k] = (quality.dsrUnmapped[k] || 0) + 1; return; }
     const date = dsrDate(r['Date']); if (!date) { quality.dsrBadDate++; return; }
     const ts = dsrTimestamp(r['Timestamp']); const key = store + '|' + date; const prev = dsr.get(key);
@@ -235,7 +233,7 @@ export function computeMetrics({ leads: rawLeads = [], salesRows = [], dsrRows =
   const storesUsed = new Set([...daily.values()].map((r) => r.s).concat(attributed.map((a) => a.s), attributed.map((a) => a.cs)));
   return {
     startDate, cutoff,
-    stores: [...storesUsed].map((id) => ({ id, name: storeNames.get(id) || id, city: cities[id] || cityFromStoreName(storeNames.get(id)) || (id === 'UNMAPPED' ? '—' : 'Other'), format: formats[id] || null })).sort((a, b) => a.name.localeCompare(b.name)),
+    stores: [...storesUsed].map((id) => ({ id, name: storeNames.get(id) || id, city: cities[id] || (id === 'UNMAPPED' ? '—' : 'Other'), format: formats[id] || null })).sort((a, b) => a.name.localeCompare(b.name)),
     daily: [...daily.values()],
     products: prodNames,
     // rows: [date, store, productIndex, orderType R|O, net, gross, qty, orders]

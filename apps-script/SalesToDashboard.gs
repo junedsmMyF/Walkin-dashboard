@@ -18,7 +18,7 @@ var CONFIG = {
   START_DATE: '2026-09-01',        // first date the dashboard counts
   DAILY_LOOKBACK_DAYS: 7,          // re-sync the last 7 days every morning (catches late edits, refunds, cancellations)
   TEST_STORES: ['FRIDO_0000'],
-  KNOWN_STORES: ['FRIDO_0001','FRIDO_0002','FRIDO_0003','FRIDO_0005','FRIDO_0006','FRIDO_0008','FRIDO_0009','FRIDO_0010','FRIDO_0011','FRIDO_0012','FRIDO_0013','FRIDO_0014','FRIDO_0015','FRIDO_0016','FRIDO_0017','FRIDO_0018','FRIDO_0019','FRIDO_0020','FRIDO_0021','FRIDO_0022','FRIDO_0023','FRIDO_0024','FRIDO_0025'],
+  KNOWN_STORES: ['FRIDO_0001','FRIDO_0002','FRIDO_0003','FRIDO_0005','FRIDO_0006','FRIDO_0008','FRIDO_0009','FRIDO_0010','FRIDO_0011','FRIDO_0012','FRIDO_0013','FRIDO_0014','FRIDO_0015','FRIDO_0016','FRIDO_0017','FRIDO_0018','FRIDO_0019','FRIDO_0020','FRIDO_0021','FRIDO_0022','FRIDO_0023','FRIDO_0024','FRIDO_0025','FRIDO_0026','FRIDO_0027','FRIDO_0028'],
   OUT_COLS: ['order_date','order_id','store_id','store_name','employee_name','order_type','phone','financial_status','is_cancelled','sku','product_name','category','quantity','price','gross','discount','net','discount_codes']
 };
 
