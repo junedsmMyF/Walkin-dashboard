@@ -105,6 +105,30 @@ async function parseRpc(res, id) {
   return text ? JSON.parse(text) : {};
 }
 
+// Zoho's reply text: one JSON document, or (since Oct 2026) several text parts / a JSON document followed by more text.
+// Prefer the part that carries records (data / users), else the first JSON value in the text.
+function parseReply(text, parts) {
+  try { return JSON.parse(text); } catch (e) {
+    const docs = []; for (const p of parts) { try { docs.push(JSON.parse(p)); } catch { /* not JSON */ } }
+    for (const p of parts.length > 1 ? [] : [text]) docs.push(...jsonValues(p));
+    const best = docs.find((d) => d && typeof d === 'object' && ('data' in d || 'users' in d)) || docs.find((d) => d && typeof d === 'object');
+    if (best) return best;
+    throw e;
+  }
+}
+// Every top-level JSON object/array in a string (e.g. "{...}{...}" or "{...} note").
+function jsonValues(t) {
+  const out = []; let depth = 0, start = -1, inStr = false, esc = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === '{' || c === '[') { if (!depth++) start = i; }
+    else if ((c === '}' || c === ']') && depth && !--depth) { try { out.push(JSON.parse(t.slice(start, i + 1))); } catch { /* skip */ } }
+  }
+  return out;
+}
+
 class McpSession {
   constructor(env) { this.env = env; this.id = 0; this.session = null; this.token = null; }
   async post(payload) {
@@ -129,9 +153,10 @@ class McpSession {
     const res = await this.post({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'ZohoMCP_executeTool', arguments: { body: { tool_name: toolName, arguments: args } } } });
     const msg = await parseRpc(res, id);
     if (msg.error) throw new Error(`${toolName}: ${msg.error.message}`);
-    const text = (msg.result?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
+    const parts = (msg.result?.content || []).filter((c) => c.type === 'text').map((c) => c.text); const text = parts.join('');
     if (msg.result?.isError) throw new Error(`${toolName}: ${text.slice(0, 300)}`);
-    return text ? JSON.parse(text) : {};
+    if (msg.result?.structuredContent && typeof msg.result.structuredContent === 'object') return msg.result.structuredContent;
+    return text ? parseReply(text, parts) : {};
   }
 }
 
