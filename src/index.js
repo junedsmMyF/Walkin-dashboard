@@ -512,7 +512,7 @@ async function adminPage(env, url) {
   const key = encodeURIComponent(url.searchParams.get('key') || '');
   return html(`<h1>Walk-in dashboard admin</h1>
   <p>Bigin connection: <strong>${connected ? 'connected' : 'not connected (or using a keyed MCP URL)'}</strong></p>
-  <p>Last Bigin refresh: <strong>${meta.refreshedAt || 'never'}</strong> · status: <strong>${meta.status || '—'}</strong> · leads: <strong>${meta.count ?? '—'}</strong></p>
+  <p>Last Bigin refresh: <strong>${meta.refreshedAt || 'never'}</strong> · status: <strong>${meta.status || '—'}</strong> · leads: <strong>${meta.count ?? '—'}</strong>${meta.pages ? ` · pages read: ${meta.pages}${meta.capped ? ' <strong style="color:#A8501A">(limit reached — newest records missing)</strong>' : ''}` : ''}</p>
   ${meta.error ? `<pre>${String(meta.error).replace(/</g, '&lt;')}</pre>` : ''}
   <a class="btn" href="/admin/connect?key=${key}">Connect Bigin</a>
   <form method="post" action="/admin/refresh?key=${key}" style="display:inline"><button type="submit">Refresh Bigin now</button></form>

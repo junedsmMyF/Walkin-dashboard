@@ -177,6 +177,8 @@ function coqlPage(r) {
 // ---------- Daily refresh: all walk-in leads → KV ----------
 const FIELDS = 'id, Deal_Name, Stage, Pipeline, Walk_in_Date_Time, Created_Time, Modified_Time, Store_Location, Store_Name1, Owner, Amount, Call_Date, Close_Lost_Reason, Phone_Number, Email_ID, Product, Quantity, Product_Category, UTM_Source, UTM_Medium, UTM_Campaign, UTM_Content, City, Preferred_Store, Close_Won_Reason';
 
+const MAX_PAGES = 150; // was 45 (9,000 records) — PDP Inventories tickets share the Pipelines table since 22 Oct 2026
+
 export async function refreshBigin(env) {
   const started = new Date().toISOString();
   try {
@@ -205,13 +207,13 @@ export async function refreshBigin(env) {
         if (String(x.Pipeline) !== String(env.WALKIN_PIPELINE_ID)) continue;
         leads.push({ i: x.id, st: x.Stage, d: x.Walk_in_Date_Time, ct: x.Created_Time, loc: x.Store_Location, own: owners.get(x.Owner?.id) || '', amt: x.Amount, call: x.Call_Date, lr: x.Close_Lost_Reason, p: x.Phone_Number, em: x.Email_ID || '', prod: Array.isArray(x.Product) ? x.Product.join(' || ') : (x.Product?.name || x.Product || ''), qty: x.Quantity, cat: x.Product_Category || '' });
       }
-      if (!rows.length || !more || pages >= 45) break; // 45 × 200 = 9,000 records per run (Worker subrequest budget)
+      if (!rows.length || !more || pages >= MAX_PAGES) break; // 150 × 200 = 30,000 records per run (Workers Paid: 1,000 subrequests)
       lastId = rows[rows.length - 1].id;
     }
     await env.DASH_KV.put(KV_LEADS, JSON.stringify(leads));
     if (env.CALLBACK_PIPELINE_ID) await env.DASH_KV.put(KV_CALLBACK, JSON.stringify(callbacks));
     if (env.META_PIPELINE_ID) await env.DASH_KV.put(KV_METAADS, JSON.stringify(metaads));
-    await env.DASH_KV.put(KV_META, JSON.stringify({ status: 'ok', refreshedAt: new Date().toISOString(), started, count: leads.length, callbacks: callbacks.length, metaads: metaads.length, pages }));
+    await env.DASH_KV.put(KV_META, JSON.stringify({ status: 'ok', refreshedAt: new Date().toISOString(), started, count: leads.length, callbacks: callbacks.length, metaads: metaads.length, pages, capped: pages >= MAX_PAGES }));
     return { ok: true, count: leads.length };
   } catch (e) {
     const prev = (await env.DASH_KV.get(KV_META, 'json')) || {};
