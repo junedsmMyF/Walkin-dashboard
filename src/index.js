@@ -734,6 +734,7 @@ async function handle(request, env, ctx) {
         }
         if (url.pathname === '/admin/snapshot' && request.method === 'GET') return json(Object.fromEntries(await Promise.all(Object.keys(SNAPS).map(async (n) => [n, { meta: await env.DASH_KV.get(n + ':snap:meta', 'json'), lastTry: await env.DASH_KV.get(n + ':snap:try', 'json'), lastError: await env.DASH_KV.get(n + ':snap:error', 'json') }]))));
         if (url.pathname === '/admin/snapshot' && request.method === 'POST') { const which = url.searchParams.get('which'); if (!SNAPS[which]) return json({ ok: false, error: 'which must be pdp or metrics' }, 400); return json(await buildSnapshot(env, which, { force: true })); }
+        if (url.pathname === '/admin/refresh' && request.method === 'POST' && url.searchParams.get('step')) { const job = await biginJob(env); const r = await runBiginJob(env); return json({ phase: job?.phase || null, result: r && typeof r === 'object' ? { ok: r.ok, done: r.done, count: r.count, pages: r.pages, error: r.error } : null, next: (await biginJob(env))?.phase || null }); } // next job step now instead of waiting for cron
         if (url.pathname === '/admin/refresh' && request.method === 'POST') {
           const r = await refreshBigin(env);
           return html(`<h1>${!r.ok ? 'Refresh failed' : r.done ? 'Refreshed' : 'Refresh started'}</h1><p>${refreshMsg(r)}</p><a class="btn" href="/admin?key=${encodeURIComponent(url.searchParams.get('key'))}">Back</a>`);
