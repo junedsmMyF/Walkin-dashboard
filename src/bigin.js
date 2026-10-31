@@ -178,50 +178,74 @@ function coqlPage(r) {
 const FIELDS = 'id, Deal_Name, Stage, Pipeline, Walk_in_Date_Time, Created_Time, Modified_Time, Store_Location, Store_Name1, Owner, Amount, Call_Date, Close_Lost_Reason, Phone_Number, Email_ID, Product, Quantity, Product_Category, UTM_Source, UTM_Medium, UTM_Campaign, UTM_Content, City, Preferred_Store, Close_Won_Reason';
 
 // Zoho's MCP cuts a reply off at about 256 KB; 200 leads came to ~265 KB (31 Oct 2026: "Unterminated string in JSON at position 265711"),
-// so read 100 per page (~130 KB). 300 pages = 30,000 records (Workers Paid: 1,000 subrequests per run).
+// so read 100 per page (~130 KB). This account allows 50 outgoing calls per Worker run (31 Oct 2026: "Too many subrequests"),
+// so one run reads at most CHUNK_PAGES pages and saves its progress in KV_JOB; the next cron run carries on (see runBiginJob in index.js).
+// The last complete read stays live until a new one finishes.
 const PAGE_SIZE = 100;
-const MAX_PAGES = 300;
+const CHUNK_PAGES = 40; // + MCP initialize, token refresh, users ≈ 44 calls
+const MAX_PAGES = 300; // 30,000 records per full read
+const KV_JOB = 'bigin:job';
 
-export async function refreshBigin(env) {
-  const started = new Date().toISOString();
+export const biginJob = (env) => env.DASH_KV.get(KV_JOB, 'json');
+export const setBiginJob = (env, job) => (job ? env.DASH_KV.put(KV_JOB, JSON.stringify({ ...job, updatedAt: new Date().toISOString() })) : env.DASH_KV.delete(KV_JOB));
+
+// One chunk of the full read. resume=false starts over. Returns { ok, done, count, pages } or { ok: false, error }.
+export async function refreshBigin(env, { resume = false } = {}) {
+  let job = resume ? await biginJob(env) : null;
+  if (resume && (!job || job.phase !== 'leads')) return { ok: true, idle: true };
+  if (!job) job = { phase: 'leads', started: new Date().toISOString(), lastId: '0', pages: 0, owners: null, leads: [], callbacks: [], metaads: [], fails: 0 };
   try {
     const mcp = new McpSession(env); await mcp.open();
-    const owners = new Map();
-    for (let page = 1; page <= 20; page++) {
-      const r = await mcp.bigin('Bigin_getNewUsers', { query_params: { type: 'AllUsers', per_page: 200, page } });
-      for (const u of r.users || []) owners.set(u.id, u.full_name);
-      if (!r.info?.more_records) break;
+    if (!job.owners) {
+      const owners = {};
+      for (let page = 1; page <= 5; page++) {
+        const r = await mcp.bigin('Bigin_getNewUsers', { query_params: { type: 'AllUsers', per_page: 200, page } });
+        for (const u of r.users || []) owners[u.id] = u.full_name;
+        if (!r.info?.more_records) break;
+      }
+      job.owners = owners;
     }
-    // Zoho's MCP server caps each COQL query at 200 rows, so page by record ID (keyset paging):
-    // "id > last id seen, order by id, PAGE_SIZE at a time" — no offset limits, stable while records are added.
-    const leads = []; const callbacks = []; const metaads = []; let lastId = '0'; let pages = 0;
-    for (;;) {
-      const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${FIELDS} from Pipelines where id > ${lastId} order by id asc limit 0, ${PAGE_SIZE}` } });
-      const { rows, more } = coqlPage(r); pages++;
+    const own = (x) => job.owners[x.Owner?.id] || '';
+    // Keyset paging: "id > last id seen, order by id, PAGE_SIZE at a time" — no offset limits, stable while records are added.
+    let done = false;
+    for (let n = 0; n < CHUNK_PAGES; n++) {
+      const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${FIELDS} from Pipelines where id > ${job.lastId} order by id asc limit 0, ${PAGE_SIZE}` } });
+      const { rows, more } = coqlPage(r); job.pages++;
       for (const x of rows) {
         if (env.CALLBACK_PIPELINE_ID && String(x.Pipeline) === String(env.CALLBACK_PIPELINE_ID)) {
-          callbacks.push({ i: x.id, nm: x.Deal_Name || '', st: x.Stage, ct: x.Created_Time, mt: x.Modified_Time, web: x.Store_Name1 || '', loc: x.Store_Location || '', own: owners.get(x.Owner?.id) || '', p: x.Phone_Number, lr: x.Close_Lost_Reason || '', prod: Array.isArray(x.Product) ? x.Product.join(' || ') : (x.Product?.name || x.Product || ''), cat: x.Product_Category || '', us: x.UTM_Source || '', um: x.UTM_Medium || '', uc: x.UTM_Campaign || '', ux: x.UTM_Content || '' });
+          job.callbacks.push({ i: x.id, nm: x.Deal_Name || '', st: x.Stage, ct: x.Created_Time, mt: x.Modified_Time, web: x.Store_Name1 || '', loc: x.Store_Location || '', own: own(x), p: x.Phone_Number, lr: x.Close_Lost_Reason || '', prod: Array.isArray(x.Product) ? x.Product.join(' || ') : (x.Product?.name || x.Product || ''), cat: x.Product_Category || '', us: x.UTM_Source || '', um: x.UTM_Medium || '', uc: x.UTM_Campaign || '', ux: x.UTM_Content || '' });
           continue;
         }
         if (env.META_PIPELINE_ID && String(x.Pipeline) === String(env.META_PIPELINE_ID)) {
-          metaads.push({ i: x.id, st: x.Stage, ct: x.Created_Time, mt: x.Modified_Time, ps: x.Preferred_Store || '', city: x.City || '', p: x.Phone_Number, lr: x.Close_Lost_Reason || '', cw: x.Close_Won_Reason || '', us: x.UTM_Source || '', uc: x.UTM_Campaign || '', ux: x.UTM_Content || '' });
+          job.metaads.push({ i: x.id, st: x.Stage, ct: x.Created_Time, mt: x.Modified_Time, ps: x.Preferred_Store || '', city: x.City || '', p: x.Phone_Number, lr: x.Close_Lost_Reason || '', cw: x.Close_Won_Reason || '', us: x.UTM_Source || '', uc: x.UTM_Campaign || '', ux: x.UTM_Content || '' });
           continue;
         }
         if (String(x.Pipeline) !== String(env.WALKIN_PIPELINE_ID)) continue;
-        leads.push({ i: x.id, st: x.Stage, d: x.Walk_in_Date_Time, ct: x.Created_Time, loc: x.Store_Location, own: owners.get(x.Owner?.id) || '', amt: x.Amount, call: x.Call_Date, lr: x.Close_Lost_Reason, p: x.Phone_Number, em: x.Email_ID || '', prod: Array.isArray(x.Product) ? x.Product.join(' || ') : (x.Product?.name || x.Product || ''), qty: x.Quantity, cat: x.Product_Category || '' });
+        job.leads.push({ i: x.id, st: x.Stage, d: x.Walk_in_Date_Time, ct: x.Created_Time, loc: x.Store_Location, own: own(x), amt: x.Amount, call: x.Call_Date, lr: x.Close_Lost_Reason, p: x.Phone_Number, em: x.Email_ID || '', prod: Array.isArray(x.Product) ? x.Product.join(' || ') : (x.Product?.name || x.Product || ''), qty: x.Quantity, cat: x.Product_Category || '' });
       }
-      if (!rows.length || !more || pages >= MAX_PAGES) break;
-      lastId = rows[rows.length - 1].id;
+      if (rows.length) job.lastId = rows[rows.length - 1].id;
+      if (!rows.length || !more || job.pages >= MAX_PAGES) { done = true; break; }
     }
-    await env.DASH_KV.put(KV_LEADS, JSON.stringify(leads));
-    if (env.CALLBACK_PIPELINE_ID) await env.DASH_KV.put(KV_CALLBACK, JSON.stringify(callbacks));
-    if (env.META_PIPELINE_ID) await env.DASH_KV.put(KV_METAADS, JSON.stringify(metaads));
-    await env.DASH_KV.put(KV_META, JSON.stringify({ status: 'ok', refreshedAt: new Date().toISOString(), started, count: leads.length, callbacks: callbacks.length, metaads: metaads.length, pages, capped: pages >= MAX_PAGES }));
-    return { ok: true, count: leads.length };
+    const { retrying, ...prev } = (await env.DASH_KV.get(KV_META, 'json')) || {};
+    if (!done) {
+      job.fails = 0; await setBiginJob(env, job);
+      await env.DASH_KV.put(KV_META, JSON.stringify({ ...prev, running: { started: job.started, pages: job.pages, leads: job.leads.length } }));
+      return { ok: true, done: false, count: job.leads.length, pages: job.pages };
+    }
+    await env.DASH_KV.put(KV_LEADS, JSON.stringify(job.leads));
+    if (env.CALLBACK_PIPELINE_ID) await env.DASH_KV.put(KV_CALLBACK, JSON.stringify(job.callbacks));
+    if (env.META_PIPELINE_ID) await env.DASH_KV.put(KV_METAADS, JSON.stringify(job.metaads));
+    await env.DASH_KV.put(KV_META, JSON.stringify({ status: 'ok', refreshedAt: new Date().toISOString(), started: job.started, count: job.leads.length, callbacks: job.callbacks.length, metaads: job.metaads.length, pages: job.pages, capped: job.pages >= MAX_PAGES }));
+    await setBiginJob(env, { phase: 'pdp', started: job.started }); // next runs: PDP Inventories, then the bot
+    return { ok: true, done: true, count: job.leads.length, pages: job.pages };
   } catch (e) {
+    const error = String(e.message || e);
+    job.fails = (job.fails || 0) + 1;
+    await setBiginJob(env, job.fails >= 3 ? null : job); // retry the same chunk on the next run; give up after 3 failures in a row
     const prev = (await env.DASH_KV.get(KV_META, 'json')) || {};
-    await env.DASH_KV.put(KV_META, JSON.stringify({ ...prev, status: 'error', error: String(e.message || e), failedAt: new Date().toISOString() }));
-    return { ok: false, error: String(e.message || e) };
+    const { running, retrying, ...rest } = prev;
+    await env.DASH_KV.put(KV_META, JSON.stringify(job.fails >= 3 ? { ...rest, status: 'error', error, failedAt: new Date().toISOString() } : { ...prev, retrying: { error, fails: job.fails } }));
+    return { ok: false, error };
   }
 }
 export const biginLeads = (env) => env.DASH_KV.get(KV_LEADS, 'json');

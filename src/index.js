@@ -10,7 +10,7 @@ import { syncBotTables } from './bot/sync.js';
 import { ask, checkSql, MODELS, MODEL_CHAIN, runModel } from './bot/ask.js';
 import { identify, can, canBot, canWalkin, filterMetrics, PAGES, ROLES, makeSession, sessionCookie, startOtp, checkOtp, OTP_MINUTES } from './auth.js';
 import { STORE_MASTER, EXCLUDED_STORE_IDS, storeFromDsr, normStoreName, suggestStore } from './stores.js';
-import { refreshBigin, biginLeads, biginCallbacks, biginMetaAds, biginMeta, biginConnected, startConnect, finishConnect, refreshPdpInventories, pdpInventories } from './bigin.js';
+import { refreshBigin, biginJob, setBiginJob, biginLeads, biginCallbacks, biginMetaAds, biginMeta, biginConnected, startConnect, finishConnect, refreshPdpInventories, pdpInventories } from './bigin.js';
 import { computePdp } from './pdp.js';
 import { pdpAnalytics } from './ga4.js';
 import { computeMeta } from './meta.js';
@@ -512,7 +512,7 @@ async function adminPage(env, url) {
   const key = encodeURIComponent(url.searchParams.get('key') || '');
   return html(`<h1>Walk-in dashboard admin</h1>
   <p>Bigin connection: <strong>${connected ? 'connected' : 'not connected (or using a keyed MCP URL)'}</strong></p>
-  <p>Last Bigin refresh: <strong>${meta.refreshedAt || 'never'}</strong> · status: <strong>${meta.status || '—'}</strong> · leads: <strong>${meta.count ?? '—'}</strong>${meta.pages ? ` · pages read: ${meta.pages}${meta.capped ? ' <strong style="color:#A8501A">(limit reached — newest records missing)</strong>' : ''}` : ''}</p>
+  <p>Last Bigin refresh: <strong>${meta.refreshedAt || 'never'}</strong> · status: <strong>${meta.status || '—'}</strong> · leads: <strong>${meta.count ?? '—'}</strong>${meta.pages ? ` · pages read: ${meta.pages}${meta.capped ? ' <strong style="color:#A8501A">(limit reached — newest records missing)</strong>' : ''}` : ''}${meta.running ? `<br>New read in progress: ${meta.running.pages} pages, ${meta.running.leads} walk-in leads so far (continues every 15 min)` : ''}${meta.retrying ? `<br><span style="color:#A8501A">Last chunk failed (${String(meta.retrying.error).replace(/</g, '&lt;')}) — retrying on the next run</span>` : ''}</p>
   ${meta.error ? `<pre>${String(meta.error).replace(/</g, '&lt;')}</pre>` : ''}
   <a class="btn" href="/admin/connect?key=${key}">Connect Bigin</a>
   <form method="post" action="/admin/refresh?key=${key}" style="display:inline"><button type="submit">Refresh Bigin now</button></form>
@@ -617,7 +617,7 @@ async function handle(request, env, ctx) {
       if (url.pathname === '/admin/callback') {
         await finishConnect(env, url);
         const r = await refreshBigin(env);
-        return html(`<h1>Bigin connected</h1><p>First refresh: ${r.ok ? `${r.count} walk-in leads loaded.` : `failed — ${String(r.error).replace(/</g, '&lt;')}`}</p><a class="btn" href="/">Open dashboard</a>`);
+        return html(`<h1>Bigin connected</h1><p>First refresh: ${refreshMsg(r)}</p><a class="btn" href="/">Open dashboard</a>`);
       }
       if (url.pathname.startsWith('/admin')) {
         if (!(isAdmin(env, url) || (id.enforced && can(id, 'admin')))) return html(`<h1>Not authorised</h1><p>${id.enforced && id.email ? `Signed in as ${id.email}, which is not an admin.` : 'Admin sign-in or admin key required.'}</p>`, 403);
@@ -736,7 +736,7 @@ async function handle(request, env, ctx) {
         if (url.pathname === '/admin/snapshot' && request.method === 'POST') { const which = url.searchParams.get('which'); if (!SNAPS[which]) return json({ ok: false, error: 'which must be pdp or metrics' }, 400); return json(await buildSnapshot(env, which, { force: true })); }
         if (url.pathname === '/admin/refresh' && request.method === 'POST') {
           const r = await refreshBigin(env);
-          return html(`<h1>${r.ok ? 'Refreshed' : 'Refresh failed'}</h1><p>${r.ok ? `${r.count} walk-in leads loaded.` : String(r.error).replace(/</g, '&lt;')}</p><a class="btn" href="/admin?key=${encodeURIComponent(url.searchParams.get('key'))}">Back</a>`);
+          return html(`<h1>${!r.ok ? 'Refresh failed' : r.done ? 'Refreshed' : 'Refresh started'}</h1><p>${refreshMsg(r)}</p><a class="btn" href="/admin?key=${encodeURIComponent(url.searchParams.get('key'))}">Back</a>`);
         }
         return adminPage(env, url);
       }
@@ -748,9 +748,19 @@ async function handle(request, env, ctx) {
       return json({ error: String(e.message || e) }, 500);
     }
 }
+const refreshMsg = (r) => (!r.ok ? `failed — ${String(r.error).replace(/</g, '&lt;')}` : r.done ? `${r.count} walk-in leads loaded.` : `started — ${r.pages} pages read (${r.count} walk-in leads so far). The rest loads automatically over the next runs, every 15 minutes; the current data stays live until then.`);
 async function scheduledRun(event, env, ctx) {
     if (event.cron === '*/15 * * * *') { ctx.waitUntil(buildSnapshot(env, 'pdp').catch(() => {})); return; } // every 15 min: PDP snapshot only (live sheets); Bigin PDP Inventories is read once a day in the 06:00 IST run (owner, 28 Oct 2026)
     if (event.cron === '7-59/15 * * * *') { ctx.waitUntil(buildSnapshot(env, 'metrics').catch(() => {})); return; } // walk-in metrics snapshot in its own run (own memory budget)
     if (event.cron === '10 * * * *') { ctx.waitUntil((env.RETENTION_CSV_URL ? retentionBroadcasts(env, true) : Promise.resolve()).catch(() => {})); return; } // hourly: retention broadcast cache
-    ctx.waitUntil(refreshBigin(env).then(() => refreshPdpInventories(env)).then(() => rebuildBot(env)).catch(() => {}));
+    if (event.cron === '3-59/15 * * * *') { ctx.waitUntil(runBiginJob(env).catch(() => {})); return; } // carries on the Bigin read, then PDP Inventories, then the bot — one step per run (50-call limit)
+    ctx.waitUntil(refreshBigin(env).catch(() => {})); // 06:00 IST: start a full Bigin read (first chunk)
+}
+// Next step of the daily Bigin job (KV bigin:job). Each step is one cron run so each gets its own 50 outgoing calls.
+async function runBiginJob(env) {
+  const job = await biginJob(env); if (!job) return;
+  if (job.phase === 'leads') return refreshBigin(env, { resume: true });
+  if (job.phase === 'pdp') { await setBiginJob(env, { ...job, phase: 'bot' }); return refreshPdpInventories(env); }
+  if (job.phase === 'bot') { await setBiginJob(env, null); return rebuildBot(env); }
+  await setBiginJob(env, null);
 }
