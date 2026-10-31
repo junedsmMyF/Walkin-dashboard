@@ -177,7 +177,10 @@ function coqlPage(r) {
 // ---------- Daily refresh: all walk-in leads → KV ----------
 const FIELDS = 'id, Deal_Name, Stage, Pipeline, Walk_in_Date_Time, Created_Time, Modified_Time, Store_Location, Store_Name1, Owner, Amount, Call_Date, Close_Lost_Reason, Phone_Number, Email_ID, Product, Quantity, Product_Category, UTM_Source, UTM_Medium, UTM_Campaign, UTM_Content, City, Preferred_Store, Close_Won_Reason';
 
-const MAX_PAGES = 150; // was 45 (9,000 records) — PDP Inventories tickets share the Pipelines table since 22 Oct 2026
+// Zoho's MCP cuts a reply off at about 256 KB; 200 leads came to ~265 KB (31 Oct 2026: "Unterminated string in JSON at position 265711"),
+// so read 100 per page (~130 KB). 300 pages = 30,000 records (Workers Paid: 1,000 subrequests per run).
+const PAGE_SIZE = 100;
+const MAX_PAGES = 300;
 
 export async function refreshBigin(env) {
   const started = new Date().toISOString();
@@ -190,10 +193,10 @@ export async function refreshBigin(env) {
       if (!r.info?.more_records) break;
     }
     // Zoho's MCP server caps each COQL query at 200 rows, so page by record ID (keyset paging):
-    // "id > last id seen, order by id, 200 at a time" — no offset limits, stable while records are added.
+    // "id > last id seen, order by id, PAGE_SIZE at a time" — no offset limits, stable while records are added.
     const leads = []; const callbacks = []; const metaads = []; let lastId = '0'; let pages = 0;
     for (;;) {
-      const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${FIELDS} from Pipelines where id > ${lastId} order by id asc limit 0, 200` } });
+      const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${FIELDS} from Pipelines where id > ${lastId} order by id asc limit 0, ${PAGE_SIZE}` } });
       const { rows, more } = coqlPage(r); pages++;
       for (const x of rows) {
         if (env.CALLBACK_PIPELINE_ID && String(x.Pipeline) === String(env.CALLBACK_PIPELINE_ID)) {
@@ -207,7 +210,7 @@ export async function refreshBigin(env) {
         if (String(x.Pipeline) !== String(env.WALKIN_PIPELINE_ID)) continue;
         leads.push({ i: x.id, st: x.Stage, d: x.Walk_in_Date_Time, ct: x.Created_Time, loc: x.Store_Location, own: owners.get(x.Owner?.id) || '', amt: x.Amount, call: x.Call_Date, lr: x.Close_Lost_Reason, p: x.Phone_Number, em: x.Email_ID || '', prod: Array.isArray(x.Product) ? x.Product.join(' || ') : (x.Product?.name || x.Product || ''), qty: x.Quantity, cat: x.Product_Category || '' });
       }
-      if (!rows.length || !more || pages >= MAX_PAGES) break; // 150 × 200 = 30,000 records per run (Workers Paid: 1,000 subrequests)
+      if (!rows.length || !more || pages >= MAX_PAGES) break;
       lastId = rows[rows.length - 1].id;
     }
     await env.DASH_KV.put(KV_LEADS, JSON.stringify(leads));
@@ -255,8 +258,8 @@ export async function refreshPdpInventories(env) {
     let fieldSet = -1, lastErr = null;
     const read = async (fields) => {
       const out = []; let lastId = '0';
-      for (let page = 0; page < 40; page++) { // 40 × 200 = 8,000 tickets per read
-        const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${fields} from Pipelines where Limechat_Conversation_ID is not null and id > ${lastId} order by id asc limit 0, 200` } });
+      for (let page = 0; page < 80; page++) { // 80 × 100 = 8,000 tickets per read
+        const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${fields} from Pipelines where Limechat_Conversation_ID is not null and id > ${lastId} order by id asc limit 0, ${PAGE_SIZE}` } });
         if (!r.data && (r.code || r.status === 'error')) throw new Error(`COQL ${r.code || 'error'}: ${String(r.message || '').slice(0, 200)}`); // e.g. unknown field
         const { rows, more } = coqlPage(r);
         out.push(...rows);
