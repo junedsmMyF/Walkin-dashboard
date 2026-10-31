@@ -135,6 +135,20 @@ class McpSession {
   }
 }
 
+// COQL rows from a Zoho MCP reply. Zoho has wrapped the payload differently over time ({ data: [...] }, { data: { data: [...] } },
+// a JSON string, { response: ... }); anything else fails with its shape (keys only, never values) so the admin page says what changed.
+function coqlPage(r) {
+  for (let x = r, depth = 0; x && depth < 4; depth++) {
+    if (typeof x === 'string') { try { x = JSON.parse(x); } catch { break; } continue; }
+    if (Array.isArray(x.data)) return { rows: x.data, more: !!x.info?.more_records };
+    if (x.code && !x.data) throw new Error(`COQL ${x.code}: ${String(x.message || '').slice(0, 200)}`);
+    x = x.data ?? x.response ?? x.result ?? null;
+  }
+  if (r && typeof r === 'object' && !('data' in r) && !Object.keys(r).length) return { rows: [], more: false }; // empty reply = no more records
+  const shape = (o) => (o && typeof o === 'object' ? (Array.isArray(o) ? 'array' : '{' + Object.keys(o).slice(0, 8).join(',') + '}') : typeof o);
+  throw new Error(`Unexpected COQL reply: ${shape(r)}${r && typeof r === 'object' && 'data' in r ? ' · data=' + shape(r.data) : ''}`);
+}
+
 // ---------- Daily refresh: all walk-in leads → KV ----------
 const FIELDS = 'id, Deal_Name, Stage, Pipeline, Walk_in_Date_Time, Created_Time, Modified_Time, Store_Location, Store_Name1, Owner, Amount, Call_Date, Close_Lost_Reason, Phone_Number, Email_ID, Product, Quantity, Product_Category, UTM_Source, UTM_Medium, UTM_Campaign, UTM_Content, City, Preferred_Store, Close_Won_Reason';
 
@@ -153,7 +167,7 @@ export async function refreshBigin(env) {
     const leads = []; const callbacks = []; const metaads = []; let lastId = '0'; let pages = 0;
     for (;;) {
       const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${FIELDS} from Pipelines where id > ${lastId} order by id asc limit 0, 200` } });
-      const rows = r.data || []; pages++;
+      const { rows, more } = coqlPage(r); pages++;
       for (const x of rows) {
         if (env.CALLBACK_PIPELINE_ID && String(x.Pipeline) === String(env.CALLBACK_PIPELINE_ID)) {
           callbacks.push({ i: x.id, nm: x.Deal_Name || '', st: x.Stage, ct: x.Created_Time, mt: x.Modified_Time, web: x.Store_Name1 || '', loc: x.Store_Location || '', own: owners.get(x.Owner?.id) || '', p: x.Phone_Number, lr: x.Close_Lost_Reason || '', prod: Array.isArray(x.Product) ? x.Product.join(' || ') : (x.Product?.name || x.Product || ''), cat: x.Product_Category || '', us: x.UTM_Source || '', um: x.UTM_Medium || '', uc: x.UTM_Campaign || '', ux: x.UTM_Content || '' });
@@ -166,7 +180,7 @@ export async function refreshBigin(env) {
         if (String(x.Pipeline) !== String(env.WALKIN_PIPELINE_ID)) continue;
         leads.push({ i: x.id, st: x.Stage, d: x.Walk_in_Date_Time, ct: x.Created_Time, loc: x.Store_Location, own: owners.get(x.Owner?.id) || '', amt: x.Amount, call: x.Call_Date, lr: x.Close_Lost_Reason, p: x.Phone_Number, em: x.Email_ID || '', prod: Array.isArray(x.Product) ? x.Product.join(' || ') : (x.Product?.name || x.Product || ''), qty: x.Quantity, cat: x.Product_Category || '' });
       }
-      if (!rows.length || !r.info?.more_records || pages >= 45) break; // 45 × 200 = 9,000 records per run (Worker subrequest budget)
+      if (!rows.length || !more || pages >= 45) break; // 45 × 200 = 9,000 records per run (Worker subrequest budget)
       lastId = rows[rows.length - 1].id;
     }
     await env.DASH_KV.put(KV_LEADS, JSON.stringify(leads));
@@ -217,9 +231,9 @@ export async function refreshPdpInventories(env) {
       for (let page = 0; page < 40; page++) { // 40 × 200 = 8,000 tickets per read
         const r = await mcp.bigin('Bigin_getRecordsUsingCoqlQuery', { body: { select_query: `select ${fields} from Pipelines where Limechat_Conversation_ID is not null and id > ${lastId} order by id asc limit 0, 200` } });
         if (!r.data && (r.code || r.status === 'error')) throw new Error(`COQL ${r.code || 'error'}: ${String(r.message || '').slice(0, 200)}`); // e.g. unknown field
-        const rows = r.data || [];
+        const { rows, more } = coqlPage(r);
         out.push(...rows);
-        if (!rows.length || !r.info?.more_records) break;
+        if (!rows.length || !more) break;
         lastId = rows[rows.length - 1].id;
       }
       return out;
